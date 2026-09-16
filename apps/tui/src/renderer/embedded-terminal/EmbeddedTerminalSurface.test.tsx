@@ -16,6 +16,7 @@ function outputState(
   data: string,
   { generation = 1, resetVersion = 1 }: { generation?: number; resetVersion?: number } = {},
 ): TerminalOutputState {
+  const byteLength = encoder.encode(data).byteLength;
   return {
     generation,
     resetVersion,
@@ -26,15 +27,16 @@ function outputState(
             {
               startOffset: 0,
               data,
-              byteLength: encoder.encode(data).byteLength,
+              byteLength,
             },
           ],
-    retainedBytes: encoder.encode(data).byteLength,
-    nextOffset: data.length,
+    retainedBytes: byteLength,
+    nextOffset: byteLength,
   };
 }
 
 function appendedOutput(previous: TerminalOutputState, data: string): TerminalOutputState {
+  const byteLength = encoder.encode(data).byteLength;
   return {
     ...previous,
     chunks: [
@@ -42,11 +44,11 @@ function appendedOutput(previous: TerminalOutputState, data: string): TerminalOu
       {
         startOffset: previous.nextOffset,
         data,
-        byteLength: encoder.encode(data).byteLength,
+        byteLength,
       },
     ],
-    retainedBytes: previous.retainedBytes + encoder.encode(data).byteLength,
-    nextOffset: previous.nextOffset + data.length,
+    retainedBytes: previous.retainedBytes + byteLength,
+    nextOffset: previous.nextOffset + byteLength,
   };
 }
 

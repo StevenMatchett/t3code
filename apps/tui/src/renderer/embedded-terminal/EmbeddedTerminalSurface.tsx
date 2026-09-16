@@ -54,7 +54,7 @@ export interface EmbeddedTerminalSurfaceProps {
   readonly onResize: (size: TerminalSize) => Promise<unknown> | unknown;
   readonly onReleaseFocus: () => void;
   readonly onCopy: (text: string) => Promise<unknown> | unknown;
-  readonly onWriteError?: (error: unknown) => void;
+  readonly onError?: (error: unknown) => void;
   readonly id?: string;
   readonly initialCols?: number;
   readonly initialRows?: number;
@@ -72,7 +72,7 @@ export const EmbeddedTerminalSurface = forwardRef<
     onResize,
     onReleaseFocus,
     onCopy,
-    onWriteError,
+    onError,
     id = "t3-embedded-terminal",
     initialCols = 80,
     initialRows = 24,
@@ -89,7 +89,7 @@ export const EmbeddedTerminalSurface = forwardRef<
   const resizeRef = useRef(onResize);
   const releaseFocusRef = useRef(onReleaseFocus);
   const copyRef = useRef(onCopy);
-  const writeErrorRef = useRef(onWriteError);
+  const errorRef = useRef(onError);
   const [terminalEpoch, setTerminalEpoch] = useState(0);
 
   focusedRef.current = focused;
@@ -97,19 +97,22 @@ export const EmbeddedTerminalSurface = forwardRef<
   resizeRef.current = onResize;
   releaseFocusRef.current = onReleaseFocus;
   copyRef.current = onCopy;
-  writeErrorRef.current = onWriteError;
+  errorRef.current = onError;
 
   const dataQueueRef = useRef<TerminalDataQueue | null>(null);
   if (dataQueueRef.current === null) {
     dataQueueRef.current = createTerminalDataQueue(
       (data, source) => writeRef.current(data, source),
-      (error) => writeErrorRef.current?.(error),
+      (error) => errorRef.current?.(error),
     );
   }
 
   const resizeHandlerRef = useRef<((cols: number, rows: number) => void) | null>(null);
   if (resizeHandlerRef.current === null) {
-    resizeHandlerRef.current = createTerminalResizeHandler((size) => resizeRef.current(size));
+    resizeHandlerRef.current = createTerminalResizeHandler(
+      (size) => resizeRef.current(size),
+      (error) => errorRef.current?.(error),
+    );
   }
 
   if (!initializedRef.current) {
@@ -190,7 +193,11 @@ export const EmbeddedTerminalSurface = forwardRef<
         const terminal = terminalRef.current;
         return terminal === null
           ? false
-          : copyTerminalSelection(terminal, (text) => copyRef.current(text));
+          : copyTerminalSelection(
+              terminal,
+              (text) => copyRef.current(text),
+              (error) => errorRef.current?.(error),
+            );
       },
       drainInput() {
         return dataQueueRef.current!.drain();

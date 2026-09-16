@@ -48,7 +48,7 @@ export function splitTerminalWrite(
       isHighSurrogate(data.charCodeAt(end - 1)) &&
       isLowSurrogate(data.charCodeAt(end))
     ) {
-      end -= 1;
+      end = end - start === 1 ? end + 1 : end - 1;
     }
     chunks.push(data.slice(start, end));
     start = end;
@@ -91,6 +91,7 @@ export function clampTerminalSize(cols: number, rows: number): TerminalSize {
 
 export function createTerminalResizeHandler(
   resize: (size: TerminalSize) => Promise<unknown> | unknown,
+  onError: (error: unknown) => void = () => undefined,
 ): (cols: number, rows: number) => void {
   let previous: TerminalSize | null = null;
 
@@ -99,7 +100,11 @@ export function createTerminalResizeHandler(
     if (previous?.cols === next.cols && previous.rows === next.rows) return;
 
     previous = next;
-    void resize(next);
+    try {
+      void Promise.resolve(resize(next)).catch(onError);
+    } catch (error) {
+      onError(error);
+    }
   };
 }
 
@@ -112,10 +117,15 @@ export function isTerminalFocusReleaseKey(
 export function copyTerminalSelection(
   terminal: Pick<EmbeddedTerminalRenderable, "getSelectedText" | "hasSelection">,
   copy: (text: string) => Promise<unknown> | unknown,
+  onError: (error: unknown) => void = () => undefined,
 ): boolean {
   if (!terminal.hasSelection()) return false;
 
-  void copy(terminal.getSelectedText());
+  try {
+    void Promise.resolve(copy(terminal.getSelectedText())).catch(onError);
+  } catch (error) {
+    onError(error);
+  }
   return true;
 }
 

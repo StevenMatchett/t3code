@@ -24,6 +24,7 @@ describe("terminal IO", () => {
     expect(chunks[0]).toHaveLength(MAX_TERMINAL_WRITE_UNITS - 1);
     expect(chunks[1]).toBe("📚end");
     expect(chunks.join("")).toBe(input);
+    expect(splitTerminalWrite("📚", 1)).toEqual(["📚"]);
   });
 
   it("serializes input and response writes through one failure-tolerant FIFO", async () => {
@@ -52,9 +53,10 @@ describe("terminal IO", () => {
     expect(errors).toHaveLength(1);
   });
 
-  it("clamps and deduplicates terminal resizes", () => {
+  it("clamps and deduplicates terminal resizes", async () => {
     const resize = vi.fn();
-    const handleResize = createTerminalResizeHandler(resize);
+    const errors: unknown[] = [];
+    const handleResize = createTerminalResizeHandler(resize, errors.push.bind(errors));
 
     handleResize(0, Number.NaN);
     handleResize(1, 1);
@@ -63,6 +65,13 @@ describe("terminal IO", () => {
 
     expect(clampTerminalSize(80.9, 24.9)).toEqual({ cols: 80, rows: 24 });
     expect(resize.mock.calls).toEqual([[{ cols: 1, rows: 1 }], [{ cols: 1_000, rows: 500 }]]);
+    expect(errors).toEqual([]);
+
+    const rejected = new Error("resize rejected");
+    createTerminalResizeHandler(() => Promise.reject(rejected), errors.push.bind(errors))(80, 24);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(errors).toEqual([rejected]);
   });
 
   it("recognizes the focus-release key", () => {
@@ -71,8 +80,9 @@ describe("terminal IO", () => {
     expect(isTerminalFocusReleaseKey({ ctrl: true, name: "c", sequence: "\x03" })).toBe(false);
   });
 
-  it("copies only when the terminal has a selection", () => {
+  it("copies only when the terminal has a selection", async () => {
     const copy = vi.fn();
+    const errors: unknown[] = [];
 
     expect(
       copyTerminalSelection({ hasSelection: () => false, getSelectedText: () => "ignored" }, copy),
@@ -82,5 +92,15 @@ describe("terminal IO", () => {
     ).toBe(true);
     expect(copy).toHaveBeenCalledOnce();
     expect(copy).toHaveBeenCalledWith("chosen");
+
+    const rejected = new Error("copy rejected");
+    copyTerminalSelection(
+      { hasSelection: () => true, getSelectedText: () => "chosen" },
+      () => Promise.reject(rejected),
+      errors.push.bind(errors),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(errors).toEqual([rejected]);
   });
 });
