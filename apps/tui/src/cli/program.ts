@@ -7,10 +7,10 @@ import * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry";
 import NodeProcess from "node:process";
 
 import { startAndConnectAuthenticatedTuiEnvironment } from "../connection/authenticatedEnvironment.ts";
+import { PrototypeApp } from "../renderer/PrototypeApp.tsx";
 import { startRendererRuntime } from "../renderer/runtime.tsx";
 import { runTuiLifecycle } from "./lifecycle.ts";
 import { buildTuiLaunchOptions, type TuiCliOptions } from "./options.ts";
-import { PrototypeApp } from "./PrototypeApp.tsx";
 import { TuiShutdownController } from "./shutdown.ts";
 
 export interface RunTuiPrototypeOptions {

@@ -1,6 +1,6 @@
 import { useKeyboard } from "@opentui/react";
 
-import { AppShell } from "../index.ts";
+import { AppShell } from "./AppShell.tsx";
 
 export interface PrototypeAppProps {
   readonly onInterrupt: () => void;
