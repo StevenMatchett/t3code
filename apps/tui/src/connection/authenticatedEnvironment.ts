@@ -2,6 +2,7 @@ import {
   AuthOrchestrationReadScope,
   AuthStandardClientScopes,
   type AuthSessionState,
+  type ExecutionEnvironmentDescriptor,
   type ServerConfig,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -10,8 +11,11 @@ import {
   fetchRemoteSessionState,
   resolveRemoteWebSocketConnectionUrl,
 } from "@t3tools/client-runtime/authorization";
+import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
 import { makeWsRpcProtocolClient, remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -19,12 +23,21 @@ import * as RpcClient from "effect/unstable/rpc/RpcClient";
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as Socket from "effect/unstable/socket/Socket";
 
-import type { OwnedBootstrapChild } from "../backend/bootstrapChild.ts";
+import {
+  startBootstrapChild,
+  type BootstrapChildStartError,
+  type OwnedBootstrapChild,
+  type StartBootstrapChildOptions,
+} from "../backend/bootstrapChild.ts";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_READINESS_ATTEMPTS = 60;
+const DEFAULT_READINESS_INTERVAL_MS = 100;
+const DEFAULT_READINESS_PROBE_TIMEOUT_MS = 1_000;
 const SOCKET_OPEN_TIMEOUT = "15 seconds";
 
 export const TuiEnvironmentConnectionPhase = Schema.Literals([
+  "readiness",
   "bearer-exchange",
   "session-validation",
   "websocket-ticket",
@@ -38,6 +51,8 @@ export class TuiEnvironmentConnectionError extends Schema.TaggedError<TuiEnviron
 ) {
   override get message(): string {
     switch (this.phase) {
+      case "readiness":
+        return "The local environment did not become ready.";
       case "bearer-exchange":
         return "Failed to exchange the local bootstrap credential.";
       case "session-validation":
@@ -105,19 +120,82 @@ export interface AuthenticatedTuiEnvironment {
 
 type WebSocketConstructor = Socket.WebSocketConstructor["Service"];
 
+const readinessProof: unique symbol = Symbol("tui-environment-readiness");
+
+export interface TuiEnvironmentReadiness {
+  readonly descriptor: ExecutionEnvironmentDescriptor;
+  readonly httpBaseUrl: string;
+  readonly [readinessProof]: true;
+}
+
+export interface WaitForTuiEnvironmentReadyOptions {
+  readonly httpBaseUrl: string;
+  readonly fetch?: typeof globalThis.fetch;
+  readonly maxAttempts?: number;
+  readonly intervalMs?: number;
+  readonly probeTimeoutMs?: number;
+}
+
 export interface ConnectAuthenticatedTuiEnvironmentOptions {
   readonly child: OwnedBootstrapChild;
-  readonly httpBaseUrl: string;
+  readonly readiness: TuiEnvironmentReadiness;
   readonly wsBaseUrl: string;
   readonly fetch?: typeof globalThis.fetch;
   readonly webSocketConstructor?: WebSocketConstructor;
   readonly timeoutMs?: number;
 }
 
+export interface StartAndConnectAuthenticatedTuiEnvironmentOptions {
+  readonly start: StartBootstrapChildOptions;
+  readonly httpBaseUrl: string;
+  readonly wsBaseUrl: string;
+  readonly fetch?: typeof globalThis.fetch;
+  readonly webSocketConstructor?: WebSocketConstructor;
+  readonly requestTimeoutMs?: number;
+  readonly readinessMaxAttempts?: number;
+  readonly readinessIntervalMs?: number;
+  readonly readinessProbeTimeoutMs?: number;
+}
+
+export interface StartedAuthenticatedTuiEnvironment extends AuthenticatedTuiEnvironment {
+  readonly child: OwnedBootstrapChild;
+  readonly readiness: TuiEnvironmentReadiness;
+}
+
 const nodeWebSocketConstructor: WebSocketConstructor = (url, protocols) =>
   (protocols === undefined
     ? new globalThis.WebSocket(url)
     : new globalThis.WebSocket(url, protocols)) as globalThis.WebSocket;
+
+export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEnvironmentReady")(
+  function* (
+    options: WaitForTuiEnvironmentReadyOptions,
+  ): Effect.fn.Return<TuiEnvironmentReadiness, TuiEnvironmentConnectionError> {
+    const maxAttempts = Math.max(1, Math.trunc(options.maxAttempts ?? DEFAULT_READINESS_ATTEMPTS));
+    const intervalMs = Math.max(0, options.intervalMs ?? DEFAULT_READINESS_INTERVAL_MS);
+    const probeTimeoutMs = Math.max(
+      1,
+      options.probeTimeoutMs ?? DEFAULT_READINESS_PROBE_TIMEOUT_MS,
+    );
+    const httpClientLayer = remoteHttpClientLayer(options.fetch ?? globalThis.fetch);
+    const probe = fetchRemoteEnvironmentDescriptor({
+      httpBaseUrl: options.httpBaseUrl,
+      timeoutMs: probeTimeoutMs,
+    }).pipe(Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "readiness" })));
+    const descriptor = yield* probe.pipe(
+      Effect.retry({
+        times: maxAttempts - 1,
+        schedule: Schedule.spaced(Duration.millis(intervalMs)),
+      }),
+      Effect.provide(httpClientLayer),
+    );
+    return {
+      descriptor,
+      httpBaseUrl: options.httpBaseUrl,
+      [readinessProof]: true,
+    };
+  },
+);
 
 const readServerConfig = Effect.fn("tui.connection.readServerConfig")(function* (input: {
   readonly socketUrl: string;
@@ -154,12 +232,13 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
 ): Effect.fn.Return<AuthenticatedTuiEnvironment, TuiEnvironmentConnectionError> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const httpClientLayer = remoteHttpClientLayer(options.fetch ?? globalThis.fetch);
+  const httpBaseUrl = options.readiness.httpBaseUrl;
 
   return yield* Effect.gen(function* () {
     const accessToken = yield* options.child
       .useBootstrapToken((credential) =>
         bootstrapRemoteBearerSession({
-          httpBaseUrl: options.httpBaseUrl,
+          httpBaseUrl,
           credential,
           scopes: AuthStandardClientScopes,
           clientMetadata: {
@@ -180,7 +259,7 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
       const session = yield* bearer
         .use((token) =>
           fetchRemoteSessionState({
-            httpBaseUrl: options.httpBaseUrl,
+            httpBaseUrl,
             bearerToken: token,
             timeoutMs,
           }),
@@ -192,7 +271,7 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
       const socketUrl = yield* bearer
         .use((token) =>
           resolveRemoteWebSocketConnectionUrl({
-            httpBaseUrl: options.httpBaseUrl,
+            httpBaseUrl,
             wsBaseUrl: options.wsBaseUrl,
             bearerToken: token,
             clientMetadata: {
@@ -217,4 +296,45 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
       return { bearer, session, config };
     }).pipe(Effect.tapError(() => Effect.sync(() => bearer.clear())));
   }).pipe(Effect.provide(httpClientLayer));
+});
+
+export const startAndConnectAuthenticatedTuiEnvironment = Effect.fn(
+  "tui.connection.startAndConnectAuthenticatedTuiEnvironment",
+)(function* (
+  options: StartAndConnectAuthenticatedTuiEnvironmentOptions,
+): Effect.fn.Return<
+  StartedAuthenticatedTuiEnvironment,
+  BootstrapChildStartError | TuiEnvironmentConnectionError
+> {
+  const child = yield* startBootstrapChild(options.start);
+  return yield* Effect.gen(function* () {
+    const readiness = yield* waitForTuiEnvironmentReady({
+      httpBaseUrl: options.httpBaseUrl,
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      ...(options.readinessMaxAttempts === undefined
+        ? {}
+        : { maxAttempts: options.readinessMaxAttempts }),
+      ...(options.readinessIntervalMs === undefined
+        ? {}
+        : { intervalMs: options.readinessIntervalMs }),
+      ...(options.readinessProbeTimeoutMs === undefined
+        ? {}
+        : { probeTimeoutMs: options.readinessProbeTimeoutMs }),
+    });
+    const connected = yield* connectAuthenticatedTuiEnvironment({
+      child,
+      readiness,
+      wsBaseUrl: options.wsBaseUrl,
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      ...(options.webSocketConstructor === undefined
+        ? {}
+        : { webSocketConstructor: options.webSocketConstructor }),
+      ...(options.requestTimeoutMs === undefined ? {} : { timeoutMs: options.requestTimeoutMs }),
+    });
+    return { ...connected, child, readiness };
+  }).pipe(
+    Effect.onExit((exit) =>
+      Exit.isFailure(exit) ? Effect.sync(() => void child.terminate()) : Effect.void,
+    ),
+  );
 });

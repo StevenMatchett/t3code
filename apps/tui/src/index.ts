@@ -10,12 +10,18 @@ export {
 } from "./backend/bootstrapChild.ts";
 export {
   connectAuthenticatedTuiEnvironment,
+  startAndConnectAuthenticatedTuiEnvironment,
   TuiBearerSession,
   TuiBearerSessionClearedError,
   TuiEnvironmentConnectionError,
   TuiEnvironmentConnectionPhase,
+  waitForTuiEnvironmentReady,
   type AuthenticatedTuiEnvironment,
   type ConnectAuthenticatedTuiEnvironmentOptions,
+  type StartedAuthenticatedTuiEnvironment,
+  type StartAndConnectAuthenticatedTuiEnvironmentOptions,
+  type TuiEnvironmentReadiness,
+  type WaitForTuiEnvironmentReadyOptions,
 } from "./connection/authenticatedEnvironment.ts";
 export {
   EmbeddedTerminalSurface,
