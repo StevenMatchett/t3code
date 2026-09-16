@@ -39,6 +39,21 @@ export {
   type TuiStoredCredential,
 } from "./connection/credentialStore.ts";
 export {
+  makeTuiLocalEnvironmentSupervisor,
+  makeTuiLocalEnvironmentSupervisorWithOperations,
+  type AttachedTuiLocalEnvironment,
+  type ForegroundTuiLocalEnvironment,
+  type MakeTuiLocalEnvironmentSupervisorOptions,
+  type TuiLocalEnvironmentLease,
+  type TuiLocalEnvironmentOwnership,
+  type TuiLocalEnvironmentReleasePolicy,
+  type TuiLocalEnvironmentSupervisor,
+  type TuiLocalEnvironmentSupervisorConnectError,
+  type TuiLocalEnvironmentSupervisorFailure,
+  type TuiLocalEnvironmentSupervisorOperations,
+  type TuiLocalEnvironmentSupervisorState,
+} from "./connection/localEnvironmentSupervisor.ts";
+export {
   EmbeddedTerminalSurface,
   type EmbeddedTerminalSurfaceHandle,
   type EmbeddedTerminalSurfaceProps,
