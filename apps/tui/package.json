@@ -2,10 +2,14 @@
   "name": "@t3tools/tui",
   "version": "0.0.0",
   "private": true,
+  "bin": {
+    "t3-tui": "./dist/cli/bin.js"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc --noEmit false --outDir dist",
+    "dev": "tsc --noEmit false --outDir dist --noCheck && node ./scripts/run-with-node-ffi.mjs ./dist/cli/bin.js",
     "runtime:check": "node ./scripts/run-with-node-ffi.mjs ./scripts/runtime-compatibility.mjs",
     "runtime:smoke": "node ./scripts/run-with-node-ffi.mjs ./scripts/open-tui-smoke.mjs",
     "test": "node ./scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run",
