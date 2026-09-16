@@ -9,6 +9,15 @@ export {
   type StartBootstrapChildOptions,
 } from "./backend/bootstrapChild.ts";
 export {
+  connectAuthenticatedTuiEnvironment,
+  TuiBearerSession,
+  TuiBearerSessionClearedError,
+  TuiEnvironmentConnectionError,
+  TuiEnvironmentConnectionPhase,
+  type AuthenticatedTuiEnvironment,
+  type ConnectAuthenticatedTuiEnvironmentOptions,
+} from "./connection/authenticatedEnvironment.ts";
+export {
   EmbeddedTerminalSurface,
   type EmbeddedTerminalSurfaceHandle,
   type EmbeddedTerminalSurfaceProps,

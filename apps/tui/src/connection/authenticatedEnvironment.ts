@@ -1,0 +1,220 @@
+import {
+  AuthOrchestrationReadScope,
+  AuthStandardClientScopes,
+  type AuthSessionState,
+  type ServerConfig,
+  WS_METHODS,
+} from "@t3tools/contracts";
+import {
+  bootstrapRemoteBearerSession,
+  fetchRemoteSessionState,
+  resolveRemoteWebSocketConnectionUrl,
+} from "@t3tools/client-runtime/authorization";
+import { makeWsRpcProtocolClient, remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
+import * as RpcClient from "effect/unstable/rpc/RpcClient";
+import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
+import * as Socket from "effect/unstable/socket/Socket";
+
+import type { OwnedBootstrapChild } from "../backend/bootstrapChild.ts";
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+const SOCKET_OPEN_TIMEOUT = "15 seconds";
+
+export const TuiEnvironmentConnectionPhase = Schema.Literals([
+  "bearer-exchange",
+  "session-validation",
+  "websocket-ticket",
+  "config-read",
+]);
+export type TuiEnvironmentConnectionPhase = typeof TuiEnvironmentConnectionPhase.Type;
+
+export class TuiEnvironmentConnectionError extends Schema.TaggedError<TuiEnvironmentConnectionError>()(
+  "TuiEnvironmentConnectionError",
+  { phase: TuiEnvironmentConnectionPhase },
+) {
+  override get message(): string {
+    switch (this.phase) {
+      case "bearer-exchange":
+        return "Failed to exchange the local bootstrap credential.";
+      case "session-validation":
+        return "The local environment did not grant an authenticated bearer session.";
+      case "websocket-ticket":
+        return "Failed to authorize the local environment WebSocket.";
+      case "config-read":
+        return "Failed to read the local environment configuration.";
+    }
+  }
+}
+
+export class TuiBearerSessionClearedError extends Schema.TaggedError<TuiBearerSessionClearedError>()(
+  "TuiBearerSessionClearedError",
+  {},
+) {
+  override get message(): string {
+    return "The local environment bearer session has been cleared.";
+  }
+}
+
+const decoder = new TextDecoder();
+const encoder = new TextEncoder();
+
+/** Keeps the reusable bearer out of JSON, logs, and ordinary object inspection. */
+export class TuiBearerSession {
+  readonly expiresInSeconds: number;
+  readonly #bytes: Uint8Array;
+  #cleared = false;
+
+  constructor(token: string, expiresInSeconds: number) {
+    this.#bytes = encoder.encode(token);
+    this.expiresInSeconds = expiresInSeconds;
+  }
+
+  use<A, E, R>(
+    f: (token: string) => Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | TuiBearerSessionClearedError, R> {
+    return Effect.suspend((): Effect.Effect<A, E | TuiBearerSessionClearedError, R> =>
+      this.#cleared
+        ? Effect.fail(new TuiBearerSessionClearedError())
+        : f(decoder.decode(this.#bytes)),
+    );
+  }
+
+  clear(): void {
+    this.#bytes.fill(0);
+    this.#cleared = true;
+  }
+
+  get cleared(): boolean {
+    return this.#cleared;
+  }
+
+  toJSON(): { readonly authenticated: true; readonly cleared: boolean } {
+    return { authenticated: true, cleared: this.#cleared };
+  }
+}
+
+export interface AuthenticatedTuiEnvironment {
+  readonly bearer: TuiBearerSession;
+  readonly session: AuthSessionState;
+  readonly config: ServerConfig;
+}
+
+type WebSocketConstructor = Socket.WebSocketConstructor["Service"];
+
+export interface ConnectAuthenticatedTuiEnvironmentOptions {
+  readonly child: OwnedBootstrapChild;
+  readonly httpBaseUrl: string;
+  readonly wsBaseUrl: string;
+  readonly fetch?: typeof globalThis.fetch;
+  readonly webSocketConstructor?: WebSocketConstructor;
+  readonly timeoutMs?: number;
+}
+
+const nodeWebSocketConstructor: WebSocketConstructor = (url, protocols) =>
+  (protocols === undefined
+    ? new globalThis.WebSocket(url)
+    : new globalThis.WebSocket(url, protocols)) as globalThis.WebSocket;
+
+const readServerConfig = Effect.fn("tui.connection.readServerConfig")(function* (input: {
+  readonly socketUrl: string;
+  readonly webSocketConstructor: WebSocketConstructor;
+}) {
+  const socketLayer = Socket.layerWebSocket(input.socketUrl, {
+    openTimeout: SOCKET_OPEN_TIMEOUT,
+  }).pipe(Layer.provide(Layer.succeed(Socket.WebSocketConstructor, input.webSocketConstructor)));
+  const protocolLayer = Layer.effect(
+    RpcClient.Protocol,
+    RpcClient.makeProtocolSocket({
+      retryTransientErrors: false,
+      retryPolicy: Schedule.recurs(0),
+    }),
+  ).pipe(Layer.provide(Layer.mergeAll(socketLayer, RpcSerialization.layerJson)));
+  const protocolContext = yield* Layer.build(protocolLayer);
+  const client = yield* makeWsRpcProtocolClient.pipe(Effect.provide(protocolContext));
+  return yield* client[WS_METHODS.serverGetConfig]({});
+});
+
+const validateBearerSession = (
+  session: AuthSessionState,
+): Effect.Effect<AuthSessionState, TuiEnvironmentConnectionError> =>
+  session.authenticated &&
+  session.sessionMethod === "bearer-access-token" &&
+  session.scopes?.includes(AuthOrchestrationReadScope) === true
+    ? Effect.succeed(session)
+    : Effect.fail(new TuiEnvironmentConnectionError({ phase: "session-validation" }));
+
+export const connectAuthenticatedTuiEnvironment = Effect.fn(
+  "tui.connection.connectAuthenticatedTuiEnvironment",
+)(function* (
+  options: ConnectAuthenticatedTuiEnvironmentOptions,
+): Effect.fn.Return<AuthenticatedTuiEnvironment, TuiEnvironmentConnectionError> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const httpClientLayer = remoteHttpClientLayer(options.fetch ?? globalThis.fetch);
+
+  return yield* Effect.gen(function* () {
+    const accessToken = yield* options.child
+      .useBootstrapToken((credential) =>
+        bootstrapRemoteBearerSession({
+          httpBaseUrl: options.httpBaseUrl,
+          credential,
+          scopes: AuthStandardClientScopes,
+          clientMetadata: {
+            label: "T3 Code TUI",
+            deviceType: "bot",
+            surface: "cli",
+          },
+          timeoutMs,
+        }),
+      )
+      .pipe(
+        Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "bearer-exchange" })),
+        Effect.ensuring(Effect.sync(() => options.child.clearBootstrapSecret())),
+      );
+    const bearer = new TuiBearerSession(accessToken.access_token, accessToken.expires_in);
+
+    return yield* Effect.gen(function* () {
+      const session = yield* bearer
+        .use((token) =>
+          fetchRemoteSessionState({
+            httpBaseUrl: options.httpBaseUrl,
+            bearerToken: token,
+            timeoutMs,
+          }),
+        )
+        .pipe(
+          Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "session-validation" })),
+          Effect.flatMap(validateBearerSession),
+        );
+      const socketUrl = yield* bearer
+        .use((token) =>
+          resolveRemoteWebSocketConnectionUrl({
+            httpBaseUrl: options.httpBaseUrl,
+            wsBaseUrl: options.wsBaseUrl,
+            bearerToken: token,
+            clientMetadata: {
+              label: "T3 Code TUI",
+              deviceType: "bot",
+              surface: "cli",
+            },
+            connectionMethod: "direct",
+            timeoutMs,
+          }),
+        )
+        .pipe(
+          Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "websocket-ticket" })),
+        );
+      const config = yield* readServerConfig({
+        socketUrl,
+        webSocketConstructor: options.webSocketConstructor ?? nodeWebSocketConstructor,
+      }).pipe(
+        Effect.scoped,
+        Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "config-read" })),
+      );
+      return { bearer, session, config };
+    }).pipe(Effect.tapError(() => Effect.sync(() => bearer.clear())));
+  }).pipe(Effect.provide(httpClientLayer));
+});
