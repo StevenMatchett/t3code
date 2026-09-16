@@ -1,4 +1,14 @@
-# T3 Code
+# T3 Code TUI fork
+
+> [!IMPORTANT]
+> This repository is an experimental, unaffiliated TUI-focused fork of
+> [T3 Code](https://github.com/pingdotgg/t3code). The working name and assets are temporary.
+> Use the upstream repository for official T3 Code releases and support. See the
+> [TUI client boundary](./docs/internals/tui-client.md) for the fork's scope.
+
+This branch is still the pinned upstream baseline. It does not contain a usable TUI yet.
+
+## Upstream project
 
 T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
 
