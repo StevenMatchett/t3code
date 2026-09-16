@@ -98,7 +98,7 @@ export async function startRendererRuntime(
       if (options.onError) {
         options.onError(error, info);
       } else {
-        console.error(error);
+        process.stderr.write(`${error.stack ?? error.message}\n`);
       }
     } finally {
       queueMicrotask(() => void close());

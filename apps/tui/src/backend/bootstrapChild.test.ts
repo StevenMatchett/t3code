@@ -1,5 +1,6 @@
 /// <reference types="node" />
 // @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics preferSchemaOverJson:off globalErrorInEffectCatch:off globalErrorInEffectFailure:off -- These fixtures intentionally inspect raw child-process JSON and failures at the process boundary.
 
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
