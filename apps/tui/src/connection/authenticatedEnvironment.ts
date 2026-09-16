@@ -11,7 +11,10 @@ import {
   fetchRemoteSessionState,
   resolveRemoteWebSocketConnectionUrl,
 } from "@t3tools/client-runtime/authorization";
-import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
+import {
+  deriveWsBaseUrl,
+  fetchRemoteEnvironmentDescriptor,
+} from "@t3tools/client-runtime/environment";
 import { makeWsRpcProtocolClient, remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -139,7 +142,6 @@ export interface WaitForTuiEnvironmentReadyOptions {
 export interface ConnectAuthenticatedTuiEnvironmentOptions {
   readonly child: OwnedBootstrapChild;
   readonly readiness: TuiEnvironmentReadiness;
-  readonly wsBaseUrl: string;
   readonly fetch?: typeof globalThis.fetch;
   readonly webSocketConstructor?: WebSocketConstructor;
   readonly timeoutMs?: number;
@@ -148,7 +150,6 @@ export interface ConnectAuthenticatedTuiEnvironmentOptions {
 export interface StartAndConnectAuthenticatedTuiEnvironmentOptions {
   readonly start: StartBootstrapChildOptions;
   readonly httpBaseUrl: string;
-  readonly wsBaseUrl: string;
   readonly fetch?: typeof globalThis.fetch;
   readonly webSocketConstructor?: WebSocketConstructor;
   readonly requestTimeoutMs?: number;
@@ -272,7 +273,7 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
         .use((token) =>
           resolveRemoteWebSocketConnectionUrl({
             httpBaseUrl,
-            wsBaseUrl: options.wsBaseUrl,
+            wsBaseUrl: deriveWsBaseUrl(httpBaseUrl),
             bearerToken: token,
             clientMetadata: {
               label: "T3 Code TUI",
@@ -324,7 +325,6 @@ export const startAndConnectAuthenticatedTuiEnvironment = Effect.fn(
     const connected = yield* connectAuthenticatedTuiEnvironment({
       child,
       readiness,
-      wsBaseUrl: options.wsBaseUrl,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.webSocketConstructor === undefined
         ? {}

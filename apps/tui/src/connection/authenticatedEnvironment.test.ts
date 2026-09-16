@@ -21,10 +21,19 @@ import { BootstrapSecretClearedError, startBootstrapChild } from "../backend/boo
 import {
   connectAuthenticatedTuiEnvironment,
   startAndConnectAuthenticatedTuiEnvironment,
+  type ConnectAuthenticatedTuiEnvironmentOptions,
+  type StartAndConnectAuthenticatedTuiEnvironmentOptions,
   TuiBearerSessionClearedError,
   TuiEnvironmentConnectionError,
   waitForTuiEnvironmentReady,
 } from "./authenticatedEnvironment.ts";
+
+type CallerCanSupplyWebSocketBase = "wsBaseUrl" extends
+  | keyof ConnectAuthenticatedTuiEnvironmentOptions
+  | keyof StartAndConnectAuthenticatedTuiEnvironmentOptions
+  ? true
+  : false;
+const CALLER_CAN_SUPPLY_WEBSOCKET_BASE: CallerCanSupplyWebSocketBase = false;
 
 const bootstrap = {
   mode: "desktop",
@@ -220,7 +229,7 @@ const makeTestWebSocketConstructor = (sockets: TestWebSocket[]) =>
   }) satisfies Socket.WebSocketConstructor["Service"];
 
 describe("authenticated TUI environment connection", () => {
-  it.effect("exchanges the child credential and reads config over a ticketed WebSocket", () =>
+  it.effect("binds the ticketed WebSocket to the readiness-proven HTTP origin", () =>
     Effect.gen(function* () {
       const child = yield* startMockChild();
       yield* Effect.addFinalizer(() => Effect.sync(() => void child.terminate("SIGKILL")));
@@ -236,7 +245,6 @@ describe("authenticated TUI environment connection", () => {
       const connected = yield* connectAuthenticatedTuiEnvironment({
         child,
         readiness,
-        wsBaseUrl: "ws://127.0.0.1:43220",
         fetch,
         webSocketConstructor: makeTestWebSocketConstructor(sockets),
       });
@@ -269,6 +277,10 @@ describe("authenticated TUI environment connection", () => {
       assert.equal(sockets.length, 1);
       const socketUrl = new URL(sockets[0]?.url ?? "");
       assert.equal(socketUrl.pathname, "/ws");
+      assert.equal(socketUrl.origin, "ws://127.0.0.1:43220");
+      assert.equal(socketUrl.host, new URL(requests[0]?.url ?? "").host);
+      assert.equal(socketUrl.host, new URL(requests[3]?.url ?? "").host);
+      assert.isFalse(CALLER_CAN_SUPPLY_WEBSOCKET_BASE);
       assert.equal(socketUrl.searchParams.get("wsTicket"), "websocket-test-ticket");
       assert.equal(socketUrl.searchParams.get("clientSurface"), "cli");
       assert.equal(socketUrl.searchParams.get("connectionMethod"), "direct");
@@ -308,7 +320,6 @@ describe("authenticated TUI environment connection", () => {
         connectAuthenticatedTuiEnvironment({
           child,
           readiness,
-          wsBaseUrl: "ws://127.0.0.1:43220",
           fetch: fetchFailure,
         }),
       );
@@ -343,7 +354,6 @@ describe("authenticated TUI environment connection", () => {
         connectAuthenticatedTuiEnvironment({
           child,
           readiness,
-          wsBaseUrl: "ws://127.0.0.1:43220",
           fetch,
           webSocketConstructor: makeTestWebSocketConstructor(sockets),
         }),
@@ -419,7 +429,6 @@ describe("authenticated TUI environment connection", () => {
           bootstrap,
         },
         httpBaseUrl: "http://127.0.0.1:43220",
-        wsBaseUrl: "ws://127.0.0.1:43220",
         fetch: gatedFetch,
         webSocketConstructor: makeTestWebSocketConstructor(sockets),
       }).pipe(Effect.forkChild);
