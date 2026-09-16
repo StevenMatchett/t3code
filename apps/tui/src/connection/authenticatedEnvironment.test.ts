@@ -1,4 +1,6 @@
 /// <reference types="node" />
+// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics preferSchemaOverJson:off
 
 import {
   AuthAccessTokenType,
@@ -16,6 +18,9 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import * as Socket from "effect/unstable/socket/Socket";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import { BootstrapSecretClearedError, startBootstrapChild } from "../backend/bootstrapChild.ts";
 import {
@@ -27,6 +32,7 @@ import {
   TuiEnvironmentConnectionError,
   waitForTuiEnvironmentReady,
 } from "./authenticatedEnvironment.ts";
+import { makePosixFileTuiCredentialStore } from "./credentialStore.ts";
 
 type CallerCanSupplyWebSocketBase = "wsBaseUrl" extends
   | keyof ConnectAuthenticatedTuiEnvironmentOptions
@@ -95,6 +101,7 @@ const SERVER_CONFIG = {
   },
   settings: DEFAULT_SERVER_SETTINGS,
 } satisfies ServerConfigType;
+const encodeServerConfig = Schema.encodeSync(ServerConfig);
 
 interface RecordedRequest {
   readonly url: string;
@@ -194,7 +201,7 @@ class TestWebSocket {
       readonly tag?: string;
     };
     if (message._tag !== "Request" || message.tag !== WS_METHODS.serverGetConfig) return;
-    const encodedConfig = Schema.encodeSync(ServerConfig)(SERVER_CONFIG);
+    const encodedConfig = encodeServerConfig(SERVER_CONFIG);
     queueMicrotask(() =>
       this.emit("message", {
         type: "message",
@@ -234,6 +241,13 @@ describe("authenticated TUI environment connection", () => {
       const child = yield* startMockChild();
       yield* Effect.addFinalizer(() => Effect.sync(() => void child.terminate("SIGKILL")));
       const bootstrapToken = yield* child.useBootstrapToken(Effect.succeed);
+      const stateDirectory = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-tui-auth-")),
+      );
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => NodeFSP.rm(stateDirectory, { recursive: true, force: true })),
+      );
+      const credentialStore = makePosixFileTuiCredentialStore({ stateDirectory });
       const requests: RecordedRequest[] = [];
       const sockets: TestWebSocket[] = [];
       const fetch = makeEnvironmentFetch(requests);
@@ -245,6 +259,7 @@ describe("authenticated TUI environment connection", () => {
       const connected = yield* connectAuthenticatedTuiEnvironment({
         child,
         readiness,
+        credentialStore,
         fetch,
         webSocketConstructor: makeTestWebSocketConstructor(sockets),
       });
@@ -291,6 +306,15 @@ describe("authenticated TUI environment connection", () => {
       });
       assert.notInclude(JSON.stringify(connected), bootstrapToken);
       assert.notInclude(JSON.stringify(connected), "bearer-test-token");
+      const persistedCredential = yield* Effect.promise(() =>
+        NodeFSP.readFile(credentialStore.credentialPath, "utf8"),
+      );
+      assert.notInclude(persistedCredential, bootstrapToken);
+      assert.include(persistedCredential, "bearer-test-token");
+      assert.equal(
+        (JSON.parse(persistedCredential) as { readonly httpOrigin: string }).httpOrigin,
+        "http://127.0.0.1:43220",
+      );
       assert.equal(yield* connected.bearer.use(Effect.succeed), "bearer-test-token");
       connected.bearer.clear();
       assert.instanceOf(

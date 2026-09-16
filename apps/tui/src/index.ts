@@ -11,19 +11,33 @@ export {
 } from "./backend/bootstrapChild.ts";
 export {
   connectAuthenticatedTuiEnvironment,
+  normalizeTuiHttpOrigin,
+  reattachAuthenticatedTuiEnvironment,
   startAndConnectAuthenticatedTuiEnvironment,
   TuiBearerSession,
   TuiBearerSessionClearedError,
   TuiEnvironmentConnectionError,
   TuiEnvironmentConnectionPhase,
+  TuiEnvironmentReattachError,
+  TuiEnvironmentReattachFailure,
   waitForTuiEnvironmentReady,
   type AuthenticatedTuiEnvironment,
   type ConnectAuthenticatedTuiEnvironmentOptions,
+  type ReattachAuthenticatedTuiEnvironmentOptions,
+  type ReattachedAuthenticatedTuiEnvironment,
   type StartedAuthenticatedTuiEnvironment,
   type StartAndConnectAuthenticatedTuiEnvironmentOptions,
   type TuiEnvironmentReadiness,
   type WaitForTuiEnvironmentReadyOptions,
 } from "./connection/authenticatedEnvironment.ts";
+export {
+  makePosixFileTuiCredentialStore,
+  TuiCredentialStoreError,
+  TuiCredentialStoreFailure,
+  type PosixFileTuiCredentialStore,
+  type TuiCredentialStore,
+  type TuiStoredCredential,
+} from "./connection/credentialStore.ts";
 export {
   EmbeddedTerminalSurface,
   type EmbeddedTerminalSurfaceHandle,

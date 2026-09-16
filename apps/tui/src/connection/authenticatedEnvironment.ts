@@ -2,6 +2,7 @@ import {
   AuthOrchestrationReadScope,
   AuthStandardClientScopes,
   type AuthSessionState,
+  type EnvironmentId,
   type ExecutionEnvironmentDescriptor,
   type ServerConfig,
   WS_METHODS,
@@ -16,6 +17,7 @@ import {
   fetchRemoteEnvironmentDescriptor,
 } from "@t3tools/client-runtime/environment";
 import { makeWsRpcProtocolClient, remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -32,6 +34,7 @@ import {
   type OwnedBootstrapChild,
   type StartBootstrapChildOptions,
 } from "../backend/bootstrapChild.ts";
+import { type TuiCredentialStore, type TuiCredentialStoreError } from "./credentialStore.ts";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_READINESS_ATTEMPTS = 60;
@@ -45,6 +48,8 @@ export const TuiEnvironmentConnectionPhase = Schema.Literals([
   "session-validation",
   "websocket-ticket",
   "config-read",
+  "identity-validation",
+  "credential-persist",
 ]);
 export type TuiEnvironmentConnectionPhase = typeof TuiEnvironmentConnectionPhase.Type;
 
@@ -64,6 +69,10 @@ export class TuiEnvironmentConnectionError extends Schema.TaggedError<TuiEnviron
         return "Failed to authorize the local environment WebSocket.";
       case "config-read":
         return "Failed to read the local environment configuration.";
+      case "identity-validation":
+        return "The local environment identity changed during authentication.";
+      case "credential-persist":
+        return "Failed to save the authenticated local environment credential.";
     }
   }
 }
@@ -142,6 +151,7 @@ export interface WaitForTuiEnvironmentReadyOptions {
 export interface ConnectAuthenticatedTuiEnvironmentOptions {
   readonly child: OwnedBootstrapChild;
   readonly readiness: TuiEnvironmentReadiness;
+  readonly credentialStore?: TuiCredentialStore;
   readonly fetch?: typeof globalThis.fetch;
   readonly webSocketConstructor?: WebSocketConstructor;
   readonly timeoutMs?: number;
@@ -150,6 +160,7 @@ export interface ConnectAuthenticatedTuiEnvironmentOptions {
 export interface StartAndConnectAuthenticatedTuiEnvironmentOptions {
   readonly start: StartBootstrapChildOptions;
   readonly httpBaseUrl: string;
+  readonly credentialStore?: TuiCredentialStore;
   readonly fetch?: typeof globalThis.fetch;
   readonly webSocketConstructor?: WebSocketConstructor;
   readonly requestTimeoutMs?: number;
@@ -163,10 +174,50 @@ export interface StartedAuthenticatedTuiEnvironment extends AuthenticatedTuiEnvi
   readonly readiness: TuiEnvironmentReadiness;
 }
 
+export const TuiEnvironmentReattachFailure = Schema.Literals(["missing", "rejected", "unsafe"]);
+export type TuiEnvironmentReattachFailure = typeof TuiEnvironmentReattachFailure.Type;
+
+export class TuiEnvironmentReattachError extends Schema.TaggedError<TuiEnvironmentReattachError>()(
+  "TuiEnvironmentReattachError",
+  { failure: TuiEnvironmentReattachFailure },
+) {
+  override get message(): string {
+    switch (this.failure) {
+      case "missing":
+        return "No saved local environment session exists. Start a new TUI-owned environment to create one.";
+      case "rejected":
+        return "The saved local environment session was rejected. Start a new TUI-owned environment to replace it.";
+      case "unsafe":
+        return "The saved local environment session is not safe to read. Fix its ownership and permissions, or remove it and start a new TUI-owned environment.";
+    }
+  }
+}
+
+export interface ReattachAuthenticatedTuiEnvironmentOptions {
+  readonly credentialStore: TuiCredentialStore;
+  readonly expectedHttpBaseUrl?: string;
+  readonly expectedEnvironmentId?: EnvironmentId;
+  readonly fetch?: typeof globalThis.fetch;
+  readonly webSocketConstructor?: WebSocketConstructor;
+  readonly timeoutMs?: number;
+}
+
+export interface ReattachedAuthenticatedTuiEnvironment extends AuthenticatedTuiEnvironment {
+  readonly readiness: TuiEnvironmentReadiness;
+}
+
 const nodeWebSocketConstructor: WebSocketConstructor = (url, protocols) =>
   (protocols === undefined
     ? new globalThis.WebSocket(url)
     : new globalThis.WebSocket(url, protocols)) as globalThis.WebSocket;
+
+export function normalizeTuiHttpOrigin(httpBaseUrl: string): string {
+  const url = new URL(httpBaseUrl);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new TypeError("The TUI environment endpoint must use HTTP or HTTPS.");
+  }
+  return url.origin;
+}
 
 export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEnvironmentReady")(
   function* (
@@ -178,9 +229,13 @@ export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEn
       1,
       options.probeTimeoutMs ?? DEFAULT_READINESS_PROBE_TIMEOUT_MS,
     );
+    const httpBaseUrl = yield* Effect.try({
+      try: () => normalizeTuiHttpOrigin(options.httpBaseUrl),
+      catch: () => new TuiEnvironmentConnectionError({ phase: "readiness" }),
+    });
     const httpClientLayer = remoteHttpClientLayer(options.fetch ?? globalThis.fetch);
     const probe = fetchRemoteEnvironmentDescriptor({
-      httpBaseUrl: options.httpBaseUrl,
+      httpBaseUrl,
       timeoutMs: probeTimeoutMs,
     }).pipe(Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "readiness" })));
     const descriptor = yield* probe.pipe(
@@ -192,7 +247,7 @@ export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEn
     );
     return {
       descriptor,
-      httpBaseUrl: options.httpBaseUrl,
+      httpBaseUrl,
       [readinessProof]: true,
     };
   },
@@ -226,14 +281,91 @@ const validateBearerSession = (
     ? Effect.succeed(session)
     : Effect.fail(new TuiEnvironmentConnectionError({ phase: "session-validation" }));
 
+const validateEnvironmentIdentity = (
+  actual: EnvironmentId,
+  expected: EnvironmentId,
+): Effect.Effect<void, TuiEnvironmentConnectionError> =>
+  actual === expected
+    ? Effect.void
+    : Effect.fail(new TuiEnvironmentConnectionError({ phase: "identity-validation" }));
+
+const connectTuiEnvironmentWithBearer = Effect.fn("tui.connection.connectTuiEnvironmentWithBearer")(
+  function* (options: {
+    readonly bearer: TuiBearerSession;
+    readonly httpBaseUrl: string;
+    readonly expectedEnvironmentId: EnvironmentId;
+    readonly fetch: typeof globalThis.fetch;
+    readonly webSocketConstructor: WebSocketConstructor;
+    readonly timeoutMs: number;
+  }): Effect.fn.Return<AuthenticatedTuiEnvironment, TuiEnvironmentConnectionError> {
+    const httpClientLayer = remoteHttpClientLayer(options.fetch);
+    return yield* Effect.gen(function* () {
+      const session = yield* options.bearer
+        .use((token) =>
+          fetchRemoteSessionState({
+            httpBaseUrl: options.httpBaseUrl,
+            bearerToken: token,
+            timeoutMs: options.timeoutMs,
+          }),
+        )
+        .pipe(
+          Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "session-validation" })),
+          Effect.flatMap(validateBearerSession),
+        );
+      const socketUrl = yield* options.bearer
+        .use((token) =>
+          resolveRemoteWebSocketConnectionUrl({
+            httpBaseUrl: options.httpBaseUrl,
+            wsBaseUrl: deriveWsBaseUrl(options.httpBaseUrl),
+            bearerToken: token,
+            clientMetadata: {
+              label: "T3 Code TUI",
+              deviceType: "bot",
+              surface: "cli",
+            },
+            connectionMethod: "direct",
+            timeoutMs: options.timeoutMs,
+          }),
+        )
+        .pipe(
+          Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "websocket-ticket" })),
+        );
+      const config = yield* readServerConfig({
+        socketUrl,
+        webSocketConstructor: options.webSocketConstructor,
+      }).pipe(
+        Effect.scoped,
+        Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "config-read" })),
+      );
+      yield* validateEnvironmentIdentity(
+        config.environment.environmentId,
+        options.expectedEnvironmentId,
+      );
+      return { bearer: options.bearer, session, config };
+    }).pipe(
+      Effect.provide(httpClientLayer),
+      Effect.tapError(() => Effect.sync(() => options.bearer.clear())),
+    );
+  },
+);
+
+function mapCredentialStoreToReattachError(
+  error: TuiCredentialStoreError,
+): TuiEnvironmentReattachError {
+  return new TuiEnvironmentReattachError({
+    failure:
+      error.failure === "missing" ? "missing" : error.failure === "unsafe" ? "unsafe" : "rejected",
+  });
+}
+
 export const connectAuthenticatedTuiEnvironment = Effect.fn(
   "tui.connection.connectAuthenticatedTuiEnvironment",
 )(function* (
   options: ConnectAuthenticatedTuiEnvironmentOptions,
 ): Effect.fn.Return<AuthenticatedTuiEnvironment, TuiEnvironmentConnectionError> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-  const httpClientLayer = remoteHttpClientLayer(options.fetch ?? globalThis.fetch);
   const httpBaseUrl = options.readiness.httpBaseUrl;
+  const fetch = options.fetch ?? globalThis.fetch;
 
   return yield* Effect.gen(function* () {
     const accessToken = yield* options.child
@@ -254,49 +386,109 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
         Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "bearer-exchange" })),
         Effect.ensuring(Effect.sync(() => options.child.clearBootstrapSecret())),
       );
+    const issuedAtEpochMs = yield* Clock.currentTimeMillis;
     const bearer = new TuiBearerSession(accessToken.access_token, accessToken.expires_in);
 
-    return yield* Effect.gen(function* () {
-      const session = yield* bearer
-        .use((token) =>
-          fetchRemoteSessionState({
-            httpBaseUrl,
-            bearerToken: token,
-            timeoutMs,
-          }),
-        )
-        .pipe(
-          Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "session-validation" })),
-          Effect.flatMap(validateBearerSession),
-        );
-      const socketUrl = yield* bearer
-        .use((token) =>
-          resolveRemoteWebSocketConnectionUrl({
-            httpBaseUrl,
-            wsBaseUrl: deriveWsBaseUrl(httpBaseUrl),
-            bearerToken: token,
-            clientMetadata: {
-              label: "T3 Code TUI",
-              deviceType: "bot",
-              surface: "cli",
-            },
-            connectionMethod: "direct",
-            timeoutMs,
-          }),
-        )
-        .pipe(
-          Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "websocket-ticket" })),
-        );
-      const config = yield* readServerConfig({
-        socketUrl,
-        webSocketConstructor: options.webSocketConstructor ?? nodeWebSocketConstructor,
-      }).pipe(
-        Effect.scoped,
-        Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "config-read" })),
+    const connected = yield* connectTuiEnvironmentWithBearer({
+      bearer,
+      httpBaseUrl,
+      expectedEnvironmentId: options.readiness.descriptor.environmentId,
+      fetch,
+      webSocketConstructor: options.webSocketConstructor ?? nodeWebSocketConstructor,
+      timeoutMs,
+    });
+    const credentialStore = options.credentialStore;
+    if (credentialStore !== undefined) {
+      const accessTokenExpiry =
+        issuedAtEpochMs + Math.max(0, Math.trunc(accessToken.expires_in * 1_000));
+      const expiresAtEpochMs = Math.min(
+        accessTokenExpiry,
+        connected.session.expiresAt?.epochMilliseconds ?? accessTokenExpiry,
       );
-      return { bearer, session, config };
-    }).pipe(Effect.tapError(() => Effect.sync(() => bearer.clear())));
-  }).pipe(Effect.provide(httpClientLayer));
+      yield* bearer
+        .use((bearerToken) =>
+          credentialStore.write({
+            version: 1,
+            httpOrigin: httpBaseUrl,
+            environmentId: options.readiness.descriptor.environmentId,
+            bearerToken,
+            expiresAtEpochMs,
+          }),
+        )
+        .pipe(
+          Effect.mapError(() => new TuiEnvironmentConnectionError({ phase: "credential-persist" })),
+          Effect.tapError(() => Effect.sync(() => bearer.clear())),
+        );
+    }
+    return connected;
+  }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+});
+
+export const reattachAuthenticatedTuiEnvironment = Effect.fn(
+  "tui.connection.reattachAuthenticatedTuiEnvironment",
+)(function* (
+  options: ReattachAuthenticatedTuiEnvironmentOptions,
+): Effect.fn.Return<ReattachedAuthenticatedTuiEnvironment, TuiEnvironmentReattachError> {
+  const stored = yield* options.credentialStore
+    .read()
+    .pipe(Effect.mapError(mapCredentialStoreToReattachError));
+  const origins = yield* Effect.try({
+    try: () => ({
+      stored: normalizeTuiHttpOrigin(stored.httpOrigin),
+      expected:
+        options.expectedHttpBaseUrl === undefined
+          ? stored.httpOrigin
+          : normalizeTuiHttpOrigin(options.expectedHttpBaseUrl),
+    }),
+    catch: () => new TuiEnvironmentReattachError({ failure: "rejected" }),
+  });
+  if (stored.httpOrigin !== origins.stored || origins.stored !== origins.expected) {
+    return yield* new TuiEnvironmentReattachError({ failure: "rejected" });
+  }
+  if (
+    options.expectedEnvironmentId !== undefined &&
+    stored.environmentId !== options.expectedEnvironmentId
+  ) {
+    return yield* new TuiEnvironmentReattachError({ failure: "rejected" });
+  }
+  const now = yield* Clock.currentTimeMillis;
+  if (stored.expiresAtEpochMs <= now) {
+    return yield* new TuiEnvironmentReattachError({ failure: "rejected" });
+  }
+
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const fetch = options.fetch ?? globalThis.fetch;
+  const descriptor = yield* fetchRemoteEnvironmentDescriptor({
+    httpBaseUrl: stored.httpOrigin,
+    timeoutMs,
+  }).pipe(
+    Effect.provide(remoteHttpClientLayer(fetch)),
+    Effect.mapError(() => new TuiEnvironmentReattachError({ failure: "rejected" })),
+  );
+  if (descriptor.environmentId !== stored.environmentId) {
+    return yield* new TuiEnvironmentReattachError({ failure: "rejected" });
+  }
+
+  const bearer = new TuiBearerSession(
+    stored.bearerToken,
+    Math.max(1, Math.ceil((stored.expiresAtEpochMs - now) / 1_000)),
+  );
+  const connected = yield* connectTuiEnvironmentWithBearer({
+    bearer,
+    httpBaseUrl: stored.httpOrigin,
+    expectedEnvironmentId: stored.environmentId,
+    fetch,
+    webSocketConstructor: options.webSocketConstructor ?? nodeWebSocketConstructor,
+    timeoutMs,
+  }).pipe(Effect.mapError(() => new TuiEnvironmentReattachError({ failure: "rejected" })));
+  return {
+    ...connected,
+    readiness: {
+      descriptor,
+      httpBaseUrl: stored.httpOrigin,
+      [readinessProof]: true,
+    },
+  };
 });
 
 export const startAndConnectAuthenticatedTuiEnvironment = Effect.fn(
@@ -325,6 +517,9 @@ export const startAndConnectAuthenticatedTuiEnvironment = Effect.fn(
     const connected = yield* connectAuthenticatedTuiEnvironment({
       child,
       readiness,
+      ...(options.credentialStore === undefined
+        ? {}
+        : { credentialStore: options.credentialStore }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       ...(options.webSocketConstructor === undefined
         ? {}
