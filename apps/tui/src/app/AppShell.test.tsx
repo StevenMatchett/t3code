@@ -49,7 +49,7 @@ describeWithNativeFfi("AppShell", () => {
     expect(driver.captureFrame()).not.toContain("Keyboard help");
     expect(driver.captureFrame()).toContain("Route: thread   Focus: conversation");
 
-    await driver.input.pressKey("BACKSPACE");
+    await driver.input.pressKey("ESCAPE");
     expect(driver.captureFrame()).toContain("Route: projects   Focus: project-list");
   });
 

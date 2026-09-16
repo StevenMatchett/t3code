@@ -74,8 +74,6 @@ export function shellCommandFromKey(key: ShellKey): ShellCommand | undefined {
       return { type: "cycle-focus", direction: key.shift ? "backward" : "forward" };
     case "escape":
       return { type: "escape" };
-    case "backspace":
-      return { type: "back" };
     default:
       return undefined;
   }

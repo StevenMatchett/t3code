@@ -79,7 +79,7 @@ function Help() {
       <text>Keyboard help</text>
       <text>1 Connection 2 Projects 3 Thread</text>
       <text>Tab Next focus Shift+Tab Previous focus</text>
-      <text>Esc or Backspace Close or go back</text>
+      <text>Esc Close help or go back</text>
       <text>? Close help</text>
     </box>
   );
@@ -118,9 +118,7 @@ export function AppShell({ initialRoute = "connection", onStateChange }: AppShel
       <text> </text>
       {state.modal === "help" ? <Help /> : <RouteContent state={state} />}
       <box flexGrow={1} />
-      <text>
-        {narrow ? "Tab focus | Esc back" : "Tab / Shift+Tab focus   Esc / Backspace back"}
-      </text>
+      <text>{narrow ? "Tab focus | Esc back" : "Tab / Shift+Tab focus   Esc back"}</text>
     </box>
   );
 }

@@ -42,7 +42,7 @@ describe("shell coordination", () => {
     });
     expect(shellCommandFromKey({ name: "2" })).toEqual({ type: "navigate", route: "projects" });
     expect(shellCommandFromKey({ name: "escape" })).toEqual({ type: "escape" });
-    expect(shellCommandFromKey({ name: "backspace" })).toEqual({ type: "back" });
+    expect(shellCommandFromKey({ name: "backspace" })).toBeUndefined();
     expect(shellCommandFromKey({ name: "2", ctrl: true })).toBeUndefined();
   });
 });
