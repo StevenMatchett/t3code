@@ -6,7 +6,10 @@
   "main": "./dist/index.js",
   "scripts": {
     "build": "tsc --noEmit false --outDir dist",
-    "test": "vp test run",
+    "runtime:check": "node ./scripts/run-with-node-ffi.mjs ./scripts/runtime-compatibility.mjs",
+    "runtime:smoke": "node ./scripts/run-with-node-ffi.mjs ./scripts/open-tui-smoke.mjs",
+    "test": "node ./scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run",
+    "test:runtime": "node --test ./scripts/runtime-compatibility.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -27,5 +30,8 @@
     "@types/react": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=26.4.0"
   }
 }
