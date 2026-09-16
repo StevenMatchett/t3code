@@ -1,3 +1,4 @@
+export * from "./app/index.ts";
 export {
   BootstrapChildStartError,
   BootstrapChildStartPhase,
