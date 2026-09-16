@@ -1,4 +1,5 @@
 export * from "./app/index.ts";
+export * from "./features/chat/index.ts";
 export {
   BootstrapChildStartError,
   BootstrapChildStartPhase,
