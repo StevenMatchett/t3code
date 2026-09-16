@@ -10,6 +10,7 @@ export { Glyph, type GlyphName, type GlyphProps, resolveGlyph } from "./glyphs.t
 export { formatKeySequence, KeyHint, type KeyHintProps, type KeyName } from "./KeyHint.tsx";
 export { calculatePanelLayout, type PanelLayout, type PanelLayoutOptions } from "./layout.ts";
 export { Panel, type PanelProps } from "./Panel.tsx";
+export { Stack, type StackProps, Text, type TextProps } from "./primitives.tsx";
 export {
   EmptyState,
   ErrorState,

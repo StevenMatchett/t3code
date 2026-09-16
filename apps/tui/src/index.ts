@@ -43,6 +43,7 @@ export {
   type EmbeddedTerminalSurfaceHandle,
   type EmbeddedTerminalSurfaceProps,
 } from "./renderer/embedded-terminal/index.ts";
+export { AppShell, type AppShellProps } from "./renderer/AppShell.tsx";
 export {
   startRendererRuntime,
   type RendererRuntime,

@@ -1,4 +1,4 @@
-export { AppShell, type AppShellProps } from "./AppShell.tsx";
+export { AppShellView, type AppShellViewProps, useAppShellState } from "./AppShell.tsx";
 export {
   createInitialShellState,
   dispatchShellCommand,
