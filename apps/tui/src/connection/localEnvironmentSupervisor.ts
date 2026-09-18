@@ -22,6 +22,7 @@ export type TuiLocalEnvironmentOwnership = "external" | "foreground";
 export type TuiLocalEnvironmentReleasePolicy = "keep-alive" | "terminate-owned";
 
 export type TuiLocalEnvironmentSupervisorFailure =
+  | "credential-missing"
   | "credential-rejected"
   | "credential-unsafe"
   | "start-failed";
@@ -74,7 +75,7 @@ export interface TuiLocalEnvironmentSupervisorOperations {
     ReattachedAuthenticatedTuiEnvironment,
     TuiEnvironmentReattachError
   >;
-  readonly start: () => Effect.Effect<
+  readonly start?: () => Effect.Effect<
     StartedAuthenticatedTuiEnvironment,
     BootstrapChildStartError | TuiEnvironmentConnectionError
   >;
@@ -92,7 +93,7 @@ export interface TuiLocalEnvironmentSupervisor {
 export interface MakeTuiLocalEnvironmentSupervisorOptions {
   readonly credentialStore: TuiCredentialStore;
   readonly reattach?: Omit<ReattachAuthenticatedTuiEnvironmentOptions, "credentialStore">;
-  readonly start: Omit<StartAndConnectAuthenticatedTuiEnvironmentOptions, "credentialStore">;
+  readonly start?: Omit<StartAndConnectAuthenticatedTuiEnvironmentOptions, "credentialStore">;
 }
 
 const IDLE_STATE: TuiLocalEnvironmentSupervisorState = Object.freeze({ _tag: "Idle" });
@@ -127,7 +128,12 @@ function reattachFailureState(
 ): TuiLocalEnvironmentSupervisorState {
   return {
     _tag: "Failed",
-    failure: error.failure === "unsafe" ? "credential-unsafe" : "credential-rejected",
+    failure:
+      error.failure === "missing"
+        ? "credential-missing"
+        : error.failure === "unsafe"
+          ? "credential-unsafe"
+          : "credential-rejected",
   };
 }
 
@@ -166,7 +172,7 @@ export const makeTuiLocalEnvironmentSupervisorWithOperations = Effect.fn(
         return lease;
       }
 
-      if (reattached.failure.failure !== "missing") {
+      if (reattached.failure.failure !== "missing" || operations.start === undefined) {
         yield* SubscriptionRef.set(state, reattachFailureState(reattached.failure));
         return yield* reattached.failure;
       }
@@ -228,16 +234,21 @@ export const makeTuiLocalEnvironmentSupervisor = Effect.fn(
 )(function* (
   options: MakeTuiLocalEnvironmentSupervisorOptions,
 ): Effect.fn.Return<TuiLocalEnvironmentSupervisor> {
+  const start = options.start;
   return yield* makeTuiLocalEnvironmentSupervisorWithOperations({
     reattach: () =>
       reattachAuthenticatedTuiEnvironment({
         ...options.reattach,
         credentialStore: options.credentialStore,
       }),
-    start: () =>
-      startAndConnectAuthenticatedTuiEnvironment({
-        ...options.start,
-        credentialStore: options.credentialStore,
-      }),
+    ...(start
+      ? {
+          start: () =>
+            startAndConnectAuthenticatedTuiEnvironment({
+              ...start,
+              credentialStore: options.credentialStore,
+            }),
+        }
+      : {}),
   });
 });

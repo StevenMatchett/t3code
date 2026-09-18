@@ -12,10 +12,12 @@ describe("terminal capabilities", () => {
     expect(detectTerminalCapabilities({ LANG: "en_US.UTF-8", NO_COLOR: "" })).toEqual({
       color: false,
       unicode: true,
+      animation: true,
     });
     expect(detectTerminalCapabilities({ LANG: "en_US.UTF-8", T3_TUI_ASCII: "1" })).toEqual({
       color: true,
       unicode: false,
+      animation: true,
     });
   });
 
@@ -24,6 +26,7 @@ describe("terminal capabilities", () => {
     expect(detectTerminalCapabilities({ FORCE_COLOR: "1", TERM: "dumb" })).toEqual({
       color: true,
       unicode: false,
+      animation: false,
     });
   });
 

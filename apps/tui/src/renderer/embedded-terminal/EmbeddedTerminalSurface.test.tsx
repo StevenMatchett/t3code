@@ -1,7 +1,14 @@
 import { EmbeddedTerminalRenderable } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
 import type { TerminalOutputState } from "@t3tools/client-runtime/state/terminal";
-import { act, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  act,
+  StrictMode,
+  useLayoutEffect,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -31,7 +38,7 @@ function outputState(
             },
           ],
     retainedBytes: byteLength,
-    nextOffset: byteLength,
+    nextOffset: data.length,
   };
 }
 
@@ -48,13 +55,14 @@ function appendedOutput(previous: TerminalOutputState, data: string): TerminalOu
       },
     ],
     retainedBytes: previous.retainedBytes + byteLength,
-    nextOffset: previous.nextOffset + byteLength,
+    nextOffset: previous.nextOffset + data.length,
   };
 }
 
 async function renderSurface(
   initialOutput: TerminalOutputState,
   overrides: Partial<EmbeddedTerminalSurfaceProps> = {},
+  strict = false,
 ) {
   let setOutput!: Dispatch<SetStateAction<TerminalOutputState>>;
   let handle: EmbeddedTerminalSurfaceHandle | null = null;
@@ -65,7 +73,9 @@ async function renderSurface(
 
   function Harness() {
     const [output, updateOutput] = useState(initialOutput);
-    setOutput = updateOutput;
+    useLayoutEffect(() => {
+      setOutput = updateOutput;
+    }, []);
     return (
       <EmbeddedTerminalSurface
         ref={(value) => {
@@ -82,11 +92,20 @@ async function renderSurface(
     );
   }
 
-  const setup = await testRender(<Harness />, {
-    width: 30,
-    height: 6,
-    exitOnCtrlC: false,
-  });
+  const setup = await testRender(
+    strict ? (
+      <StrictMode>
+        <Harness />
+      </StrictMode>
+    ) : (
+      <Harness />
+    ),
+    {
+      width: 30,
+      height: 6,
+      exitOnCtrlC: false,
+    },
+  );
   await setup.flush();
 
   return {
@@ -117,6 +136,23 @@ const describeWithNativeFfi = runtime.process?.getBuiltinModule?.("node:ffi")
   : describe.skip;
 
 describeWithNativeFfi("EmbeddedTerminalSurface", () => {
+  it.each([
+    ["F1", "\x1bOP", "\x1bOP"],
+    ["F5", "\x1b[15~", "\x1b[15~"],
+    ["F12", "\x1b[24~", "\x1b[24~"],
+    ["Ctrl+F1", "\x1b[1;5P", "\x1b[1;5P"],
+    ["SS3 left", "\x1bOD", "\x1b[D"],
+  ] as const)("forwards %s through the native encoder", async (_label, sequence, expected) => {
+    const rendered = await renderSurface(outputState(""), { focused: true });
+    try {
+      rendered.mockInput.pressKey(sequence);
+      await rendered.handle.drainInput();
+      expect(rendered.onWrite.mock.calls).toEqual([[expected, "input"]]);
+    } finally {
+      await act(async () => rendered.renderer.destroy());
+    }
+  });
+
   it("registers the native terminal, replays once, and appends once", async () => {
     const write = vi.spyOn(EmbeddedTerminalRenderable.prototype, "write");
     const initial = outputState("hello");
@@ -133,7 +169,36 @@ describeWithNativeFfi("EmbeddedTerminalSurface", () => {
     rendered.setOutput(appendedOutput(initial, " world"));
     await rendered.flush();
     expect(write.mock.calls.map(([data]) => data)).toEqual(["hello", " world"]);
-    rendered.renderer.destroy();
+    await act(async () => rendered.renderer.destroy());
+  });
+
+  it("appends Unicode output once using the runtime's string offsets", async () => {
+    const initial = outputState("漢字");
+    const rendered = await renderSurface(initial);
+    try {
+      const next = appendedOutput(initial, " café");
+      rendered.setOutput(next);
+      await rendered.flush();
+      rendered.setOutput({ ...next });
+      await rendered.flush();
+      const terminal = rendered.renderer.root.findDescendantById(
+        "t3-embedded-terminal",
+      ) as EmbeddedTerminalRenderable;
+      expect(terminal.screen().text).toBe("漢字 café");
+    } finally {
+      await act(async () => rendered.renderer.destroy());
+    }
+  });
+
+  it("keeps input working after StrictMode replays mount effects", async () => {
+    const rendered = await renderSurface(outputState(""), { focused: true }, true);
+    try {
+      rendered.handle.paste("after replay");
+      await rendered.handle.drainInput();
+      expect(rendered.onWrite.mock.calls).toEqual([["after replay", "input"]]);
+    } finally {
+      await act(async () => rendered.renderer.destroy());
+    }
   });
 
   it("replaces the native terminal for every reset and restores owned focus", async () => {
@@ -162,8 +227,28 @@ describeWithNativeFfi("EmbeddedTerminalSurface", () => {
     expect(cleared).not.toBe(after);
     expect(after.isDestroyed).toBe(true);
     expect(cleared.screen().text).toBe("");
-    rendered.renderer.destroy();
+    await act(async () => rendered.renderer.destroy());
     expect(cleared.isDestroyed).toBe(true);
+  });
+
+  it("does not send queued input after the terminal is unmounted", async () => {
+    const pending = Promise.withResolvers<void>();
+    const writes: string[] = [];
+    const rendered = await renderSurface(outputState(""), {
+      onWrite: async (data) => {
+        writes.push(data);
+        if (data === "first") await pending.promise;
+      },
+    });
+    rendered.handle.paste("first");
+    rendered.handle.paste("second");
+    const drained = rendered.handle.drainInput();
+    await Promise.resolve();
+    expect(writes).toEqual(["first"]);
+    await act(async () => rendered.renderer.destroy());
+    pending.resolve();
+    await drained;
+    expect(writes).toEqual(["first"]);
   });
 
   it("uses the native bracketed-paste encoder", async () => {
@@ -173,7 +258,7 @@ describeWithNativeFfi("EmbeddedTerminalSurface", () => {
     await rendered.handle.drainInput();
 
     expect(rendered.onWrite).toHaveBeenCalledWith("\x1b[200~pasted\x1b[201~", "input");
-    rendered.renderer.destroy();
+    await act(async () => rendered.renderer.destroy());
   });
 
   it("releases focus on Ctrl+\\ without forwarding SIGQUIT", async () => {
@@ -189,6 +274,6 @@ describeWithNativeFfi("EmbeddedTerminalSurface", () => {
     expect(rendered.onReleaseFocus).toHaveBeenCalledOnce();
     expect(terminal.focused).toBe(false);
     expect(rendered.onWrite.mock.calls.flatMap(([data]) => [...data])).not.toContain("\x1c");
-    rendered.renderer.destroy();
+    await act(async () => rendered.renderer.destroy());
   });
 });

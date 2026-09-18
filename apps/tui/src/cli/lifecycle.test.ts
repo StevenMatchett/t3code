@@ -42,7 +42,9 @@ function makeHarness() {
       events.push("close");
     },
     clearBearer: () => events.push("clear-bearer"),
-    terminateChild: (session) => events.push(`terminate:${session.id}`),
+    terminateChild: (session) => {
+      events.push(`terminate:${session.id}`);
+    },
     reportError: (error) => errors.push(error),
   });
   return { shutdown, rendered, childExit, events, errors, run };
@@ -93,7 +95,9 @@ describe("TUI CLI lifecycle", () => {
         events.push("close");
       },
       clearBearer: () => events.push("clear-bearer"),
-      terminateChild: () => events.push("terminate"),
+      terminateChild: () => {
+        events.push("terminate");
+      },
       reportError: (reported) => errors.push(reported),
     });
 

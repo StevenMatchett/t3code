@@ -3,6 +3,7 @@
 // @effect-diagnostics preferSchemaOverJson:off
 
 import {
+  AuthAccessTokenType,
   AuthStandardClientScopes,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
@@ -21,6 +22,7 @@ import * as NodePath from "node:path";
 import {
   type ReattachAuthenticatedTuiEnvironmentOptions,
   reattachAuthenticatedTuiEnvironment,
+  pairExistingTuiEnvironment,
   TuiEnvironmentReattachError,
 } from "./authenticatedEnvironment.ts";
 import { makePosixFileTuiCredentialStore } from "./credentialStore.ts";
@@ -213,6 +215,93 @@ const prepareStore = Effect.fn(function* () {
 });
 
 describe("authenticated TUI environment reattachment", () => {
+  it.effect(
+    "pairs to the existing environment and reattaches with only its derived credential",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* withTemporaryDirectory;
+        const store = makePosixFileTuiCredentialStore({
+          stateDirectory: NodePath.join(root, "state"),
+        });
+        const credential = new TextEncoder().encode("one-use-pairing-fixture");
+        const requests: RecordedRequest[] = [];
+        const sockets: TestWebSocket[] = [];
+        const baseFetch = makeReattachFetch({ requests });
+        let exchanges = 0;
+        const fetch: typeof globalThis.fetch = async (input, init) => {
+          assert.equal(init?.redirect, "error");
+          const request = new Request(input, init);
+          if (new URL(request.url).pathname === "/oauth/token") {
+            exchanges += 1;
+            assert.equal(
+              new URLSearchParams(await request.text()).get("subject_token"),
+              "one-use-pairing-fixture",
+            );
+            return jsonResponse({
+              access_token: BEARER,
+              issued_token_type: AuthAccessTokenType,
+              token_type: "Bearer",
+              expires_in: 3_600,
+              scope: AuthStandardClientScopes.join(" "),
+            });
+          }
+          return baseFetch(input, init);
+        };
+        const paired = yield* pairExistingTuiEnvironment({
+          httpBaseUrl: HTTP_ORIGIN,
+          credential,
+          credentialStore: store,
+          fetch,
+          webSocketConstructor: makeTestWebSocketConstructor(sockets),
+        });
+        assert.deepEqual([...credential], Array(credential.length).fill(0));
+        assert.isFalse("child" in paired);
+        assert.deepEqual(paired.config, SERVER_CONFIG);
+        paired.bearer.clear();
+        const stored = yield* store.read();
+        assert.equal(stored.bearerToken, BEARER);
+        assert.equal(stored.environmentId, ENVIRONMENT_ID);
+        assert.equal(stored.httpOrigin, HTTP_ORIGIN);
+        const reattached = yield* reattachAuthenticatedTuiEnvironment({
+          credentialStore: store,
+          fetch,
+          webSocketConstructor: makeTestWebSocketConstructor(sockets),
+        });
+        assert.equal(
+          reattached.config.environment.environmentId,
+          paired.config.environment.environmentId,
+        );
+        assert.equal(exchanges, 1);
+        reattached.bearer.clear();
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("rejects redirects during pairing and clears the supplied credential", () =>
+    Effect.gen(function* () {
+      const root = yield* withTemporaryDirectory;
+      const store = makePosixFileTuiCredentialStore({
+        stateDirectory: NodePath.join(root, "state"),
+      });
+      const credential = new TextEncoder().encode("one-use-pairing-fixture");
+      const error = yield* pairExistingTuiEnvironment({
+        httpBaseUrl: HTTP_ORIGIN,
+        credential,
+        credentialStore: store,
+        fetch: async (_input, init) => {
+          assert.equal(init?.redirect, "error");
+          return new Response(null, {
+            status: 307,
+            headers: { location: "https://other.example.test/" },
+          });
+        },
+      }).pipe(Effect.flip);
+      assert.equal(error.phase, "readiness");
+      assert.isFalse(String(error).includes("one-use-pairing-fixture"));
+      assert.deepEqual([...credential], Array(credential.length).fill(0));
+      assert.equal((yield* store.read().pipe(Effect.flip)).failure, "missing");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("reattaches with the saved bearer and never calls the OAuth exchange", () =>
     Effect.gen(function* () {
       const store = yield* prepareStore();
@@ -264,7 +353,7 @@ describe("authenticated TUI environment reattachment", () => {
 
       assert.instanceOf(error, TuiEnvironmentReattachError);
       assert.equal(error.failure, "rejected");
-      assert.include(error.message, "Start a new TUI-owned environment");
+      assert.include(error.message, "No server was started or stopped");
       assert.deepEqual(requests, []);
     }),
   );
@@ -372,7 +461,7 @@ describe("authenticated TUI environment reattachment", () => {
         reattachAuthenticatedTuiEnvironment({ credentialStore: store }),
       );
       assert.equal(missing.failure, "missing");
-      assert.include(missing.message, "Start a new TUI-owned environment");
+      assert.include(missing.message, "Pair with your existing T3 environment");
 
       yield* store.write({
         version: 1,

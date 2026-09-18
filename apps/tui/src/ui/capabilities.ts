@@ -1,6 +1,7 @@
 export interface TerminalCapabilities {
   readonly color: boolean;
   readonly unicode: boolean;
+  readonly animation?: boolean;
 }
 
 export type TerminalEnvironment = Readonly<Record<string, string | undefined>>;
@@ -13,6 +14,7 @@ export const richTerminalCapabilities: TerminalCapabilities = Object.freeze({
 export const basicTerminalCapabilities: TerminalCapabilities = Object.freeze({
   color: false,
   unicode: false,
+  animation: false,
 });
 
 function supportsColor(environment: TerminalEnvironment) {
@@ -32,5 +34,6 @@ export function detectTerminalCapabilities(environment: TerminalEnvironment): Te
   return {
     color: supportsColor(environment),
     unicode: supportsUnicode(environment),
+    animation: environment.T3_TUI_ANIMATION !== "0" && environment.TERM !== "dumb",
   };
 }

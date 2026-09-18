@@ -23,6 +23,7 @@ export type TerminalDataWriter = (
 export interface TerminalDataQueue {
   enqueue(data: Uint8Array, source: EmbeddedTerminalDataSource): void;
   drain(): Promise<void>;
+  dispose(): void;
 }
 
 export function decodeTerminalData(data: Uint8Array): string {
@@ -61,23 +62,28 @@ export function createTerminalDataQueue(
   onError: (error: unknown) => void = () => undefined,
 ): TerminalDataQueue {
   let tail = Promise.resolve();
+  let disposed = false;
 
   return {
     enqueue(data, source) {
+      if (disposed) return;
       const decoded = decodeTerminalData(data);
       for (const chunk of splitTerminalWrite(decoded)) {
         tail = tail
-          .then(() => write(chunk, source))
+          .then(() => (disposed ? undefined : write(chunk, source)))
           .then(
             () => undefined,
             (error) => {
-              onError(error);
+              if (!disposed) onError(error);
             },
           );
       }
     },
     drain() {
       return tail;
+    },
+    dispose() {
+      disposed = true;
     },
   };
 }

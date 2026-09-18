@@ -31,6 +31,8 @@ emulator with the React renderer.
 
 ## Consequences
 
-Phase 0 must measure streaming input latency, cleanup, native packaging, and Node compatibility before
-feature work starts. If React reconciliation fails but OpenTUI Core passes, the fork may replace the
-React adapter. Feature code must not support both renderers at once.
+Phase 0 measures streaming input latency, cleanup, native packaging, and Node compatibility.
+The verified macOS path permits client implementation to proceed. Linux and Windows certification
+remains a release requirement rather than an implementation blocker. If React reconciliation fails
+but OpenTUI Core passes, the fork may replace the React adapter. Feature code must not support both
+renderers at once.

@@ -1,0 +1,127 @@
+import type { TextareaRenderable } from "@opentui/core";
+import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import { useThemeColor } from "../ui/context.tsx";
+
+export interface PromptSnapshot {
+  readonly text: string;
+  readonly cursor: number;
+}
+
+export interface PromptEditorControl {
+  readonly snapshot: () => PromptSnapshot;
+  readonly replace: (text: string, cursor: number) => void;
+}
+
+function cursorInText(editor: TextareaRenderable) {
+  return editor.editBuffer.getTextRange(0, editor.cursorOffset).length;
+}
+
+function moveToTextOffset(editor: TextareaRenderable, cursor: number) {
+  editor.gotoBufferEnd();
+  let low = 0;
+  let high = editor.cursorOffset;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (editor.editBuffer.getTextRange(0, middle).length <= cursor) low = middle;
+    else high = middle - 1;
+  }
+  editor.cursorOffset = low;
+}
+
+export function PromptEditor({
+  value,
+  onChange,
+  onSubmit,
+  focused,
+  height = 4,
+  placeholder = "Write a prompt...",
+  control,
+  onSnapshot,
+  onActivate,
+}: {
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly onSubmit: (value: string) => void;
+  readonly focused: boolean;
+  readonly height?: number;
+  readonly placeholder?: string;
+  readonly control?: Ref<PromptEditorControl>;
+  readonly onSnapshot?: (snapshot: PromptSnapshot) => void;
+  readonly onActivate?: () => void;
+}) {
+  const editor = useRef<TextareaRenderable | null>(null);
+  const updating = useRef(false);
+  const background = useThemeColor("panel");
+  const foreground = useThemeColor("text");
+  const muted = useThemeColor("muted");
+  const accent = useThemeColor("accent");
+  const snapshot = () =>
+    editor.current
+      ? { text: editor.current.plainText, cursor: cursorInText(editor.current) }
+      : { text: value, cursor: value.length };
+  const replace = (text: string, cursor: number) => {
+    const current = editor.current;
+    if (!current) return;
+    updating.current = true;
+    try {
+      current.replaceText(text);
+      moveToTextOffset(current, cursor);
+    } finally {
+      updating.current = false;
+    }
+    onChange(text);
+    onSnapshot?.(snapshot());
+  };
+  useImperativeHandle(control, () => ({ snapshot, replace }));
+  useEffect(() => {
+    const current = editor.current;
+    if (current && current.plainText !== value) {
+      current.setText(value);
+      current.gotoBufferEnd();
+    }
+  }, [value]);
+  return (
+    <textarea
+      ref={editor}
+      id="prompt-editor"
+      initialValue={value}
+      height={height}
+      flexShrink={0}
+      width="100%"
+      focused={focused}
+      placeholder={placeholder}
+      {...(background ? { backgroundColor: background, focusedBackgroundColor: background } : {})}
+      {...(foreground ? { textColor: foreground, focusedTextColor: foreground } : {})}
+      {...(muted ? { placeholderColor: muted } : {})}
+      {...(accent ? { cursorColor: accent } : {})}
+      cursorStyle={{ style: "line", blinking: false }}
+      keyBindings={[
+        { name: "return", action: "submit" },
+        { name: "return", shift: true, action: "newline" },
+        { name: "j", ctrl: true, action: "newline" },
+        { name: "linefeed", action: "newline" },
+      ]}
+      onMouseDown={() => onActivate?.()}
+      onKeyDown={(key) => {
+        if (key.repeated && (key.name === "return" || key.name === "enter")) {
+          key.preventDefault();
+          key.stopPropagation();
+        }
+      }}
+      onCursorChange={() => {
+        if (!updating.current && editor.current) onSnapshot?.(snapshot());
+      }}
+      onContentChange={() => {
+        if (!updating.current && editor.current) {
+          onChange(editor.current.plainText);
+          onSnapshot?.(snapshot());
+        }
+      }}
+      onSubmit={() => {
+        const text = editor.current?.plainText ?? value;
+        onChange(text);
+        onSubmit(text);
+      }}
+    />
+  );
+}

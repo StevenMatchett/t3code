@@ -10,5 +10,6 @@ export {
   type ShellKey,
   type ShellModal,
   type ShellRoute,
+  type ShellRows,
   type ShellState,
 } from "./state.ts";

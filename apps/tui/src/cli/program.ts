@@ -4,13 +4,20 @@
 import { createElement } from "react";
 import * as Effect from "effect/Effect";
 import * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry";
-import NodeProcess from "node:process";
+import * as NodeProcess from "node:process";
+import * as NodePath from "node:path";
 
-import { startAndConnectAuthenticatedTuiEnvironment } from "../connection/authenticatedEnvironment.ts";
+import { pairExistingTuiEnvironment } from "../connection/authenticatedEnvironment.ts";
+import { createTuiClient } from "../connection/clientRuntime.ts";
+import { makeTuiCredentialStore } from "../connection/credentialStore.ts";
+import { makeTuiLocalEnvironmentSupervisor } from "../connection/localEnvironmentSupervisor.ts";
+import { readPairingCredential } from "./pairingInput.ts";
 import { PrototypeApp } from "../renderer/PrototypeApp.tsx";
+import { UiProvider } from "../ui/context.tsx";
+import { detectTerminalCapabilities } from "../ui/capabilities.ts";
 import { startRendererRuntime } from "../renderer/runtime.tsx";
 import { runTuiLifecycle } from "./lifecycle.ts";
-import { buildTuiLaunchOptions, type TuiCliOptions } from "./options.ts";
+import { buildTuiLaunchOptions, formatTuiCliError, type TuiCliOptions } from "./options.ts";
 import { TuiShutdownController } from "./shutdown.ts";
 
 export interface RunTuiPrototypeOptions {
@@ -18,41 +25,81 @@ export interface RunTuiPrototypeOptions {
   readonly serverEntryPath: string;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? (error.stack ?? error.message) : String(error);
-}
-
 export async function runTuiPrototype(options: RunTuiPrototypeOptions): Promise<number> {
+  const stateDirectory = options.cli.newEnvironment
+    ? NodePath.join(options.cli.stateDir, "standalone")
+    : options.cli.stateDir;
+  const credentialStore = makeTuiCredentialStore({ stateDirectory });
+  if (options.cli.pairStdin && options.cli.connect) {
+    const credential = await readPairingCredential(NodeProcess.stdin, options.cli.connect);
+    try {
+      const paired = await Effect.runPromise(
+        pairExistingTuiEnvironment({
+          httpBaseUrl: options.cli.connect,
+          credential,
+          credentialStore,
+        }),
+      );
+      paired.bearer.clear();
+      NodeProcess.stdout.write(
+        "Paired with the existing T3 environment. Start the TUI again to attach.\n",
+      );
+      return 0;
+    } finally {
+      credential.fill(0);
+    }
+  }
   const shutdown = new TuiShutdownController();
-  shutdown.attachToProcess(NodeProcess);
-  const launch = buildTuiLaunchOptions(options.cli, {
-    executable: NodeProcess.execPath,
-    serverEntryPath: options.serverEntryPath,
-    env: NodeProcess.env,
-  });
-
+  shutdown.attachToProcess(process);
   try {
+    const supervisor = await Effect.runPromise(
+      makeTuiLocalEnvironmentSupervisor({
+        credentialStore,
+        ...(options.cli.connect ? { reattach: { expectedHttpBaseUrl: options.cli.connect } } : {}),
+        ...(options.cli.newEnvironment
+          ? {
+              start: buildTuiLaunchOptions(
+                { ...options.cli, stateDir: stateDirectory },
+                {
+                  executable: NodeProcess.execPath,
+                  serverEntryPath: options.serverEntryPath,
+                  env: NodeProcess.env,
+                },
+              ),
+            }
+          : {}),
+      }),
+    );
     return await runTuiLifecycle({
       shutdown,
-      start: (signal) =>
-        Effect.runPromise(startAndConnectAuthenticatedTuiEnvironment(launch), { signal }),
-      render: async ({ onFatal, onInterrupt }) =>
+      start: (signal) => Effect.runPromise(supervisor.connect, { signal }),
+      render: async ({ onFatal, onInterrupt }, lease) =>
         startRendererRuntime({
           registry: AtomRegistry.make(),
-          children: createElement(PrototypeApp, { onInterrupt }),
+          children: createElement(
+            UiProvider,
+            { capabilities: detectTerminalCapabilities(NodeProcess.env) },
+            createElement(PrototypeApp, {
+              onInterrupt,
+              client: createTuiClient(lease.environment),
+            }),
+          ),
           onError: onFatal,
         }),
-      waitForChildExit: (session) => Effect.runPromise(session.child.waitForExit()),
-      drainChildOutput: (session) => {
-        session.child.stdout.resume();
-        session.child.stderr.resume();
+      waitForChildExit: (lease) =>
+        lease.ownership === "foreground"
+          ? Effect.runPromise(lease.environment.child.waitForExit())
+          : new Promise<never>(() => {}),
+      drainChildOutput: (lease) => {
+        if (lease.ownership === "foreground") {
+          lease.environment.child.stdout.resume();
+          lease.environment.child.stderr.resume();
+        }
       },
       closeRuntime: (runtime) => runtime.close(),
-      clearBearer: (session) => session.bearer.clear(),
-      terminateChild: (session) => {
-        void session.child.terminate();
-      },
-      reportError: (error) => NodeProcess.stderr.write(`${errorMessage(error)}\n`),
+      clearBearer: (lease) => lease.environment.bearer.clear(),
+      terminateChild: () => Effect.runPromise(supervisor.release("terminate-owned")),
+      reportError: (error) => NodeProcess.stderr.write(`${formatTuiCliError(error)}\n`),
     });
   } finally {
     shutdown.disposeProcessListeners();

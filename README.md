@@ -6,7 +6,116 @@
 > Use the upstream repository for official T3 Code releases and support. See the
 > [TUI client boundary](./docs/internals/tui-client.md) for the fork's scope.
 
-This branch is still the pinned upstream baseline. It does not contain a usable TUI yet.
+This branch connects to an existing T3 environment to browse projects and threads, send text
+prompts, follow agent output, stop turns, respond to approvals and questions, choose models/options,
+and invoke provider skills. New threads can use the current checkout or an isolated Git worktree.
+Switching provider accounts in existing threads, attachments, Git review/actions, and the
+server-backed terminal UI remain unfinished. macOS implementation is proceeding; Linux and Windows
+certification remains a release requirement.
+
+## Share an existing T3 Code environment
+
+The TUI attaches to the saved T3 environment by default. It does not copy its database or start a
+second server against its data. Keep the existing T3 desktop app or server running while attached.
+
+For first-time pairing, create a pairing link in that environment's Connections settings.
+Set `T3_ORIGIN` to the backend's HTTP(S) origin, including the port, without a path or token.
+Copy the complete pairing link or its token. On macOS, send the clipboard through stdin:
+
+```bash
+pbpaste | ./start-tui.sh --connect "$T3_ORIGIN" --pair-stdin
+./start-tui.sh
+```
+
+Pairing saves a derived bearer credential under `~/.t3-tui`, then exits. macOS and Linux use a
+mode-`0600` file. The Windows implementation encrypts the credential with current-user DPAPI through
+Windows PowerShell, without putting the token in arguments or environment variables. Its native
+round-trip test still needs a Windows runner. Protection failures never fall back to plaintext.
+The next launch validates the credential and environment identity before opening the prototype shell.
+Do not put pairing tokens in command arguments. The parser accepts T3's direct and hosted links,
+including tokens in the fragment or query string. For a hosted link, `--connect` must match the
+embedded backend address, not the hosted page. The TUI contacts only the selected backend.
+The scheme, hostname, and port must match; `localhost` and `127.0.0.1` are different origins.
+
+`--connect <origin>` checks the saved connection's origin. Missing, expired, or rejected credentials
+require pairing again, never an automatic replacement server. Quitting the TUI leaves an existing
+T3 server running. The project list, active threads, and conversation history come from that same
+server and update when another client changes them.
+
+Use Up/Down or Tab to select a project or thread, Enter or Right to open it, and Escape or Left to
+go back. Within a conversation, Up/Down and Page Up/Down scroll; End follows the latest output.
+Home moves to the top and requests earlier turns when available. `?` opens help, `R` reconnects,
+and Ctrl+C quits. Wide terminals keep the thread list beside the conversation; smaller terminals
+use a single pane. The composer stays visible, with its border indicating when it owns keyboard
+input. Routine tool activity is collapsed by default; press `t` from history to expand it. Errors
+and pending requests remain visible.
+
+To start a conversation, select a project and click **New thread**, or press `n` from navigation
+or conversation history. Choose a title, provider/model, and **Current checkout** or **New worktree**.
+Permissions initially follow the project's/environment's settings. Creating the thread does not
+send a prompt or start an agent.
+
+A new worktree uses the base ref's committed files (`HEAD` by default), with a generated branch
+and a server-managed location. It does not copy uncommitted changes, fetch remotes, or run setup
+scripts automatically. Worktree threads are marked `[WT]` and show their directory when opened.
+If creation is not confirmed, Retry reuses the same thread ID and checks for the same worktree.
+Close hides the form without cancelling an in-flight server operation. Start over requires
+confirmation and retains any created thread, branch, or worktree; it never deletes them.
+
+In an open conversation, Enter or `i` focuses the composer. Enter sends; Ctrl+J inserts a newline
+in legacy and enhanced terminals, and Shift+Enter also inserts one where the terminal supports it.
+Escape returns to history without discarding the draft. Text pasted into the composer is never
+submitted automatically. Drafts survive thread navigation within the TUI session but are not saved
+across process exits. Prompts use the thread's existing model, options, and runtime mode; wait for
+an active turn to finish or press Ctrl+X to request a stop before sending another prompt.
+
+Use the model and reasoning dropdowns on the composer to change the shared thread's selection.
+Click a control, or Tab from the text editor to it and press Enter. Choose a value to apply it;
+Escape closes the dropdown without discarding your prompt. Only options advertised by the current
+provider/account are offered. Providers that lock a started conversation require a new thread;
+a running turn must finish or be stopped before changing models.
+
+Type `/` to open the inline skills menu. Continue typing to filter it, then use Up/Down and Enter
+or click a result. Selection replaces the slash query and prepares the provider-native invocation
+at the start of the draft, preserving surrounding text. It never sends automatically. Escape
+leaves the slash text untouched; edit the arguments and press Enter when ready to send. Skills come
+from the environment's provider catalog, including workspace-specific entries when the server
+reports them. Disabled and agent-only skills are excluded. Older servers, including T3 0.0.35,
+only report the provider-level catalog, so project skills may require a server upgrade. Skill
+execution remains the provider's responsibility; the TUI does not load local skill files or add
+its own tool runtime.
+
+Press `a` from conversation history to review pending approvals or agent questions. Approval choices
+come from the provider and require a separate confirmation. For questions, Space toggles choices;
+select Continue or Submit after answering. Custom text is offered only when permitted. Responses
+remain pending until the server reports the result, including responses made in another client.
+The TUI honors the server's output-streaming preference; some servers buffer text until a turn
+finishes or pauses.
+
+For an isolated prototype environment, use `./start-tui.sh --new-environment`. This uses a separate
+`standalone` directory under the TUI state directory and does not share existing T3 threads.
+
+## Build an internal artifact
+
+With workspace dependencies installed, build a host-specific prototype outside the checkout:
+
+```bash
+npx --yes node@26.4.0 apps/tui/scripts/build-artifact.mjs
+```
+
+The command prints a new temporary artifact directory. An optional directory argument must name a
+path that does not exist. The artifact contains the TUI, server, required runtime packages, upstream
+license and provenance, third-party notices, and SHA-256 file checksums. It contains no web, desktop,
+mobile, or marketing bundle. Dependency installation and security settings are unchanged.
+
+Run `node <artifact-directory>/t3-tui.mjs` with Node 26.4 or newer. The launcher enables the required
+FFI flag. Existing-environment attachment remains the default; `--new-environment` explicitly starts
+the bundled server. `--version` reports the TUI, server, upstream base, and OpenTUI versions.
+
+The TUI package exposes `test:artifact` for relocation, repeat-build checksums, native assets,
+standalone startup, shared-server attachment, and terminal cleanup. This is a development artifact,
+not a public release or an installer. macOS arm64 has local smoke evidence; Linux and Windows
+certification remains outstanding.
 
 ## Upstream project
 

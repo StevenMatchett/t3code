@@ -39,4 +39,19 @@ export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
   );
 }
 
+export function layerWithResolver(
+  resolver: ConnectionResolver.ConnectionResolver["Service"],
+  options: RpcSession.RpcSessionOptions = {},
+) {
+  const driverLayer = ConnectionDriver.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(ConnectionResolver.ConnectionResolver, resolver),
+        RpcSession.layerWithOptions(options),
+      ),
+    ),
+  );
+  return EnvironmentRegistry.layer.pipe(Layer.provide(driverLayer));
+}
+
 export const layer = layerWithOptions({});

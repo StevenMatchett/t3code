@@ -1,6 +1,17 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { calculatePanelLayout } from "./layout.ts";
+import { calculatePanelLayout, calculateShellLayout } from "./layout.ts";
+
+describe("responsive shell layout", () => {
+  it("uses two panes only when both navigation and conversation have usable space", () => {
+    const wide = calculateShellLayout(120, 32);
+    expect(wide.split).toBe(true);
+    expect(wide.sidebarWidth + wide.mainWidth + 3).toBe(120);
+    expect(wide.contentWidth).toBeGreaterThanOrEqual(64);
+    expect(calculateShellLayout(80, 24).split).toBe(false);
+    expect(calculateShellLayout(120, 14).split).toBe(false);
+  });
+});
 
 describe("calculatePanelLayout", () => {
   it.each([

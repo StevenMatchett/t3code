@@ -119,7 +119,6 @@ export async function createTuiTestDriver(
       otherModifiersMode: options.otherModifiersMode ?? false,
     });
     setup = rendererSetup;
-    rendererSetup.renderer.once(CliRenderEvents.DESTROY, releaseReactActEnvironment);
 
     const registry = options.registry ?? AtomRegistry.make();
     const defaultFrameReplacements = [...(options.frameReplacements ?? [])];
@@ -151,7 +150,25 @@ export async function createTuiTestDriver(
     };
 
     const input: TuiTestInput = {
-      pressKey: (key, modifiers) => settle(() => rendererSetup.mockInput.pressKey(key, modifiers)),
+      pressKey: (key, modifiers) =>
+        settle(async () => {
+          if (key !== "ESCAPE" || options.kittyKeyboard) {
+            rendererSetup.mockInput.pressKey(key, modifiers);
+            return;
+          }
+          const parsed = Promise.withResolvers<void>();
+          const onKey = () => parsed.resolve();
+          const onDestroy = () => parsed.reject(new Error("Renderer closed before parsing Escape"));
+          rendererSetup.renderer.keyInput.prependOnceListener("keypress", onKey);
+          rendererSetup.renderer.once(CliRenderEvents.DESTROY, onDestroy);
+          try {
+            rendererSetup.mockInput.pressKey(key, modifiers);
+            await parsed.promise;
+          } finally {
+            rendererSetup.renderer.keyInput.off("keypress", onKey);
+            rendererSetup.renderer.off(CliRenderEvents.DESTROY, onDestroy);
+          }
+        }),
       typeText: (text) => settle(() => rendererSetup.mockInput.typeText(text)),
       paste: (text) => settle(() => rendererSetup.mockInput.pasteBracketedText(text)),
     };

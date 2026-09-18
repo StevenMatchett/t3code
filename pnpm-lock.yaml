@@ -606,6 +606,9 @@ importers:
       '@t3tools/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@t3tools/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112(patch_hash=8bef799f35729cf3465eb428196f617b434a7c9f658d56acb2874d74b21b98b2)
@@ -618,6 +621,9 @@ importers:
       scheduler:
         specifier: 'catalog:'
         version: 0.27.0
+      string-width:
+        specifier: 7.2.0
+        version: 7.2.0
       web-tree-sitter:
         specifier: 'catalog:'
         version: 0.25.10(@types/emscripten@1.41.5)

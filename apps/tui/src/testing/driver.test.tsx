@@ -121,6 +121,7 @@ describeWithNativeFfi("TUI test driver", () => {
   });
 
   it("unmounts React and disposes the registry once", async () => {
+    const consoleError = vi.spyOn(console, "error");
     const cleanup = vi.fn();
 
     function Harness() {
@@ -139,5 +140,6 @@ describeWithNativeFfi("TUI test driver", () => {
     expect(driver.renderer.isDestroyed).toBe(true);
     expect(cleanup).toHaveBeenCalledOnce();
     expect(dispose).toHaveBeenCalledOnce();
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });

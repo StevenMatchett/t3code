@@ -68,6 +68,40 @@ describe("TUI CLI options", () => {
     },
   );
 
+  it("attaches to existing environments unless a separate environment is explicit", () => {
+    expect(parseTuiCliArgs([], context)).toMatchObject({ action: "run", options: {} });
+    expect(parseTuiCliArgs(["--connect", "http://127.0.0.1:43110/"], context)).toMatchObject({
+      options: { connect: "http://127.0.0.1:43110" },
+    });
+    expect(parseTuiCliArgs(["--new-environment"], context)).toMatchObject({
+      options: { newEnvironment: true },
+    });
+    expect(
+      parseTuiCliArgs(["--connect", "http://127.0.0.1:43110", "--pair-stdin"], context),
+    ).toMatchObject({
+      options: { connect: "http://127.0.0.1:43110", pairStdin: true },
+    });
+  });
+
+  it.each(
+    [
+      ["--pair-stdin"],
+      ["--connect", "http://127.0.0.1:43110", "--new-environment"],
+      ["--new-environment", "--pair-stdin"],
+      ["--connect", "http://user:secret@example.test"],
+      ["--connect", "http://example.test/#token=secret"],
+      ["--connect", "http://example.test/?token=secret"],
+      ["--connect", "file:///tmp/environment"],
+    ].map((argv) => [argv] as const),
+  )("rejects ambiguous connection options without disclosing credentials: %j", (argv) => {
+    expect(() => parseTuiCliArgs(argv, context)).toThrow(TuiCliUsageError);
+    try {
+      parseTuiCliArgs(argv, context);
+    } catch (error) {
+      expect(String(error)).not.toContain("secret");
+    }
+  });
+
   it("builds a loopback-only child launch and replaces ambient location overrides", () => {
     const result = buildTuiLaunchOptions(
       { stateDir: "/tmp/tui-state", cwd: "/work/project", port: 43_112 },
@@ -77,6 +111,7 @@ describe("TUI CLI options", () => {
         env: {
           PATH: "/bin",
           T3CODE_HOME: "/users/tui/.t3",
+          T3CODE_TELEMETRY_ENABLED: "true",
           T3CODE_HOST: "0.0.0.0",
           T3CODE_TAILSCALE_SERVE: "true",
           T3CODE_BOOTSTRAP_FD: "9",
@@ -104,6 +139,7 @@ describe("TUI CLI options", () => {
     expect(result.start.env).toMatchObject({
       PATH: "/bin",
       T3CODE_HOME: "/tmp/tui-state",
+      T3CODE_TELEMETRY_ENABLED: "false",
       T3CODE_HOST: "127.0.0.1",
       T3CODE_TAILSCALE_SERVE: "false",
     });

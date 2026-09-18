@@ -27,10 +27,15 @@ owns only view state such as route, focus, open panels, selection, scroll anchor
 
 ## Local authentication
 
-First startup passes a bootstrap secret to the server child through an inherited descriptor. The
-client exchanges that secret for a scoped attach credential and then clears the bootstrap buffer.
-The bootstrap secret must not appear in argv, environment variables, logs, runtime state, or a
-file.
+Default startup attaches to an existing T3 Code environment so the TUI and installed clients share
+server-owned sessions and history. Initial pairing takes an explicitly supplied T3 credential from
+stdin and stores only the derived bearer. It neither copies the database nor borrows another client's
+credential.
+
+An explicitly requested separate environment passes a bootstrap secret to the server child through
+an inherited descriptor. The client exchanges that secret for a scoped attach credential and then
+clears the bootstrap buffer. The bootstrap secret must not appear in argv, environment variables,
+logs, runtime state, or a file.
 
 Later TUI processes use a protected, derived credential bound to the environment identity and
 origin. A missing or rejected credential enters repair state. It does not make a loopback server

@@ -13,12 +13,12 @@ export interface TuiLifecycleRenderEvents {
 export interface TuiLifecycleDependencies<Session, Runtime> {
   readonly shutdown: TuiShutdownController;
   readonly start: (signal: AbortSignal) => Promise<Session>;
-  readonly render: (events: TuiLifecycleRenderEvents) => Promise<Runtime>;
+  readonly render: (events: TuiLifecycleRenderEvents, session: Session) => Promise<Runtime>;
   readonly waitForChildExit: (session: Session) => Promise<TuiChildExit>;
   readonly drainChildOutput: (session: Session) => void;
   readonly closeRuntime: (runtime: Runtime) => Promise<void>;
   readonly clearBearer: (session: Session) => void;
-  readonly terminateChild: (session: Session) => void;
+  readonly terminateChild: (session: Session) => void | Promise<void>;
   readonly reportError: (error: unknown) => void;
 }
 
@@ -26,12 +26,12 @@ type LifecycleReason =
   | TuiShutdownReason
   | { readonly kind: "child-exit"; readonly exit: TuiChildExit };
 
-const signalExitCode = (signal: "SIGINT" | "SIGTERM"): number => (signal === "SIGINT" ? 130 : 143);
+const signalExitCodes = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } as const;
 
 function reasonExitCode(reason: LifecycleReason): number {
   switch (reason.kind) {
     case "signal":
-      return signalExitCode(reason.signal);
+      return signalExitCodes[reason.signal];
     case "fatal":
       return 1;
     case "child-exit":
@@ -50,10 +50,13 @@ export async function runTuiLifecycle<Session, Runtime>(
   try {
     session = await dependencies.start(dependencies.shutdown.abortController.signal);
     dependencies.drainChildOutput(session);
-    runtime = await dependencies.render({
-      onFatal: (error) => dependencies.shutdown.request({ kind: "fatal", error }),
-      onInterrupt: () => dependencies.shutdown.request({ kind: "signal", signal: "SIGINT" }),
-    });
+    runtime = await dependencies.render(
+      {
+        onFatal: (error) => dependencies.shutdown.request({ kind: "fatal", error }),
+        onInterrupt: () => dependencies.shutdown.request({ kind: "signal", signal: "SIGINT" }),
+      },
+      session,
+    );
 
     const reason = await Promise.race<LifecycleReason>([
       dependencies.shutdown.requested,
@@ -64,7 +67,7 @@ export async function runTuiLifecycle<Session, Runtime>(
   } catch (error) {
     const requested = dependencies.shutdown.reason;
     if (requested?.kind === "signal") {
-      exitCode = signalExitCode(requested.signal);
+      exitCode = signalExitCodes[requested.signal];
     } else {
       errors.push(requested?.kind === "fatal" ? requested.error : error);
       exitCode = 1;
@@ -86,7 +89,7 @@ export async function runTuiLifecycle<Session, Runtime>(
         exitCode = 1;
       }
       try {
-        dependencies.terminateChild(session);
+        await dependencies.terminateChild(session);
       } catch (error) {
         errors.push(error);
         exitCode = 1;

@@ -67,6 +67,21 @@ const missingCredential = () =>
   });
 
 describe("TuiLocalEnvironmentSupervisor", () => {
+  it.effect("requires pairing instead of starting a separate server in attach-only mode", () =>
+    Effect.gen(function* () {
+      const supervisor = yield* makeTuiLocalEnvironmentSupervisorWithOperations({
+        reattach: () => Effect.fail(missingCredential()),
+      });
+      const error = yield* supervisor.connect.pipe(Effect.flip);
+      assert.equal(error._tag, "TuiEnvironmentReattachError");
+      assert.deepEqual(yield* SubscriptionRef.get(supervisor.state), {
+        _tag: "Failed",
+        failure: "credential-missing",
+      });
+      yield* supervisor.release("terminate-owned");
+    }),
+  );
+
   it.effect("coalesces concurrent startup behind one captured child", () =>
     Effect.gen(function* () {
       const startEntered = yield* Deferred.make<void>();

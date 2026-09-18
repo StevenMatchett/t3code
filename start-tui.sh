@@ -15,10 +15,11 @@ node_runner=(npx --yes node@26.4.0)
 
 launch_args=("$@")
 has_port=false
-needs_server=true
+needs_server=false
 for argument in "$@"; do
   case "$argument" in
     --port | --port=*) has_port=true ;;
+    --new-environment) needs_server=true ;;
     -h | --help | -v | --version) needs_server=false ;;
   esac
 done

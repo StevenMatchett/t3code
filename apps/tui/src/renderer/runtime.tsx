@@ -1,5 +1,10 @@
 import { RegistryContext } from "@effect/atom-react";
-import { CliRenderEvents, createCliRenderer, type CliRenderer } from "@opentui/core";
+import {
+  CliRenderEvents,
+  createCliRenderer,
+  type CliRenderer,
+  type CliRendererErrorEvent,
+} from "@opentui/core";
 import { createRoot, type Root } from "@opentui/react";
 import type * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry";
 import { Component, type ErrorInfo, type ReactNode, useEffect } from "react";
@@ -63,6 +68,8 @@ export async function startRendererRuntime(
   let registryLifetimeMounted = false;
   let registryDisposed = false;
   let closePromise: Promise<void> | undefined;
+  let rendererDestroyed: Promise<void> | undefined;
+  let fatalErrorReported = false;
 
   const disposeRegistry = () => {
     if (registryDisposed) return;
@@ -87,31 +94,44 @@ export async function startRendererRuntime(
       }
 
       // OpenTUI defers final destruction when close is requested during a frame.
-      await Promise.resolve();
+      await rendererDestroyed;
       if (!registryLifetimeMounted) disposeRegistry();
     })();
     return closePromise;
   };
 
   const onFatalError = (error: Error, info: ErrorInfo) => {
-    try {
+    if (fatalErrorReported) return;
+    fatalErrorReported = true;
+    const report = (failure: Error) => {
       if (options.onError) {
-        options.onError(error, info);
+        options.onError(failure, info);
       } else {
-        process.stderr.write(`${error.stack ?? error.message}\n`);
+        process.stderr.write(`${failure.stack ?? failure.message}\n`);
       }
-    } finally {
-      queueMicrotask(() => void close());
-    }
+    };
+    queueMicrotask(() => {
+      void close().then(
+        () => report(error),
+        (cleanupError: unknown) =>
+          report(new AggregateError([error, cleanupError], "Renderer cleanup failed")),
+      );
+    });
   };
 
   try {
     renderer = await (options.createRenderer ?? createCliRenderer)();
     root = createRoot(renderer);
+    const destroyed = Promise.withResolvers<void>();
+    (renderer as DestroyEventRenderer).once(CliRenderEvents.DESTROY, destroyed.resolve);
+    rendererDestroyed = destroyed.promise;
 
     // createRoot registers its destroy listener first. RegistryLifetime is the
     // last child so its passive cleanup runs after the caller's effects.
     (renderer as DestroyEventRenderer).once(CliRenderEvents.DESTROY, unmount);
+    renderer.once(CliRenderEvents.RENDER_ERROR, ({ error }: CliRendererErrorEvent) =>
+      onFatalError(error, { componentStack: null }),
+    );
     root.render(
       <FatalErrorBoundary onError={onFatalError}>
         <RegistryContext.Provider value={options.registry}>
@@ -134,6 +154,7 @@ export async function startRendererRuntime(
       throw new AggregateError(
         [startError, cleanupError],
         "Renderer runtime failed to start and clean up",
+        { cause: cleanupError },
       );
     }
     throw startError;

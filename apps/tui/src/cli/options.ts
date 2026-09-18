@@ -13,6 +13,9 @@ export interface TuiCliOptions {
   readonly stateDir: string;
   readonly cwd: string;
   readonly port: number;
+  readonly connect?: string;
+  readonly pairStdin?: boolean;
+  readonly newEnvironment?: boolean;
 }
 
 export type TuiCliParseResult =
@@ -33,6 +36,12 @@ export interface TuiLaunchRuntime {
 
 export class TuiCliUsageError extends Error {
   override readonly name = "TuiCliUsageError";
+}
+
+export function formatTuiCliError(error: unknown): string {
+  return error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : "TUI failed with an unexpected error.";
 }
 
 function resolveCliPath(value: string, context: TuiCliParseContext): string {
@@ -74,6 +83,24 @@ function splitFlag(argument: string): readonly [name: string, inlineValue: strin
     : [argument.slice(0, equalsIndex), argument.slice(equalsIndex + 1)];
 }
 
+function parseConnectionOrigin(value: string): string {
+  const url = URL.parse(value);
+  if (
+    !url ||
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    url.search ||
+    url.pathname !== "/"
+  ) {
+    throw new TuiCliUsageError(
+      "--connect requires an HTTP(S) origin without credentials, a path, or a pairing token.",
+    );
+  }
+  return url.origin;
+}
+
 export function parseTuiCliArgs(
   argv: ReadonlyArray<string>,
   context: TuiCliParseContext,
@@ -81,6 +108,9 @@ export function parseTuiCliArgs(
   let stateDir: string | undefined;
   let cwd: string | undefined;
   let port: number | undefined;
+  let connect: string | undefined;
+  let pairStdin = false;
+  let newEnvironment = false;
   const seen = new Set<string>();
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -90,11 +120,26 @@ export function parseTuiCliArgs(
 
     if (name === "--help" || name === "-h") return { action: "help" };
     if (name === "--version" || name === "-v") return { action: "version" };
-    if (name !== "--state-dir" && name !== "--cwd" && name !== "--port") {
-      throw new TuiCliUsageError(`Unknown argument: ${argument}`);
+    if (
+      ![
+        "--state-dir",
+        "--cwd",
+        "--port",
+        "--connect",
+        "--pair-stdin",
+        "--new-environment",
+      ].includes(name)
+    ) {
+      throw new TuiCliUsageError("Unknown argument. Use --help to see supported options.");
     }
     if (seen.has(name)) throw new TuiCliUsageError(`${name} may only be supplied once`);
     seen.add(name);
+    if (name === "--pair-stdin" || name === "--new-environment") {
+      if (inlineValue !== undefined) throw new TuiCliUsageError(`${name} does not accept a value`);
+      if (name === "--pair-stdin") pairStdin = true;
+      else newEnvironment = true;
+      continue;
+    }
 
     const value = inlineValue ?? argv[index + 1];
     if (
@@ -116,9 +161,18 @@ export function parseTuiCliArgs(
       case "--port":
         port = parsePort(value);
         break;
+      case "--connect":
+        connect = parseConnectionOrigin(value);
+        break;
     }
   }
 
+  if (pairStdin && !connect) throw new TuiCliUsageError("--pair-stdin requires --connect <origin>");
+  if (newEnvironment && (connect || pairStdin)) {
+    throw new TuiCliUsageError(
+      "--new-environment cannot be combined with existing-environment options",
+    );
+  }
   const resolvedStateDir =
     stateDir ?? NodePath.resolve(context.homeDir, DEFAULT_TUI_STATE_DIRECTORY_NAME);
   assertSafeStateDirectory(resolvedStateDir, context);
@@ -128,6 +182,9 @@ export function parseTuiCliArgs(
       stateDir: resolvedStateDir,
       cwd: cwd ?? NodePath.resolve(context.cwd),
       port: port ?? DEFAULT_TUI_PORT,
+      ...(connect ? { connect } : {}),
+      ...(pairStdin ? { pairStdin } : {}),
+      ...(newEnvironment ? { newEnvironment } : {}),
     },
   };
 }
@@ -137,9 +194,13 @@ export function formatTuiCliHelp(context: TuiCliParseContext): string {
   return [
     "Usage: t3-tui [options]",
     "",
-    "Run the local T3 Code TUI prototype.",
+    "Attach the TUI prototype to your saved T3 Code environment.",
+    "Existing projects and threads stay on that server. The current UI is still a prototype.",
     "",
     "Options:",
+    "  --connect <origin>  Attach only to this HTTP(S) origin with its saved credential",
+    "  --pair-stdin        Read a T3 pairing link or token from stdin, save the connection, and exit",
+    "  --new-environment   Start a separate TUI environment instead of sharing T3 Code",
     `  --state-dir <path>  TUI state directory (default: ${defaultStateDir})`,
     `  --cwd <path>        Provider working directory (default: ${context.cwd})`,
     `  --port <port>       Loopback server port (default: ${DEFAULT_TUI_PORT})`,
@@ -159,6 +220,7 @@ export function buildTuiLaunchOptions(
     T3CODE_HOST: TUI_LOOPBACK_HOST,
     T3CODE_HOME: options.stateDir,
     T3CODE_NO_BROWSER: "true",
+    T3CODE_TELEMETRY_ENABLED: "false",
     T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
     T3CODE_TAILSCALE_SERVE: "false",
     T3CODE_TAILSCALE_SERVE_PORT: "443",

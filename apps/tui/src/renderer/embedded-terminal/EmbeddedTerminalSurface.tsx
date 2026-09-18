@@ -100,12 +100,24 @@ export const EmbeddedTerminalSurface = forwardRef<
   errorRef.current = onError;
 
   const dataQueueRef = useRef<TerminalDataQueue | null>(null);
-  if (dataQueueRef.current === null) {
-    dataQueueRef.current = createTerminalDataQueue(
-      (data, source) => writeRef.current(data, source),
-      (error) => errorRef.current?.(error),
-    );
-  }
+  const makeDataQueue = useCallback(
+    () =>
+      createTerminalDataQueue(
+        (data, source) => writeRef.current(data, source),
+        (error) => errorRef.current?.(error),
+      ),
+    [],
+  );
+  if (dataQueueRef.current === null) dataQueueRef.current = makeDataQueue();
+
+  useLayoutEffect(() => {
+    const queue = dataQueueRef.current ?? makeDataQueue();
+    dataQueueRef.current = queue;
+    return () => {
+      queue.dispose();
+      dataQueueRef.current = null;
+    };
+  }, [makeDataQueue]);
 
   const resizeHandlerRef = useRef<((cols: number, rows: number) => void) | null>(null);
   if (resizeHandlerRef.current === null) {
@@ -139,7 +151,7 @@ export const EmbeddedTerminalSurface = forwardRef<
   }, []);
 
   const handleData = useCallback((data: Uint8Array, source: EmbeddedTerminalDataSource) => {
-    dataQueueRef.current!.enqueue(data, source);
+    dataQueueRef.current?.enqueue(data, source);
   }, []);
 
   const handleKeyDown = useCallback((event: KeyEvent) => {
@@ -187,7 +199,7 @@ export const EmbeddedTerminalSurface = forwardRef<
         if (terminal === null) return;
 
         const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-        dataQueueRef.current!.enqueue(terminal.encodePaste(bytes), "input");
+        dataQueueRef.current?.enqueue(terminal.encodePaste(bytes), "input");
       },
       copySelection() {
         const terminal = terminalRef.current;
@@ -200,7 +212,7 @@ export const EmbeddedTerminalSurface = forwardRef<
             );
       },
       drainInput() {
-        return dataQueueRef.current!.drain();
+        return dataQueueRef.current?.drain() ?? Promise.resolve();
       },
     }),
     [],

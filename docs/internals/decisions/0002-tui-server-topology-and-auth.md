@@ -11,13 +11,20 @@ create a different trust model from every other T3 client.
 
 ## Decision
 
-Run the TUI and `apps/server` as separate processes. The TUI may start a loopback-only child server
-or connect to a compatible existing environment through authenticated HTTP and WebSocket RPC.
+Run the TUI and `apps/server` as separate processes. By default, attach to the user's existing T3
+Code environment through authenticated HTTP and WebSocket RPC. Both clients must use the same
+environment to share projects, threads, history, and running work. The TUI must not copy the live
+database, read another client's credentials, or launch another server against T3's state directory.
 
-First startup sends a bootstrap secret over an inherited descriptor. The client exchanges it for a
-scoped, environment-bound attach credential and clears the original buffer. Later clients use only
-the protected derived credential. Missing or rejected credentials enter repair state without
-killing the live server or starting a second server against the same state directory.
+First-time attachment exchanges an explicitly supplied T3 pairing credential for a scoped bearer
+session. Later launches use only the protected derived credential, bound to origin and environment
+identity. Missing or rejected credentials enter repair state without killing or replacing the server.
+HTTP redirects are rejected during discovery and authentication.
+
+A separate loopback-only environment requires `--new-environment` and uses its own state and
+credential directory. Only this path sends a bootstrap secret over an inherited descriptor. It
+exchanges that secret for a scoped attach credential and clears the original buffer. Existing T3
+servers remain externally owned and survive TUI exit.
 
 ## Alternatives considered
 

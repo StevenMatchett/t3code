@@ -163,12 +163,129 @@ describe("startRendererRuntime", () => {
     expect(disposeSpy).toHaveBeenCalledOnce();
   });
 
+  it("waits for an active frame to finish before resolving close", async () => {
+    const registry = makeRegistry();
+    const setup = await makeRenderer();
+    let runtime!: Awaited<ReturnType<typeof startRendererRuntime>>;
+    await act(async () => {
+      runtime = await startRendererRuntime({
+        registry,
+        children: <text>frame</text>,
+        createRenderer: async () => setup.renderer,
+      });
+    });
+    await setup.flush();
+
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const frame = async () => {
+      entered.resolve();
+      await release.promise;
+    };
+    setup.renderer.setFrameCallback(frame);
+    setup.renderer.requestRender();
+    const flushing = setup.flush();
+    await entered.promise;
+    let closed = false;
+    const closing = runtime.close().then(() => {
+      closed = true;
+    });
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(closed).toBe(false);
+    } finally {
+      release.resolve();
+      await act(async () => {
+        await flushing;
+        await closing;
+      });
+    }
+    expect(closed).toBe(true);
+    expect(registry.getNodes().size).toBe(0);
+  });
+
+  it("restores the terminal after a native render pass fails", async () => {
+    const registry = makeRegistry();
+    const setup = await makeRenderer();
+    const nativeError = new Error("native frame failed");
+    const errors: Error[] = [];
+    const fail = vi.fn(() => {
+      throw nativeError;
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(async () => {
+      await startRendererRuntime({
+        registry,
+        children: <text>native frame</text>,
+        createRenderer: async () => setup.renderer,
+        onError: (error) => errors.push(error),
+      });
+    });
+    await setup.flush();
+    vi.spyOn(setup.renderer.root, "render").mockImplementationOnce(fail);
+    setup.renderer.requestRender();
+    await act(async () => {
+      await setup.flush();
+    });
+    expect(fail).toHaveBeenCalledOnce();
+    expect(errors).toEqual([nativeError]);
+    expect(setup.renderer.isDestroyed).toBe(true);
+    expect(registry.getNodes().size).toBe(0);
+  });
+
+  it("releases atom listeners and effects across 100 mount/unmount cycles", async () => {
+    const valueAtom = Atom.make("live");
+    let mounted = 0;
+    function Value() {
+      const value = useAtomValue(valueAtom);
+      useEffect(() => {
+        mounted += 1;
+        return () => {
+          mounted -= 1;
+        };
+      }, []);
+      return <text>{value}</text>;
+    }
+    for (let cycle = 0; cycle < 100; cycle += 1) {
+      const registry = makeRegistry();
+      const setup = await makeRenderer();
+      let runtime!: Awaited<ReturnType<typeof startRendererRuntime>>;
+      await act(async () => {
+        runtime = await startRendererRuntime({
+          registry,
+          children: <Value />,
+          createRenderer: async () => setup.renderer,
+        });
+      });
+      await setup.flush();
+      const node = registry.getNodes().get(valueAtom)!;
+      expect(node.listeners.size).toBeGreaterThan(0);
+      expect(mounted).toBe(1);
+      await act(async () => {
+        registry.set(valueAtom, `cycle ${cycle}`);
+      });
+      await setup.flush();
+      expect(setup.captureCharFrame()).toContain(`cycle ${cycle}`);
+      await act(async () => {
+        await runtime.close();
+      });
+      expect(node.listeners.size).toBe(0);
+      expect(registry.getNodes().size).toBe(0);
+      expect(mounted).toBe(0);
+      activeRenderers.delete(setup.renderer);
+      activeRegistries.delete(registry);
+    }
+  });
+
   it("closes after a fatal React render error", async () => {
     const registry = makeRegistry();
     const disposeSpy = vi.spyOn(registry, "dispose");
     const setup = await makeRenderer();
     const renderError = new Error("render failed");
     const errors: Error[] = [];
+    const destroyedWhenReported: boolean[] = [];
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     function BrokenValue(): never {
@@ -180,12 +297,16 @@ describe("startRendererRuntime", () => {
         registry,
         children: <BrokenValue />,
         createRenderer: async () => setup.renderer,
-        onError: (error) => errors.push(error),
+        onError: (error) => {
+          destroyedWhenReported.push(setup.renderer.isDestroyed);
+          errors.push(error);
+        },
       });
     });
     await Promise.resolve();
 
     expect(errors).toEqual([renderError]);
+    expect(destroyedWhenReported).toEqual([true]);
     expect(setup.renderer.isDestroyed).toBe(true);
     expect(disposeSpy).toHaveBeenCalledOnce();
     consoleError.mockRestore();

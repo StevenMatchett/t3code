@@ -8,11 +8,12 @@ import {
 import {
   isToolLifecycleItemType,
   type OrchestrationMessage,
-  type OrchestrationThread,
+  type OrchestrationCheckpointSummary,
   type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 
 import { normalizeTerminalText, type TerminalTextOptions } from "./terminalText.ts";
+import { toolActivityDetails } from "./activityDetails.ts";
 
 export type TimelineMessageKind = "user" | "assistant" | "system";
 export type TimelineActivityKind = "reasoning" | "tool" | "error" | "activity";
@@ -40,13 +41,23 @@ export interface TimelineActivityRow extends TimelineRowBase<TimelineActivityKin
   readonly detail?: string;
   readonly toolCallId?: string;
   readonly status?: WorkLogToolLifecycleStatus;
+  readonly command?: string;
+  readonly toolName?: string;
+  readonly files?: readonly string[];
 }
 
-export type TimelineRow = TimelineMessageRow | TimelineActivityRow;
+export interface TimelineChangesRow extends TimelineRowBase<"changes"> {
+  readonly source: "checkpoint";
+  readonly status: OrchestrationCheckpointSummary["status"];
+  readonly files: OrchestrationCheckpointSummary["files"];
+}
+
+export type TimelineRow = TimelineMessageRow | TimelineActivityRow | TimelineChangesRow;
 
 export interface RecordedThreadTimeline {
   readonly messages: ReadonlyArray<OrchestrationMessage>;
   readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly checkpoints?: ReadonlyArray<OrchestrationCheckpointSummary>;
 }
 
 export interface TimelineProjectionOptions extends TerminalTextOptions {}
@@ -201,7 +212,14 @@ function activityRow(
   const rawToolCallId = extractToolCallId(payload);
   const text = normalizeTerminalText(activity.summary, options);
   const detail = activityDetail(kind, text, payload, options);
-  const status = extractWorkLogToolLifecycleStatus(payload);
+  const tool = toolActivityDetails(payload);
+  const status =
+    extractWorkLogToolLifecycleStatus(payload) ??
+    (activity.kind === "tool.completed"
+      ? "completed"
+      : activity.kind === "tool.started"
+        ? "inProgress"
+        : undefined);
   const safeActivityKind = safeInlineText(activity.kind, options) || "unknown";
   const safeToolCallId = rawToolCallId
     ? safeInlineText(rawToolCallId, { ...options, maxLineLength: 256 })
@@ -223,6 +241,9 @@ function activityRow(
     ...(activity.sequence === undefined ? {} : { sequence: activity.sequence }),
     ...(detail === undefined ? {} : { detail }),
     ...(safeToolCallId ? { toolCallId: safeToolCallId } : {}),
+    ...(tool.command ? { command: tool.command } : {}),
+    ...(tool.name ? { toolName: tool.name } : {}),
+    ...(tool.files.length ? { files: tool.files } : {}),
     ...(status === undefined ? {} : { status }),
   };
 }
@@ -267,6 +288,11 @@ function collapseToolLifecycle(rows: ReadonlyArray<TimelineActivityRow>): Timeli
       activityTone: row.activityTone,
       ...(row.detail === undefined ? {} : { detail: row.detail }),
       ...(row.status === undefined ? {} : { status: row.status }),
+      ...(row.command === undefined ? {} : { command: row.command }),
+      ...(row.toolName === undefined ? {} : { toolName: row.toolName }),
+      ...(previous.files?.length || row.files?.length
+        ? { files: [...new Set([...(previous.files ?? []), ...(row.files ?? [])])] }
+        : {}),
     };
   }
 
@@ -281,6 +307,7 @@ const timelineKindRank: Readonly<Record<TimelineRow["kind"], number>> = {
   activity: 4,
   error: 5,
   assistant: 6,
+  changes: 7,
 };
 
 function compareRows(left: TimelineRow, right: TimelineRow): number {
@@ -304,7 +331,7 @@ function compareRows(left: TimelineRow, right: TimelineRow): number {
 
 /** Projects a recorded normalized thread into stable, renderer-neutral terminal rows. */
 export function projectRecordedThreadTimeline(
-  thread: RecordedThreadTimeline | Pick<OrchestrationThread, "messages" | "activities">,
+  thread: RecordedThreadTimeline,
   options: TimelineProjectionOptions = {},
 ): ReadonlyArray<TimelineRow> {
   const messages = deduplicateMessages(thread.messages).map((message) =>
@@ -314,5 +341,30 @@ export function projectRecordedThreadTimeline(
   const activities = collapseToolLifecycle(
     orderedActivities.map((activity) => activityRow(activity, options)),
   );
-  return [...messages, ...activities].toSorted(compareRows);
+  const byTurn = new Map<string, OrchestrationCheckpointSummary>();
+  for (const checkpoint of thread.checkpoints ?? []) {
+    const previous = byTurn.get(checkpoint.turnId);
+    if (!previous || checkpoint.completedAt.localeCompare(previous.completedAt) >= 0)
+      byTurn.set(checkpoint.turnId, checkpoint);
+  }
+  const changes: TimelineChangesRow[] = [...byTurn.values()]
+    .filter((checkpoint) => checkpoint.files.length > 0 || checkpoint.status !== "ready")
+    .map((checkpoint) => ({
+      id: encodedRowId("changes", checkpoint.turnId),
+      source: "checkpoint",
+      kind: "changes",
+      turnId: checkpoint.turnId,
+      createdAt: checkpoint.completedAt,
+      status: checkpoint.status,
+      files: [
+        ...new Map(
+          checkpoint.files.map((file) => [
+            file.path,
+            { ...file, path: safeInlineText(file.path, options) },
+          ]),
+        ).values(),
+      ],
+      text: `Turn ${checkpoint.checkpointTurnCount} file changes`,
+    }));
+  return [...messages, ...activities, ...changes].toSorted(compareRows);
 }

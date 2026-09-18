@@ -8,6 +8,7 @@ export interface SemanticTheme {
   readonly muted: string;
   readonly panel: string;
   readonly success: string;
+  readonly selection: string;
   readonly text: string;
   readonly warning: string;
 }
@@ -22,6 +23,7 @@ export const defaultTheme: SemanticTheme = Object.freeze({
   muted: "#8b949e",
   panel: "#0d1117",
   success: "#3fb950",
+  selection: "#1c2e45",
   text: "#e6edf3",
   warning: "#d29922",
 });

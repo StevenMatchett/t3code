@@ -17,7 +17,7 @@ const UiContext = createContext(defaultUiContext);
 
 export interface UiProviderProps {
   readonly capabilities?: TerminalCapabilities;
-  readonly children: ReactNode;
+  readonly children?: ReactNode;
   readonly theme?: SemanticTheme;
 }
 

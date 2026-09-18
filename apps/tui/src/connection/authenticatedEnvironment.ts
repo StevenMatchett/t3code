@@ -30,6 +30,7 @@ import * as Socket from "effect/unstable/socket/Socket";
 
 import {
   startBootstrapChild,
+  BootstrapSecretClearedError,
   type BootstrapChildStartError,
   type OwnedBootstrapChild,
   type StartBootstrapChildOptions,
@@ -149,7 +150,7 @@ export interface WaitForTuiEnvironmentReadyOptions {
 }
 
 export interface ConnectAuthenticatedTuiEnvironmentOptions {
-  readonly child: OwnedBootstrapChild;
+  readonly child: Pick<OwnedBootstrapChild, "useBootstrapToken" | "clearBootstrapSecret">;
   readonly readiness: TuiEnvironmentReadiness;
   readonly credentialStore?: TuiCredentialStore;
   readonly fetch?: typeof globalThis.fetch;
@@ -184,11 +185,11 @@ export class TuiEnvironmentReattachError extends Schema.TaggedError<TuiEnvironme
   override get message(): string {
     switch (this.failure) {
       case "missing":
-        return "No saved local environment session exists. Start a new TUI-owned environment to create one.";
+        return "No saved T3 connection exists. Pair with your existing T3 environment using --connect <origin> --pair-stdin. Use --new-environment only for a separate environment.";
       case "rejected":
-        return "The saved local environment session was rejected. Start a new TUI-owned environment to replace it.";
+        return "The saved T3 connection was rejected or is unavailable. Check the existing server and pair again if needed. No server was started or stopped.";
       case "unsafe":
-        return "The saved local environment session is not safe to read. Fix its ownership and permissions, or remove it and start a new TUI-owned environment.";
+        return "The saved T3 credential has unsafe ownership or permissions. Repair the credential file before attaching. No server was started or stopped.";
     }
   }
 }
@@ -219,6 +220,10 @@ export function normalizeTuiHttpOrigin(httpBaseUrl: string): string {
   return url.origin;
 }
 
+function withoutRedirects(fetch: typeof globalThis.fetch): typeof globalThis.fetch {
+  return (input, init) => fetch(input, { ...init, redirect: "error" });
+}
+
 export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEnvironmentReady")(
   function* (
     options: WaitForTuiEnvironmentReadyOptions,
@@ -233,7 +238,9 @@ export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEn
       try: () => normalizeTuiHttpOrigin(options.httpBaseUrl),
       catch: () => new TuiEnvironmentConnectionError({ phase: "readiness" }),
     });
-    const httpClientLayer = remoteHttpClientLayer(options.fetch ?? globalThis.fetch);
+    const httpClientLayer = remoteHttpClientLayer(
+      withoutRedirects(options.fetch ?? globalThis.fetch),
+    );
     const probe = fetchRemoteEnvironmentDescriptor({
       httpBaseUrl,
       timeoutMs: probeTimeoutMs,
@@ -365,7 +372,7 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
 ): Effect.fn.Return<AuthenticatedTuiEnvironment, TuiEnvironmentConnectionError> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const httpBaseUrl = options.readiness.httpBaseUrl;
-  const fetch = options.fetch ?? globalThis.fetch;
+  const fetch = withoutRedirects(options.fetch ?? globalThis.fetch);
 
   return yield* Effect.gen(function* () {
     const accessToken = yield* options.child
@@ -424,6 +431,46 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
   }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
 });
 
+export const pairExistingTuiEnvironment = Effect.fn("tui.connection.pairExistingTuiEnvironment")(
+  function* (options: {
+    readonly httpBaseUrl: string;
+    readonly credential: Uint8Array;
+    readonly credentialStore: TuiCredentialStore;
+    readonly fetch?: typeof globalThis.fetch;
+    readonly webSocketConstructor?: WebSocketConstructor;
+  }) {
+    const secret = new TuiBearerSession(decoder.decode(options.credential).trim(), 0);
+    options.credential.fill(0);
+    return yield* Effect.gen(function* () {
+      const readiness = yield* waitForTuiEnvironmentReady({
+        httpBaseUrl: options.httpBaseUrl,
+        maxAttempts: 1,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      });
+      const connected = yield* connectAuthenticatedTuiEnvironment({
+        child: {
+          useBootstrapToken: (use) =>
+            secret
+              .use(use)
+              .pipe(
+                Effect.catchTag("TuiBearerSessionClearedError", () =>
+                  Effect.fail(new BootstrapSecretClearedError()),
+                ),
+              ),
+          clearBootstrapSecret: () => secret.clear(),
+        },
+        readiness,
+        credentialStore: options.credentialStore,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+        ...(options.webSocketConstructor
+          ? { webSocketConstructor: options.webSocketConstructor }
+          : {}),
+      });
+      return { ...connected, readiness };
+    }).pipe(Effect.ensuring(Effect.sync(() => secret.clear())));
+  },
+);
+
 export const reattachAuthenticatedTuiEnvironment = Effect.fn(
   "tui.connection.reattachAuthenticatedTuiEnvironment",
 )(function* (
@@ -457,7 +504,7 @@ export const reattachAuthenticatedTuiEnvironment = Effect.fn(
   }
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-  const fetch = options.fetch ?? globalThis.fetch;
+  const fetch = withoutRedirects(options.fetch ?? globalThis.fetch);
   const descriptor = yield* fetchRemoteEnvironmentDescriptor({
     httpBaseUrl: stored.httpOrigin,
     timeoutMs,
