@@ -12,6 +12,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationThread,
   type OrchestrationThreadShell,
+  type UploadChatImageAttachment,
 } from "@t3tools/contracts";
 import {
   AVAILABLE_CONNECTION_STATE,
@@ -23,7 +24,11 @@ import {
   type EnvironmentThreadState,
 } from "@t3tools/client-runtime/state/threads";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import {
+  EMPTY_TERMINAL_BUFFER_STATE,
+  type TerminalBufferState,
+} from "@t3tools/client-runtime/state/terminal";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { makeNewThreadActions, type CreateThreadCommand } from "../features/chat/newThread.ts";
 import type { ProviderCatalog } from "../features/chat/providerChoices.ts";
@@ -34,6 +39,7 @@ const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "g
 
 export function makeClientFixture(
   dispatch: (command: TuiThreadCommand) => Promise<boolean> = async () => true,
+  loadImageAttachment?: (path: string) => Promise<UploadChatImageAttachment>,
 ) {
   const projects: OrchestrationProjectShell[] = ["Alpha", "Beta"].map((title) => ({
     id: ProjectId.make(title.toLowerCase()),
@@ -175,6 +181,7 @@ export function makeClientFixture(
       }
       return accepted;
     },
+    ...(loadImageAttachment ? { loadImageAttachment } : {}),
   });
   const settings = Atom.make<ServerSettings | null>({
     ...DEFAULT_SERVER_SETTINGS,
@@ -182,6 +189,67 @@ export function makeClientFixture(
   });
   const creationCommands: CreateThreadCommand[] = [];
   const worktreeRequests: VcsCreateWorktreeInput[] = [];
+  const terminalWrites: string[] = [];
+  const terminalAttachInputs: Array<{
+    readonly threadId: string;
+    readonly terminalId: string;
+    readonly cwd: string;
+    readonly worktreePath: string | null;
+  }> = [];
+  const terminalCloseInputs: Array<{
+    readonly threadId?: string;
+    readonly terminalId?: string;
+    readonly deleteHistory?: boolean;
+  }> = [];
+  const terminalMetadata = Atom.make(AsyncResult.success([]));
+  const terminalBuffer = Atom.make(
+    AsyncResult.success<TerminalBufferState>({
+      ...EMPTY_TERMINAL_BUFFER_STATE,
+      status: "running",
+    }),
+  );
+  const terminalSuccess = { run: async () => AsyncResult.success(undefined) };
+  const terminals = {
+    metadata: () => terminalMetadata,
+    attach: (request: {
+      readonly input: {
+        readonly threadId: string;
+        readonly terminalId: string;
+        readonly cwd?: string;
+        readonly worktreePath?: string | null;
+      };
+    }) => {
+      terminalAttachInputs.push({
+        threadId: request.input.threadId,
+        terminalId: request.input.terminalId,
+        cwd: request.input.cwd!,
+        worktreePath: request.input.worktreePath ?? null,
+      });
+      return terminalBuffer;
+    },
+    write: {
+      run: async (_registry: unknown, request: { readonly input: { readonly data: string } }) => {
+        terminalWrites.push(request.input.data);
+        return AsyncResult.success(undefined);
+      },
+    },
+    resize: terminalSuccess,
+    close: {
+      run: async (
+        _registry: unknown,
+        request: {
+          readonly input: {
+            readonly threadId?: string;
+            readonly terminalId?: string;
+            readonly deleteHistory?: boolean;
+          };
+        },
+      ) => {
+        terminalCloseInputs.push(request.input);
+        return AsyncResult.success(undefined);
+      },
+    },
+  } as unknown as NonNullable<TuiClient["terminals"]>;
   const newThreads = makeNewThreadActions({
     shell,
     connection,
@@ -245,6 +313,7 @@ export function makeClientFixture(
     newThreads,
     settings,
     providers,
+    terminals,
     refreshProvider: async () => true,
     retry: async () => {},
     loadOlder: () => false,
@@ -262,5 +331,9 @@ export function makeClientFixture(
     settings,
     creationCommands,
     worktreeRequests,
+    terminalWrites,
+    terminalAttachInputs,
+    terminalBuffer,
+    terminalCloseInputs,
   };
 }

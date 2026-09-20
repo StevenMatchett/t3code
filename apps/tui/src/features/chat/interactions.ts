@@ -2,6 +2,7 @@ import {
   CommandId,
   MessageId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type ApprovalRequestId,
   type ClientOrchestrationCommand,
   type OrchestrationThread,
@@ -10,6 +11,7 @@ import {
   type ServerProviderSkill,
   type ProviderApprovalDecision,
   type ThreadId,
+  type UploadChatImageAttachment,
 } from "@t3tools/contracts";
 import {
   derivePendingRequests,
@@ -32,6 +34,7 @@ import * as Encoding from "effect/Encoding";
 import * as Predicate from "effect/Predicate";
 import * as Option from "effect/Option";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { loadImageAttachment as loadImageAttachmentFromDisk } from "./imageAttachments.ts";
 
 export type TuiThreadCommand = Extract<
   ClientOrchestrationCommand,
@@ -51,9 +54,17 @@ interface ReplyReceipt {
   readonly kind: "approval" | "user-input";
   readonly failureId: string | null;
 }
+interface PastedText {
+  readonly id: string;
+  readonly marker: string;
+  readonly text: string;
+}
 export interface ThreadInteractionState {
   readonly draft: string;
+  readonly pastes: readonly PastedText[];
   readonly pending: "send" | "stop" | "reply" | "model" | null;
+  readonly attachmentPending: boolean;
+  readonly attachments: readonly UploadChatImageAttachment[];
   readonly modelPending: ModelSelection | null;
   readonly skill: {
     readonly instanceId: ProviderInstanceId;
@@ -64,16 +75,21 @@ export interface ThreadInteractionState {
   readonly error: string | null;
   readonly notice: string | null;
   readonly attempt: PromptCommand | null;
+  readonly attemptDraft: string | null;
   readonly replies: readonly ReplyReceipt[];
 }
 const initial: ThreadInteractionState = {
   draft: "",
+  pastes: [],
   pending: null,
+  attachmentPending: false,
+  attachments: [],
   modelPending: null,
   skill: null,
   error: null,
   notice: null,
   attempt: null,
+  attemptDraft: null,
   replies: [],
 };
 
@@ -132,7 +148,28 @@ export function makeThreadInteractions(options: {
     registry: AtomRegistry.AtomRegistry,
     command: TuiThreadCommand,
   ) => Promise<boolean>;
+  readonly loadImageAttachment?: typeof loadImageAttachmentFromDisk;
 }) {
+  const expandPastes = (draft: string, pastes: readonly PastedText[]) => {
+    let text = draft;
+    let from = 0;
+    for (const paste of pastes) {
+      const index = text.indexOf(paste.marker, from);
+      if (index < 0) continue;
+      text = `${text.slice(0, index)}${paste.text}${text.slice(index + paste.marker.length)}`;
+      from = index + paste.text.length;
+    }
+    return text;
+  };
+  const retainedPastes = (draft: string, pastes: readonly PastedText[]) => {
+    let from = 0;
+    return pastes.filter((paste) => {
+      const index = draft.indexOf(paste.marker, from);
+      if (index < 0) return false;
+      from = index + paste.marker.length;
+      return true;
+    });
+  };
   const state = Atom.family((_threadId: ThreadId) =>
     Atom.make<ThreadInteractionState>(initial).pipe(Atom.keepAlive),
   );
@@ -218,10 +255,17 @@ export function makeThreadInteractions(options: {
         ...(sent
           ? {
               attempt: null,
+              attemptDraft: null,
               error: null,
               notice: "Prompt accepted.",
-              draft: current.draft === current.attempt?.message.text ? "" : current.draft,
-              skill: current.draft === current.attempt?.message.text ? null : current.skill,
+              draft: current.draft === current.attemptDraft ? "" : current.draft,
+              pastes: current.draft === current.attemptDraft ? [] : current.pastes,
+              attachments:
+                current.attachments.map((attachment) => attachment.id).join("\0") ===
+                current.attempt?.message.attachments.map((attachment) => attachment.id).join("\0")
+                  ? []
+                  : current.attachments,
+              skill: current.draft === current.attemptDraft ? null : current.skill,
             }
           : {}),
       });
@@ -252,11 +296,76 @@ export function makeThreadInteractions(options: {
   return {
     state,
     setDraft: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId, draft: string) => {
-      const skill = registry.get(state(threadId)).skill;
+      const current = registry.get(state(threadId));
+      const skill = current.skill;
       update(registry, threadId, {
         draft,
+        pastes: retainedPastes(draft, current.pastes),
         skill: skill && draft.startsWith(skill.prefix) ? skill : null,
       });
+    },
+    addPaste: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId, text: string) => {
+      const characters = Array.from(text).length;
+      if (characters <= 200) return false;
+      const current = registry.get(state(threadId));
+      const marker = `[paste ${characters} characters]`;
+      const id = Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16)));
+      update(registry, threadId, {
+        draft: `${current.draft}${marker}`,
+        pastes: [...current.pastes, { id, marker, text }],
+        error: null,
+        notice: null,
+      });
+      return true;
+    },
+    attachImages: async (
+      registry: AtomRegistry.AtomRegistry,
+      threadId: ThreadId,
+      paths: readonly string[],
+    ) => {
+      const current = registry.get(state(threadId));
+      if (current.pending || current.attachmentPending || paths.length === 0) return false;
+      if (current.attachments.length + paths.length > PROVIDER_SEND_TURN_MAX_ATTACHMENTS)
+        return error(
+          registry,
+          threadId,
+          `A prompt can include up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images.`,
+        );
+      update(registry, threadId, { attachmentPending: true, error: null, notice: null });
+      try {
+        const loadImageAttachment = options.loadImageAttachment ?? loadImageAttachmentFromDisk;
+        const attachments = await Promise.all(paths.map(loadImageAttachment));
+        update(registry, threadId, {
+          attachments: [...registry.get(state(threadId)).attachments, ...attachments],
+          notice:
+            attachments.length === 1
+              ? `Added [Image #${current.attachments.length + 1}].`
+              : `Added ${attachments.length} images.`,
+        });
+        return true;
+      } catch (cause) {
+        return error(
+          registry,
+          threadId,
+          cause instanceof Error ? cause.message : "The image could not be attached.",
+        );
+      } finally {
+        update(registry, threadId, { attachmentPending: false });
+      }
+    },
+    removeAttachment: (
+      registry: AtomRegistry.AtomRegistry,
+      threadId: ThreadId,
+      attachmentId: string,
+    ) => {
+      const current = registry.get(state(threadId));
+      if (current.pending || current.attachmentPending) return false;
+      const attachments = current.attachments.filter(
+        (attachment) => attachment.id !== attachmentId,
+      );
+      if (attachments.length === current.attachments.length) return false;
+      update(registry, threadId, { attachments, error: null, notice: "Image removed." });
+      return true;
     },
     observe,
     selectSkill: (
@@ -363,6 +472,8 @@ export function makeThreadInteractions(options: {
       if (!thread) return false;
       if (current.modelPending)
         return error(registry, threadId, "Waiting for the server's model update before sending.");
+      if (current.attachmentPending)
+        return error(registry, threadId, "Wait for the image to finish loading before sending.");
       if (current.skill) {
         const { provider, cwd } = providerContext(registry, thread);
         if (
@@ -378,10 +489,17 @@ export function makeThreadInteractions(options: {
             "The selected skill is no longer available here. Remove its prefix or choose it again.",
           );
       }
-      if (!current.draft.trim()) return error(registry, threadId, "Write a prompt first.");
-      if (current.draft.length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS)
+      if (!current.draft.trim() && current.attachments.length === 0)
+        return error(registry, threadId, "Write a prompt or attach an image first.");
+      const messageText = expandPastes(current.draft, current.pastes);
+      if (messageText.length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS)
         return error(registry, threadId, "The prompt exceeds the server's input limit.");
-      const retry = current.attempt?.message.text === current.draft ? current.attempt : null;
+      const retry =
+        current.attempt?.message.text === messageText &&
+        current.attempt.message.attachments.map((attachment) => attachment.id).join("\0") ===
+          current.attachments.map((attachment) => attachment.id).join("\0")
+          ? current.attempt
+          : null;
       if (!retry && thread.latestTurn?.state === "running")
         return error(
           registry,
@@ -404,14 +522,14 @@ export function makeThreadInteractions(options: {
             Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16))),
           ),
           role: "user",
-          text: current.draft,
-          attachments: [],
+          text: messageText,
+          attachments: [...current.attachments],
         },
         modelSelection: thread.modelSelection,
         runtimeMode: thread.runtimeMode,
         interactionMode: thread.interactionMode,
       };
-      update(registry, threadId, { attempt: command });
+      update(registry, threadId, { attempt: command, attemptDraft: current.draft });
       if (!(await run(registry, command, "send"))) {
         observe(registry, threadId);
         return false;
@@ -419,8 +537,11 @@ export function makeThreadInteractions(options: {
       const latest = registry.get(state(threadId));
       update(registry, threadId, {
         attempt: null,
+        attemptDraft: null,
         notice: "Prompt accepted.",
-        draft: latest.draft === command.message.text ? "" : latest.draft,
+        draft: latest.draft === current.draft ? "" : latest.draft,
+        pastes: latest.draft === current.draft ? [] : latest.pastes,
+        attachments: [],
         skill: latest.draft === command.message.text ? null : latest.skill,
       });
       return true;

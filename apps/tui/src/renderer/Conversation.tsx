@@ -1,5 +1,6 @@
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
+import { decodePasteBytes } from "@opentui/core";
+import { useKeyboard, usePaste } from "@opentui/react";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useMemo, useState, useContext, useEffect } from "react";
@@ -9,11 +10,15 @@ import { ComposerControls } from "./ProviderPicker.tsx";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { projectRecordedThreadTimeline } from "../features/chat/timeline.ts";
 import { threadActivityPhase } from "../features/chat/threadActivity.ts";
+import { pastedImagePaths } from "../features/chat/imageAttachments.ts";
+import { suggestedReplies as parseSuggestedReplies } from "../features/chat/suggestedReplies.ts";
 import { ThreadActivityIndicator } from "../ui/ThreadActivityIndicator.tsx";
 import { conversationLines } from "../ui/conversationLines.ts";
+import { ConversationText } from "../ui/ShellCommandText.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
+import { ThreadTerminal } from "./ThreadTerminal.tsx";
 
 export function Conversation({
   client,
@@ -43,20 +48,41 @@ export function Conversation({
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
   const [mode, setMode] = useState<"history" | "composer" | "requests">("history");
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const requests = useMemo(() => derivePendingRequests(thread?.activities ?? []), [thread]);
   const requestCount = requests.approvals.length + requests.userInputs.length;
+  const latestMessage = thread?.messages.at(-1);
+  const suggestedReplies =
+    requestCount === 0 &&
+    latestMessage?.role === "assistant" &&
+    !latestMessage.streaming &&
+    thread?.latestTurn?.state !== "running"
+      ? parseSuggestedReplies(latestMessage.text)
+      : [];
+  usePaste((event) => {
+    if (!active) return;
+    const text = decodePasteBytes(event.bytes);
+    const paths = pastedImagePaths(text);
+    if (!paths && !client.actions.addPaste(registry, threadId, text)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setMode("composer");
+    if (paths) void client.actions.attachImages(registry, threadId, paths);
+  });
   useEffect(() => {
     if (thread) client.actions.observe(registry, thread.id);
   }, [client, registry, thread]);
   const hints =
     mode === "composer"
-      ? "Enter Send  / Skills  Tab Model/options  Esc History"
+      ? suggestedReplies.length
+        ? "Arrows Choose reply  Enter Select  Tab Model  Esc History"
+        : "Enter Send  / Skills  Tab Model/options  Ctrl+T Shell  Esc History"
       : mode === "requests"
         ? "Up/Down Select  Enter Review  Esc Back  PgUp/PgDn Details"
         : width < 58
-          ? "Enter Write  A Requests  Esc Back  ? Help"
-          : "Enter Write  Click Model/options  A Requests  Esc Back  ? Help";
+          ? "Enter Write  A Requests  Ctrl+T Shell  Esc Back"
+          : "Enter Write  A Requests  Ctrl+T Shell  Esc Back  ? Help";
   useEffect(() => {
     onHintsChange?.(hints);
   }, [hints, onHintsChange]);
@@ -66,12 +92,14 @@ export function Conversation({
       : interaction.draft
         ? 2
         : 1;
+  const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
+  const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;
   const gap = height >= 12 ? 1 : 0;
   const count = Math.max(
     1,
     height -
       1 -
-      (editorHeight + 3) -
+      (editorHeight + attachmentHeight + suggestedReplyHeight + 3) -
       gap -
       (interaction.error ? 1 : 0) -
       (thread?.worktreePath ? 1 : 0),
@@ -108,6 +136,13 @@ export function Conversation({
   };
   useKeyboard((key) => {
     if (!active) return;
+    if (key.ctrl && key.name === "t" && !terminalOpen && client.terminals) {
+      key.preventDefault();
+      key.stopPropagation();
+      setTerminalOpen(true);
+      return;
+    }
+    if (terminalOpen) return;
     if (key.ctrl && key.name === "x") {
       key.preventDefault();
       key.stopPropagation();
@@ -203,6 +238,23 @@ export function Conversation({
         live,
       )
     : "stale";
+  const project = Option.getOrNull(shell.snapshot)?.projects.find(
+    (item) => item.id === thread?.projectId,
+  );
+  const terminalCwd = thread?.worktreePath ?? project?.workspaceRoot ?? null;
+  if (terminalOpen && client.terminals && terminalCwd)
+    return (
+      <ThreadTerminal
+        client={client}
+        environmentId={client.environmentId}
+        threadId={threadId}
+        cwd={terminalCwd}
+        worktreePath={thread?.worktreePath ?? null}
+        active={active}
+        {...(onHintsChange ? { onHintsChange } : {})}
+        onBack={() => setTerminalOpen(false)}
+      />
+    );
   if (mode === "requests")
     return (
       <Panel
@@ -250,18 +302,9 @@ export function Conversation({
         {lines.length === 0 ? (
           <Text tone="muted">{empty}</Text>
         ) : (
-          lines.slice(start, start + count).map((line) => (
-            <Text
-              key={`${line.id}:${line.line}`}
-              height={1}
-              flexShrink={0}
-              wrapMode="none"
-              tone={line.tone}
-              strong={line.strong}
-            >
-              {line.text}
-            </Text>
-          ))
+          lines
+            .slice(start, start + count)
+            .map((line) => <ConversationText key={`${line.id}:${line.line}`} line={line} />)
         )}
       </Stack>
       {interaction.error ? (
@@ -276,6 +319,7 @@ export function Conversation({
         active={active}
         focused={mode === "composer"}
         editorHeight={editorHeight}
+        suggestedReplies={suggestedReplies}
         availableHeight={height - 1}
         onActivate={() => setMode("composer")}
         onBlur={() => setMode("history")}

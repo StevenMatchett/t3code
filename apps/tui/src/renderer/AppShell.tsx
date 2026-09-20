@@ -1,7 +1,14 @@
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import {
+  useKeyboard,
+  useRenderer,
+  useSelectionHandler,
+  useTerminalDimensions,
+} from "@opentui/react";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
-import { useMemo, useContext, useState } from "react";
+import { useMemo, useContext, useEffect, useState } from "react";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { AppShellView, useAppShellState } from "../app/AppShell.tsx";
 import { shellCommandFromKey, type ShellRoute, type ShellState } from "../app/state.ts";
@@ -17,12 +24,39 @@ export interface AppShellProps {
 }
 
 export function AppShell({ client, initialRoute = "projects", onStateChange }: AppShellProps) {
+  const renderer = useRenderer();
   const shell = useAtomValue(client.shell);
   const connection = useAtomValue(client.connection);
   const registry = useContext(RegistryContext);
   const { width, height } = useTerminalDimensions();
   const layout = calculateShellLayout(width, height);
   const [hints, setHints] = useState("");
+  const [copyNotice, setCopyNotice] = useState<{
+    readonly text: string;
+    readonly failed: boolean;
+  } | null>(null);
+  useSelectionHandler((selection) => {
+    const text = selection.getSelectedText();
+    if (!text) return;
+    const copied = renderer.copyToClipboardOSC52(text);
+    setCopyNotice({
+      text: copied ? "Copied to clipboard." : "Copy unavailable in this terminal.",
+      failed: !copied,
+    });
+  });
+  useEffect(() => {
+    if (!copyNotice) return;
+    const fiber = Effect.runFork(
+      Effect.sleep("2 seconds").pipe(
+        Effect.andThen(
+          Effect.sync(() => setCopyNotice((current) => (current === copyNotice ? null : current))),
+        ),
+      ),
+    );
+    return () => {
+      Effect.runFork(Fiber.interrupt(fiber));
+    };
+  }, [copyNotice]);
   const snapshot = Option.getOrNull(shell.snapshot);
   const rows = useMemo(
     () => ({
@@ -92,6 +126,7 @@ export function AppShell({ client, initialRoute = "projects", onStateChange }: A
         width={width}
         height={height}
         hints={hints}
+        notice={copyNotice}
         onNewThread={() => dispatch({ type: "new-thread" })}
         modalContent={
           state.modal === "new-thread" ? (

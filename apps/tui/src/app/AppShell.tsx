@@ -35,6 +35,10 @@ export interface AppShellViewProps {
   readonly width: number;
   readonly height: number;
   readonly hints?: string;
+  readonly notice?: {
+    readonly text: string;
+    readonly failed: boolean;
+  } | null;
   readonly children?: ReactNode;
   readonly onNewThread?: () => void;
   readonly modalContent?: ReactNode;
@@ -136,11 +140,11 @@ function Help() {
       <Text>/ Search skills Enter Choose Esc Dismiss</Text>
       <Text>Up/Down / PgUp/PgDn Scroll End Follow latest</Text>
       <Text>A Requests T Tool detail Ctrl+X Stop turn</Text>
+      <Text>Ctrl+T Open thread shell Ctrl+\ Release shell focus</Text>
       <Text>N New thread (from navigation or history)</Text>
       <Text tone="muted">Ctrl+C quits the TUI, not the shared server.</Text>
       <Text tone="muted">
-        Provider switching in existing threads, attachments, Git actions, and terminal UI remain
-        pending.
+        Provider switching in existing threads and Git actions remain pending.
       </Text>
     </Stack>
   );
@@ -159,6 +163,7 @@ export function AppShellView({
   width,
   height,
   hints,
+  notice,
   children,
   onNewThread,
   modalContent,
@@ -351,14 +356,21 @@ export function AppShellView({
           </Panel>
         ) : null}
       </Stack>
-      <Text height={1} flexShrink={0} tone="muted" wrapMode="none" truncate>
-        {state.modal === "new-thread"
-          ? "Tab Select field  Enter Activate  Esc Close"
-          : state.modal
-            ? "Enter / Esc  Close help"
-            : conversation
-              ? (hints ?? "Enter  Compose   A  Requests   Esc  Threads   ?  Help")
-              : "Up/Down Select  Enter Open  N New thread  Esc Back  ? Help"}
+      <Text
+        height={1}
+        flexShrink={0}
+        tone={notice?.failed ? "danger" : notice ? "success" : "muted"}
+        wrapMode="none"
+        truncate
+      >
+        {notice?.text ??
+          (state.modal === "new-thread"
+            ? "Tab Select field  Enter Activate  Esc Close"
+            : state.modal
+              ? "Enter / Esc  Close help"
+              : conversation
+                ? (hints ?? "Enter  Compose   A  Requests   Esc  Threads   ?  Help")
+                : "Up/Down Select  Enter Open  N New thread  Esc Back  ? Help")}
       </Text>
     </Stack>
   );

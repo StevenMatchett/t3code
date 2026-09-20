@@ -6,6 +6,14 @@ const record = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Un
 const array = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown));
 const string = Schema.decodeUnknownOption(Schema.String);
 const text = (value: unknown) => Option.getOrUndefined(string(value));
+const commandText = (value: unknown) => {
+  const direct = text(value)?.trim();
+  if (direct) return direct;
+  const parts = Option.getOrUndefined(array(value))
+    ?.map((part) => text(part)?.trim())
+    .filter((part): part is string => Boolean(part));
+  return parts?.length ? parts.join(" ") : undefined;
+};
 const inline = (value: string) => normalizeTerminalText(value).replace(/\n/gu, " ").trim();
 const pathKeys = [
   "path",
@@ -32,8 +40,20 @@ const nestedKeys = [
 export function toolActivityDetails(payloadValue: unknown) {
   const payload = Option.getOrNull(record(payloadValue));
   const data = Option.getOrNull(record(payload?.data));
-  const input = Option.getOrNull(record(data?.rawInput ?? data?.input));
-  const command = text(data?.command) ?? text(input?.command) ?? text(payload?.command);
+  const item = Option.getOrNull(record(data?.item));
+  const input = Option.getOrNull(record(data?.rawInput ?? data?.input ?? item?.input));
+  const result = Option.getOrNull(record(item?.result));
+  const actionCommand = Option.getOrUndefined(array(item?.commandActions))
+    ?.map((action) => Option.getOrNull(record(action)))
+    .find((action) => commandText(action?.command));
+  const command =
+    commandText(actionCommand?.command) ??
+    commandText(item?.command) ??
+    commandText(input?.command) ??
+    commandText(result?.command) ??
+    commandText(data?.command) ??
+    commandText(payload?.command) ??
+    (payload?.itemType === "command_execution" ? text(payload.detail) : undefined);
   const name = text(data?.toolName) ?? text(payload?.title);
   const paths = new Set<string>();
   let remaining = 256;

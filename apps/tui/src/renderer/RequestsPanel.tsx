@@ -154,7 +154,9 @@ function Questions({
   const [questionIndex, setQuestionIndex] = useState(0);
   const [choice, setChoice] = useState(0);
   const [answers, setAnswers] = useState<QuestionAnswers>({});
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(
+    request.questions[0]?.options.length === 0 && request.questions[0]?.allowCustomAnswer !== false,
+  );
   const [custom, setCustom] = useState("");
   const [offset, setOffset] = useState(0);
   const question = request.questions[questionIndex]!;
@@ -176,8 +178,8 @@ function Questions({
   const editorHeight = editing ? Math.max(1, Math.min(3, Math.floor(height / 3))) : 0;
   const optionRows = Math.max(1, Math.min(continueIndex + 1, 6, height - editorHeight - 4));
   const count = Math.max(1, height - optionRows - editorHeight - 3);
-  const toggle = () => {
-    const option = question.options[choice];
+  const toggle = (index = choice) => {
+    const option = question.options[index];
     if (!option) return;
     const value = option.value ?? option.label;
     setAnswers((current) => ({
@@ -188,6 +190,49 @@ function Questions({
           : [...selected, value]
         : value,
     }));
+  };
+  const beginCustomAnswer = () => {
+    if (!canCustom) return;
+    setCustom(
+      typeof answer === "string" &&
+        !question.options.some((option) => (option.value ?? option.label) === answer)
+        ? answer
+        : "",
+    );
+    setChoice(question.options.length);
+    setEditing(true);
+  };
+  const continueOrSubmit = () => {
+    if (
+      !answersAreComplete(
+        { ...request, questions: [question] },
+        Object.fromEntries([[question.id, answer ?? ""]]),
+      )
+    )
+      return;
+    if (questionIndex < request.questions.length - 1) {
+      const nextIndex = questionIndex + 1;
+      const next = request.questions[nextIndex]!;
+      setQuestionIndex(nextIndex);
+      setChoice(0);
+      setCustom("");
+      setEditing(next.options.length === 0 && next.allowCustomAnswer !== false);
+      setOffset(0);
+    } else if (answersAreComplete(request, answers))
+      void client.actions.reply(registry, threadId, {
+        kind: "user-input",
+        requestId: request.requestId,
+        answers,
+      });
+  };
+  const activate = (index = choice) => {
+    if (waiting) return;
+    setChoice(index);
+    if (index < question.options.length) {
+      toggle(index);
+      if (!question.multiSelect) setChoice(continueIndex);
+    } else if (index < continueIndex) beginCustomAnswer();
+    else continueOrSubmit();
   };
   useKeyboard((key) => {
     if (!active || key.ctrl || key.meta || key.option) return;
@@ -201,8 +246,11 @@ function Questions({
           break;
         case "left":
           if (questionIndex > 0) {
-            setQuestionIndex((index) => index - 1);
+            const previousIndex = questionIndex - 1;
+            const previous = request.questions[previousIndex]!;
+            setQuestionIndex(previousIndex);
             setChoice(0);
+            setEditing(previous.options.length === 0 && previous.allowCustomAnswer !== false);
             setOffset(0);
           }
           break;
@@ -222,39 +270,14 @@ function Questions({
           setOffset((value) => Math.min(Math.max(0, lines.length - count), value + count));
           break;
         case "space":
-          if (!waiting) toggle();
+          if (!waiting && choice < question.options.length) toggle();
+          break;
+        case "e":
+          if (!waiting && canCustom) beginCustomAnswer();
           break;
         case "return":
         case "enter":
-          if (waiting) break;
-          if (choice < question.options.length) {
-            toggle();
-            if (!question.multiSelect) setChoice(continueIndex);
-          } else if (choice < continueIndex) {
-            setCustom(
-              typeof answer === "string" &&
-                !question.options.some((option) => (option.value ?? option.label) === answer)
-                ? answer
-                : "",
-            );
-            setEditing(true);
-          } else if (
-            answersAreComplete(
-              { ...request, questions: [question] },
-              Object.fromEntries([[question.id, answer ?? ""]]),
-            )
-          ) {
-            if (questionIndex < request.questions.length - 1) {
-              setQuestionIndex((value) => value + 1);
-              setChoice(0);
-              setOffset(0);
-            } else if (answersAreComplete(request, answers))
-              void client.actions.reply(registry, threadId, {
-                kind: "user-input",
-                requestId: request.requestId,
-                answers,
-              });
-          }
+          activate();
           break;
         default:
           return;
@@ -271,7 +294,7 @@ function Questions({
       ? [
           {
             id: JSON.stringify([question.id, "custom"]),
-            label: `Other answer${typeof answer === "string" && !question.options.some((option) => (option.value ?? option.label) === answer) ? `: ${inlineTerminalText(answer)}` : ""}`,
+            label: `${question.options.length ? "Type a different answer" : "Type your answer"}${typeof answer === "string" && !question.options.some((option) => (option.value ?? option.label) === answer) ? `: ${inlineTerminalText(answer)}` : ""}`,
           },
         ]
       : []),
@@ -295,14 +318,28 @@ function Questions({
           {lines.slice(offset, offset + count).join("\n")}
         </Text>
       </Stack>
-      {items.slice(start, start + optionRows).map((item, index) => (
-        <SelectionRow
-          key={item.id}
-          label={item.label}
-          selected={start + index === choice}
-          active={!waiting && !editing}
-        />
-      ))}
+      {items.slice(start, start + optionRows).map((item, index) => {
+        const itemIndex = start + index;
+        return (
+          <Stack
+            key={item.id}
+            height={1}
+            flexShrink={0}
+            onMouseDown={(event) => {
+              if (event.button !== 0 || waiting || editing) return;
+              event.preventDefault();
+              event.stopPropagation();
+              activate(itemIndex);
+            }}
+          >
+            <SelectionRow
+              label={item.label}
+              selected={itemIndex === choice}
+              active={!waiting && !editing}
+            />
+          </Stack>
+        );
+      })}
       {editing ? (
         <PromptEditor
           key={question.id}
@@ -325,7 +362,9 @@ function Questions({
           ? "Response queued; waiting for provider."
           : editing
             ? "Enter keeps answer | Shift+Enter newline | Esc cancel"
-            : "Space/Enter choose | Left previous | Esc requests"}
+            : canCustom
+              ? "Up/Down choose | Enter select | E type answer | Esc requests"
+              : "Up/Down choose | Space/Enter select | Esc requests"}
       </Text>
       <Text height={1} wrapMode="none">
         {state.error ?? "Select an answer, then Continue or Submit. PgUp/PgDn scroll details."}

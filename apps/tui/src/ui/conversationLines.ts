@@ -8,6 +8,8 @@ export interface ConversationLine {
   readonly text: string;
   readonly tone: ThemeToken;
   readonly strong: boolean;
+  readonly shell?: boolean;
+  readonly align?: "left" | "right";
 }
 
 export function conversationLines(
@@ -25,6 +27,7 @@ export function conversationLines(
         ? "accent"
         : "muted";
     let texts: string[];
+    let shellLines = 0;
     if (row.source === "checkpoint") {
       const additions = row.files.reduce((sum, file) => sum + file.additions, 0);
       const deletions = row.files.reduce((sum, file) => sum + file.deletions, 0);
@@ -45,30 +48,21 @@ export function conversationLines(
       if (!expanded && row.kind !== "tool" && !error) return [];
       const status =
         row.status === "inProgress" ? "running" : (row.status ?? (error ? "failed" : "tool"));
-      const summary = [
-        row.toolName,
-        row.text,
-        row.command && !row.text.includes(row.command) ? row.command : undefined,
-      ]
-        .filter(Boolean)
-        .join(" - ");
+      const summary = row.command ?? [row.toolName, row.text].filter(Boolean).join(" - ");
+      const heading = wrapTerminalLines(`[${status}] ${inlineTerminalText(summary)}`, width).slice(
+        0,
+        expanded ? undefined : 2,
+      );
+      shellLines = row.command ? heading.length : 0;
       texts = [
-        ...wrapTerminalLines(`[${status}] ${inlineTerminalText(summary)}`, width).slice(
-          0,
-          expanded ? undefined : 2,
-        ),
+        ...heading,
         ...(row.files ?? []).flatMap((path) => wrapTerminalLines(`  File: ${path}`, width)),
         ...(expanded && row.detail
           ? wrapTerminalLines(row.detail, Math.max(1, width - 2)).map((text) => `  ${text}`)
           : []),
       ];
     } else {
-      const label = row.kind === "user" ? "You" : row.kind === "assistant" ? "Assistant" : "System";
-      texts = [
-        label,
-        ...wrapTerminalLines(row.text, Math.max(1, width - 2)).map((text) => `  ${text}`),
-        "",
-      ];
+      texts = [...wrapTerminalLines(row.text, Math.max(1, width)), ""];
     }
     return texts.map((text, line) => ({
       id: row.id,
@@ -76,6 +70,8 @@ export function conversationLines(
       text,
       tone: line === 0 ? tone : error ? "danger" : "text",
       strong: line === 0,
+      ...(line < shellLines ? { shell: true } : {}),
+      ...(row.kind === "user" ? { align: "right" as const } : {}),
     }));
   });
 }

@@ -102,7 +102,13 @@ describe("projectRecordedThreadTimeline", () => {
       payload: {
         toolCallId: "shell-1",
         status: "completed",
-        data: { rawOutput: { stdout: "done" } },
+        data: {
+          item: {
+            command: '/bin/zsh -lc "bun test"',
+            commandActions: [{ command: "bun test", type: "unknown" }],
+          },
+          rawOutput: { stdout: "done" },
+        },
       },
     });
     const recording = {
@@ -120,6 +126,7 @@ describe("projectRecordedThreadTimeline", () => {
       kind: "tool",
       sourceId: EventId.make("tool-complete"),
       status: "completed",
+      command: "bun test",
       detail: "done",
     });
     expect(first[1]).toMatchObject({
@@ -181,6 +188,49 @@ describe("projectRecordedThreadTimeline", () => {
       activityKind: "future.activity",
       text: "A newer server sent this",
     });
+  });
+
+  it("adds numbered placeholders for persisted image attachments", () => {
+    const [row] = projectRecordedThreadTimeline({
+      messages: [
+        message("user-1", "user", {
+          text: "Compare these",
+          attachments: [
+            {
+              type: "image",
+              id: "image-1",
+              name: "first.png",
+              mimeType: "image/png",
+              sizeBytes: 4,
+            },
+            {
+              type: "image",
+              id: "image-2",
+              name: "second.webp",
+              mimeType: "image/webp",
+              sizeBytes: 8,
+            },
+          ],
+        }),
+      ],
+      activities: [],
+    });
+
+    expect(row).toMatchObject({ text: "Compare these\n[Image #1] [Image #2]" });
+  });
+
+  it("limits long user messages to a 400-character history preview", () => {
+    const longPaste = "p".repeat(600);
+    const rows = projectRecordedThreadTimeline({
+      messages: [
+        message("user-1", "user", { text: longPaste }),
+        message("assistant-1", "assistant", { text: longPaste }),
+      ],
+      activities: [],
+    });
+
+    expect(rows[0]).toMatchObject({ text: `${"p".repeat(400)}…` });
+    expect(rows[1]).toMatchObject({ text: longPaste });
   });
 
   it("normalizes every display string before exposing hostile tool output", () => {

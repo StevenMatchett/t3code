@@ -1,5 +1,8 @@
-import { afterEach, describe, expect, it } from "@effect/vitest";
+import { afterEach, describe, expect, it, vi } from "@effect/vitest";
+import { CliRenderEvents, type Selection } from "@opentui/core";
+import { EMPTY_TERMINAL_BUFFER_STATE } from "@t3tools/client-runtime/state/terminal";
 import * as Option from "effect/Option";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { act } from "react";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
@@ -27,6 +30,31 @@ const describeWithNativeFfi = runtime.process?.getBuiltinModule?.("node:ffi")
   : describe.skip;
 
 describeWithNativeFfi("connected AppShell", () => {
+  it("copies a mouse selection and reports the result in the status line", async () => {
+    const { driver } = await renderShell({ width: 80, height: 24 });
+    const copy = vi.spyOn(driver.renderer, "copyToClipboardOSC52").mockReturnValue(true);
+
+    await act(async () => {
+      driver.renderer.emit(CliRenderEvents.SELECTION, {
+        getSelectedText: () => "selected conversation text",
+      } as Selection);
+    });
+    await driver.flush();
+
+    expect(copy).toHaveBeenCalledWith("selected conversation text");
+    expect(driver.captureFrame()).toContain("Copied to clipboard.");
+
+    copy.mockReturnValue(false);
+    await act(async () => {
+      driver.renderer.emit(CliRenderEvents.SELECTION, {
+        getSelectedText: () => "another selection",
+      } as Selection);
+    });
+    await driver.flush();
+
+    expect(driver.captureFrame()).toContain("Copy unavailable in this terminal.");
+  });
+
   it.each([false, true])(
     "opens actual project and thread selections with arrows, Tab, and Enter (kitty=%s)",
     async (kittyKeyboard) => {
@@ -108,6 +136,84 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.input.pressKey("ESCAPE");
     await driver.input.pressKey("TAB");
     expect(driver.captureFrame()).toContain("> Second conversation");
+  });
+
+  it("opens multiple shells in the thread directory and returns to chat", async () => {
+    const { driver, fixture } = await renderShell({
+      width: 96,
+      height: 28,
+      kittyKeyboard: true,
+    });
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("t", { ctrl: true });
+
+    expect(driver.captureFrame()).toContain("[term-1]");
+    expect(driver.captureFrame()).toContain("/workspace/alpha");
+    expect(fixture.terminalAttachInputs.at(-1)).toMatchObject({
+      threadId: "thread-0",
+      terminalId: "term-1",
+      cwd: "/workspace/alpha",
+      worktreePath: null,
+    });
+    await driver.input.pressKey("\\", { ctrl: true });
+    expect(driver.captureFrame()).toContain("N New");
+    await driver.input.pressKey("n");
+    expect(driver.captureFrame()).toContain("[term-2]");
+    expect(fixture.terminalAttachInputs.at(-1)).toMatchObject({ terminalId: "term-2" });
+    await driver.input.pressKey("\\", { ctrl: true });
+    await driver.input.pressKey("ARROW_LEFT");
+    expect(driver.captureFrame()).toContain("[term-1]");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("Visible line 59");
+  });
+
+  it("returns to chat when the last shell exits", async () => {
+    const { driver, fixture } = await renderShell({
+      width: 96,
+      height: 28,
+      kittyKeyboard: true,
+    });
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("t", { ctrl: true });
+    expect(driver.captureFrame()).toContain("[term-1]");
+
+    await act(async () =>
+      driver.registry.set(
+        fixture.terminalBuffer,
+        AsyncResult.success({
+          ...EMPTY_TERMINAL_BUFFER_STATE,
+          status: "exited",
+          version: 1,
+        }),
+      ),
+    );
+    await driver.flush();
+
+    expect(driver.captureFrame()).toContain("Visible line 59");
+    expect(driver.captureFrame()).not.toContain("[term-1]");
+    expect(fixture.terminalCloseInputs).toContainEqual({
+      terminalId: "term-1",
+      deleteHistory: true,
+      threadId: "thread-0",
+    });
+
+    await act(async () =>
+      driver.registry.set(
+        fixture.terminalBuffer,
+        AsyncResult.success({
+          ...EMPTY_TERMINAL_BUFFER_STATE,
+          status: "running",
+          version: 1,
+        }),
+      ),
+    );
+    await driver.input.pressKey("t", { ctrl: true });
+
+    expect(driver.captureFrame()).toContain("[term-2]");
+    expect(driver.captureFrame()).not.toContain("[term-1]");
+    expect(fixture.terminalAttachInputs.at(-1)).toMatchObject({ terminalId: "term-2" });
   });
 
   it("keeps selection and navigation readable with ASCII borders and no color", async () => {

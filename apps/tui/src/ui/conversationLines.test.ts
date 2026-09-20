@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { conversationLines } from "./conversationLines.ts";
 import type { TimelineRow } from "../features/chat/timeline.ts";
-import { EventId, TurnId } from "@t3tools/contracts";
+import { EventId, MessageId, TurnId } from "@t3tools/contracts";
 
 const base = {
   turnId: TurnId.make("turn-1"),
@@ -38,7 +38,8 @@ describe("conversationLines", () => {
       .map((line) => line.text)
       .join("\n");
     expect(collapsed).toContain("[completed]");
-    expect(collapsed).toContain("Ran command");
+    expect(collapsed).toContain("npm test");
+    expect(collapsed).not.toContain("Ran command");
     expect(collapsed).toContain("File: src/a.ts");
     expect(collapsed).not.toContain("thinking");
     expect(
@@ -69,5 +70,34 @@ describe("conversationLines", () => {
     expect(text).toContain("+17 -3");
     expect(text).toContain("src/a.ts  +12 -3 (modified)");
     expect(text).toContain("src/b.ts  +5 -0 (added)");
+  });
+
+  it("omits role headings and marks only user messages for right alignment", () => {
+    const rows: TimelineRow[] = [
+      {
+        ...base,
+        id: "user",
+        source: "message",
+        sourceId: MessageId.make("user-message"),
+        kind: "user",
+        text: "hello",
+        streaming: false,
+      },
+      {
+        ...base,
+        id: "assistant",
+        source: "message",
+        sourceId: MessageId.make("assistant-message"),
+        kind: "assistant",
+        text: "hi there",
+        streaming: false,
+      },
+    ];
+
+    const lines = conversationLines(rows, 40, false);
+
+    expect(lines.map((line) => line.text)).toEqual(["hello", "", "hi there", ""]);
+    expect(lines.slice(0, 2).every((line) => line.align === "right")).toBe(true);
+    expect(lines.slice(2).every((line) => line.align === undefined)).toBe(true);
   });
 });

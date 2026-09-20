@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "@effect/vitest";
-import { ApprovalRequestId, EventId, type OrchestrationThreadActivity } from "@t3tools/contracts";
+import {
+  ApprovalRequestId,
+  EventId,
+  type OrchestrationThreadActivity,
+  type UploadChatImageAttachment,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { act } from "react";
 import { makeClientFixture } from "../testing/clientFixture.ts";
@@ -11,8 +16,12 @@ afterEach(async () => {
   await Promise.all([...drivers].map((driver) => driver.close()));
   drivers.clear();
 });
-async function setup(kittyKeyboard = true, dispatch?: Parameters<typeof makeClientFixture>[0]) {
-  const fixture = makeClientFixture(dispatch);
+async function setup(
+  kittyKeyboard = true,
+  dispatch?: Parameters<typeof makeClientFixture>[0],
+  loadImageAttachment?: (path: string) => Promise<UploadChatImageAttachment>,
+) {
+  const fixture = makeClientFixture(dispatch, loadImageAttachment);
   const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
     width: 96,
     height: 28,
@@ -72,6 +81,71 @@ describe("conversation interaction", () => {
       expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe("");
     },
   );
+
+  it("turns a dropped image path into a visible attachment and sends it", async () => {
+    const image = {
+      type: "image" as const,
+      id: "dropped-image",
+      name: "screen shot.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+      dataUrl: "data:image/png;base64,iVBORw==",
+    };
+    const { driver, fixture, id } = await setup(true, undefined, async (path) => {
+      expect(path).toBe("/tmp/screen shot.png");
+      return image;
+    });
+
+    await driver.input.paste("/tmp/screen\\ shot.png");
+    await driver.flush();
+
+    expect(driver.captureFrame()).toContain("[Image #1]");
+    expect(driver.registry.get(fixture.client.actions.state(id)).attachments).toEqual([image]);
+    await driver.input.pressKey("RETURN");
+    expect(fixture.commands[0]).toMatchObject({
+      type: "thread.turn.start",
+      message: { text: "", attachments: [image] },
+    });
+  });
+
+  it("recognizes an image path delivered as editor input instead of a paste event", async () => {
+    const image = {
+      type: "image" as const,
+      id: "typed-drop-image",
+      name: "screen shot.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+      dataUrl: "data:image/png;base64,iVBORw==",
+    };
+    const { driver, fixture, id } = await setup(true, undefined, async () => image);
+
+    await driver.input.pressKey("RETURN");
+    await driver.input.typeText("/tmp/screen\\ shot.png");
+    await driver.flush();
+
+    expect(driver.captureFrame()).toContain("[Image #1]");
+    expect(driver.registry.get(fixture.client.actions.state(id))).toMatchObject({
+      draft: "",
+      attachments: [image],
+    });
+  });
+
+  it("shows clipboard text over 200 characters as a marker but sends its full text", async () => {
+    const { driver, fixture, id } = await setup();
+    const paste = "long paste ".repeat(21);
+
+    await driver.input.paste(paste);
+
+    expect(driver.captureFrame()).toContain(`[paste ${paste.length} characters]`);
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe(
+      `[paste ${paste.length} characters]`,
+    );
+    await driver.input.pressKey("RETURN");
+    expect(fixture.commands[0]).toMatchObject({
+      type: "thread.turn.start",
+      message: { text: paste },
+    });
+  });
 
   it.each([false, true])(
     "inserts a newline with Ctrl+J without sending (kitty=%s)",
@@ -203,7 +277,7 @@ describe("conversation interaction", () => {
     await driver.input.pressKey("ARROW_DOWN");
     await driver.input.pressKey("RETURN");
     expect(driver.captureFrame()).toContain("Question 2/2");
-    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Type your answer");
     await driver.input.typeText("Use both, please.");
     await driver.input.pressKey("RETURN");
     expect(fixture.commands).toHaveLength(0);
@@ -212,6 +286,74 @@ describe("conversation interaction", () => {
       type: "thread.user-input.respond",
       requestId,
       answers: { " ids ": [" opaque-1 ", "opaque-2"], explanation: "Use both, please." },
+    });
+  });
+
+  it("opens a fill-in answer directly from an option question with E", async () => {
+    const { driver, fixture } = await setup();
+    const requestId = ApprovalRequestId.make("option-or-custom");
+    await request(driver, fixture, "user-input.requested", {
+      requestId,
+      questions: [
+        {
+          id: "direction",
+          header: "Direction",
+          question: "Which direction?",
+          multiSelect: false,
+          allowCustomAnswer: true,
+          options: [
+            { label: "Left", value: "left", description: "Go left" },
+            { label: "Right", value: "right", description: "Go right" },
+          ],
+        },
+      ],
+    });
+
+    await driver.input.pressKey("a");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("E type answer");
+    await driver.input.pressKey("e");
+    await driver.input.typeText("Straight ahead");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+
+    expect(fixture.commands[0]).toMatchObject({
+      type: "thread.user-input.respond",
+      requestId,
+      answers: { direction: "Straight ahead" },
+    });
+  });
+
+  it("offers quick replies for a numbered choice list sent as a normal assistant message", async () => {
+    const { driver, fixture, id } = await setup();
+    const thread = fixture.details[0]!;
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({
+          ...thread,
+          messages: [
+            {
+              ...thread.messages[0]!,
+              text: "Which theme do you prefer?\n\n1. Dark\n2. Light\n3. System default",
+            },
+          ],
+        }),
+      }),
+    );
+    await driver.flush();
+
+    expect(driver.captureFrame()).toContain("[ Dark ]");
+    expect(driver.captureFrame()).toContain("[ Light ]");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+
+    expect(fixture.commands[0]).toMatchObject({
+      type: "thread.turn.start",
+      threadId: id,
+      message: { text: "Light" },
     });
   });
 });

@@ -191,6 +191,16 @@ function messageRow(
   message: OrchestrationMessage,
   options: TerminalTextOptions,
 ): TimelineMessageRow {
+  const images = (message.attachments ?? []).filter((attachment) => attachment.type === "image");
+  const normalized = normalizeTerminalText(message.text, options);
+  const characters = Array.from(normalized);
+  const preview =
+    message.role === "user" && characters.length > 400
+      ? `${characters.slice(0, 400).join("")}…`
+      : normalized;
+  const text = [preview, images.map((_, index) => `[Image #${index + 1}]`).join(" ")]
+    .filter(Boolean)
+    .join("\n");
   return {
     id: encodedRowId("message", message.id),
     source: "message",
@@ -198,7 +208,7 @@ function messageRow(
     kind: message.role,
     createdAt: message.createdAt,
     turnId: message.turnId,
-    text: normalizeTerminalText(message.text, options),
+    text,
     streaming: message.streaming,
   };
 }

@@ -1,4 +1,4 @@
-import { CliRenderEvents, type CliRenderer } from "@opentui/core";
+import { CliRenderEvents, type CapturedFrame, type CliRenderer } from "@opentui/core";
 import {
   createTestRenderer,
   type KeyInput,
@@ -49,6 +49,7 @@ export interface TuiTestDriver {
   readonly resize: (width: number, height: number) => Promise<void>;
   readonly captureRawFrame: () => string;
   readonly captureFrame: (replacements?: readonly FrameReplacement[]) => string;
+  readonly captureSpans: () => CapturedFrame;
   readonly close: () => Promise<void>;
 }
 
@@ -190,6 +191,7 @@ export async function createTuiTestDriver(
       flush: () => settle(() => undefined),
       resize: (width, height) => settle(() => rendererSetup.resize(width, height)),
       captureRawFrame: rendererSetup.captureCharFrame,
+      captureSpans: rendererSetup.captureSpans,
       captureFrame: (replacements = []) =>
         normalizeFrame(rendererSetup.captureCharFrame(), [
           ...defaultFrameReplacements,

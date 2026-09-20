@@ -29,6 +29,7 @@ import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
 import { createEnvironmentCatalogAtoms } from "@t3tools/client-runtime/state/connections";
 import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
 import { createEnvironmentSessionAtoms } from "@t3tools/client-runtime/state/session";
+import { createTerminalEnvironmentAtoms } from "@t3tools/client-runtime/state/terminal";
 import { mergeEnvironmentThread } from "@t3tools/client-runtime/state/threads";
 import { scopeThread, scopeThreadShell } from "@t3tools/client-runtime/state/models";
 import type { ProviderCatalog } from "../features/chat/providerChoices.ts";
@@ -78,6 +79,7 @@ export interface TuiClient {
   readonly newThreads: NewThreadActions;
   readonly settings: Atom.Atom<ServerSettings | null>;
   readonly providers: Atom.Atom<ProviderCatalog>;
+  readonly terminals?: ReturnType<typeof createTerminalEnvironmentAtoms>;
   readonly refreshProvider: (
     registry: AtomRegistry.AtomRegistry,
     threadId: ThreadId,
@@ -246,6 +248,7 @@ export function createTuiClient(
     };
   }).pipe(Atom.keepAlive);
   const threads = createEnvironmentThreadStateAtoms(runtime);
+  const terminals = createTerminalEnvironmentAtoms(runtime);
   const shellStatus = Atom.make((get) => get(shell.stateValueAtom(environmentId)).status);
   const threadMetadata = Atom.family((threadId: ThreadId) =>
     Atom.make(
@@ -355,6 +358,7 @@ export function createTuiClient(
     newThreads,
     settings: server.settingsValueAtom(environmentId),
     providers,
+    terminals,
     refreshProvider: async (registry, threadId, models) => {
       const value = Option.getOrNull(registry.get(thread(threadId)).data);
       if (!value || registry.get(connection).phase !== "connected") return false;

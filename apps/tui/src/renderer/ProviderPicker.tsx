@@ -8,6 +8,7 @@ import { useContext, useEffect, useRef, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { selectableSkills, selectionForModel } from "../features/chat/providerChoices.ts";
 import { completeSkillDraft, skillCompletionAt } from "../features/chat/skillCompletion.ts";
+import { trailingPastedImagePaths } from "../features/chat/imageAttachments.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
@@ -21,6 +22,7 @@ export function ComposerControls({
   active,
   focused,
   editorHeight,
+  suggestedReplies,
   availableHeight,
   onActivate,
   onBlur,
@@ -31,6 +33,7 @@ export function ComposerControls({
   readonly active: boolean;
   readonly focused: boolean;
   readonly editorHeight: number;
+  readonly suggestedReplies: readonly string[];
   readonly availableHeight: number;
   readonly onActivate: () => void;
   readonly onBlur: () => void;
@@ -113,6 +116,22 @@ export function ComposerControls({
     setSnapshot((old) => (old.text === next.text && old.cursor === next.cursor ? old : next));
     if (next.text !== snapshot.text || next.cursor !== snapshot.cursor) setCursor(0);
   };
+  const updateDraft = (value: string) => {
+    client.actions.setDraft(registry, threadId, value);
+    const dropped = trailingPastedImagePaths(value);
+    if (!dropped || interaction.attachmentPending) return;
+    void client.actions.attachImages(registry, threadId, dropped.paths).then((attached) => {
+      if (!attached) return;
+      const current = registry.get(client.actions.state(threadId));
+      const droppedText = value.slice(dropped.start);
+      if (!current.draft.slice(dropped.start).startsWith(droppedText)) return;
+      client.actions.setDraft(
+        registry,
+        threadId,
+        `${current.draft.slice(0, dropped.start)}${current.draft.slice(dropped.start + droppedText.length)}`,
+      );
+    });
+  };
   const open = (id: string, index: number) => {
     menuGeneration.current += 1;
     onActivate();
@@ -128,6 +147,12 @@ export function ComposerControls({
     setDropdown(null);
     setDismissed(completionKey);
     setFocus(0);
+  };
+  const chooseSuggestedReply = (index: number) => {
+    const reply = suggestedReplies[index];
+    if (!reply || interaction.pending || interaction.attachmentPending) return;
+    client.actions.setDraft(registry, threadId, reply);
+    onSubmit();
   };
   const needle = (menu === "skills" ? (completion?.query ?? "") : query).toLocaleLowerCase();
   const skills = provider
@@ -217,7 +242,15 @@ export function ComposerControls({
     });
   };
   useKeyboard((key) => {
-    if (!active || !focused || key.ctrl || key.meta || key.option) return;
+    if (!active || !focused) return;
+    if (key.ctrl && key.name === "backspace" && interaction.attachments.length > 0) {
+      const attachment = interaction.attachments.at(-1)!;
+      client.actions.removeAttachment(registry, threadId, attachment.id!);
+      key.preventDefault();
+      key.stopPropagation();
+      return;
+    }
+    if (key.ctrl || key.meta || key.option) return;
     if (menu) {
       switch (key.name) {
         case "escape":
@@ -241,9 +274,22 @@ export function ComposerControls({
         default:
           return;
       }
+    } else if (
+      suggestedReplies.length > 0 &&
+      (key.name === "up" || key.name === "down" || key.name === "left" || key.name === "right") &&
+      ((focus === 0 && interaction.draft.length === 0) || focus <= suggestedReplies.length)
+    ) {
+      const offset = key.name === "up" || key.name === "left" ? -1 : 1;
+      setFocus((current) => {
+        if (current < 1 || current > suggestedReplies.length)
+          return offset < 0 ? suggestedReplies.length : 1;
+        return ((current - 1 + offset + suggestedReplies.length) % suggestedReplies.length) + 1;
+      });
     } else if (key.name === "tab")
       setFocus(
-        (value) => (value + (key.shift ? descriptors.length + 1 : 1)) % (descriptors.length + 2),
+        (value) =>
+          (value + (key.shift ? suggestedReplies.length + descriptors.length + 1 : 1)) %
+          (suggestedReplies.length + descriptors.length + 2),
       );
     else if (key.name === "escape") {
       if (focus > 0) setFocus(0);
@@ -252,13 +298,23 @@ export function ComposerControls({
       focus > 0 &&
       (key.name === "return" || key.name === "enter" || key.name === "space")
     ) {
-      if (!key.repeated)
-        open(focus === 1 ? "models" : `option:${descriptors[focus - 2]!.id}`, focus);
+      if (!key.repeated) {
+        if (focus <= suggestedReplies.length) chooseSuggestedReply(focus - 1);
+        else {
+          const controlIndex = focus - suggestedReplies.length;
+          open(
+            controlIndex === 1 ? "models" : `option:${descriptors[controlIndex - 2]!.id}`,
+            focus,
+          );
+        }
+      }
     } else return;
     key.preventDefault();
     key.stopPropagation();
   });
-  const height = editorHeight + 3;
+  const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
+  const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;
+  const height = editorHeight + attachmentHeight + suggestedReplyHeight + 3;
   const menuHeight = Math.max(4, Math.min(10, availableHeight - height));
   const count = Math.max(1, menuHeight - (menu === "skills" ? 3 : 4));
   const start = Math.max(0, Math.min(index - Math.floor(count / 2), rows.length - count));
@@ -290,7 +346,7 @@ export function ComposerControls({
         <PromptEditor
           control={editor}
           value={interaction.draft}
-          onChange={(value) => client.actions.setDraft(registry, threadId, value)}
+          onChange={updateDraft}
           onSnapshot={updateSnapshot}
           onActivate={() => {
             onActivate();
@@ -312,6 +368,64 @@ export function ComposerControls({
           height={editorHeight}
           placeholder="Message the agent, or / for skills..."
         />
+        {suggestedReplies.length > 0 ? (
+          <Stack height={1} flexShrink={0} flexDirection="row" width="100%" overflow="hidden">
+            {suggestedReplies.map((reply, replyIndex) => (
+              <Stack
+                key={reply}
+                id={`suggested-reply-${replyIndex}`}
+                height={1}
+                flexGrow={1}
+                flexBasis={0}
+                minWidth={0}
+                {...(focused && focus === replyIndex + 1 && selectedBackground
+                  ? { backgroundColor: selectedBackground }
+                  : {})}
+                onMouseDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  chooseSuggestedReply(replyIndex);
+                }}
+              >
+                <Text
+                  height={1}
+                  tone={focused && focus === replyIndex + 1 ? "accent" : "muted"}
+                  wrapMode="none"
+                  truncate
+                >
+                  {`[ ${inlineTerminalText(reply)} ]`}
+                </Text>
+              </Stack>
+            ))}
+          </Stack>
+        ) : null}
+        {interaction.attachments.length > 0 ? (
+          <Stack height={1} flexShrink={0} flexDirection="row" width="100%" overflow="hidden">
+            {interaction.attachments.map((attachment, attachmentIndex) => (
+              <Text
+                key={attachment.id ?? `${attachment.name}:${attachmentIndex}`}
+                height={1}
+                flexShrink={0}
+                tone="accent"
+                wrapMode="none"
+                onMouseDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  client.actions.removeAttachment(registry, threadId, attachment.id!);
+                }}
+              >
+                {`${attachmentIndex ? " " : ""}[Image #${attachmentIndex + 1}]`}
+              </Text>
+            ))}
+            <Text height={1} flexGrow={1} tone="muted" wrapMode="none" truncate>
+              {interaction.attachmentPending
+                ? "  Loading..."
+                : "  Click or Ctrl+Backspace to remove"}
+            </Text>
+          </Stack>
+        ) : null}
         <Stack height={1} flexShrink={0} flexDirection="row" width="100%">
           {buttons.map((button, buttonIndex) => (
             <Stack
@@ -321,14 +435,16 @@ export function ComposerControls({
               flexBasis={0}
               minWidth={0}
               height={1}
-              {...(focused && focus === buttonIndex + 1 && selectedBackground
+              {...(focused &&
+              focus === suggestedReplies.length + buttonIndex + 1 &&
+              selectedBackground
                 ? { backgroundColor: selectedBackground }
                 : {})}
               onMouseDown={(event) => {
                 if (event.button !== 0) return;
                 event.preventDefault();
                 event.stopPropagation();
-                open(button.id, buttonIndex + 1);
+                open(button.id, suggestedReplies.length + buttonIndex + 1);
               }}
             >
               <Text
@@ -336,7 +452,8 @@ export function ComposerControls({
                 wrapMode="none"
                 truncate
                 tone={
-                  dropdown === button.id || (focused && focus === buttonIndex + 1)
+                  dropdown === button.id ||
+                  (focused && focus === suggestedReplies.length + buttonIndex + 1)
                     ? "accent"
                     : "muted"
                 }

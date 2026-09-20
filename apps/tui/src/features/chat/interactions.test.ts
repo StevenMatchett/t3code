@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ApprovalRequestId, EventId, TurnId } from "@t3tools/contracts";
+import {
+  ApprovalRequestId,
+  EventId,
+  TurnId,
+  type UploadChatImageAttachment,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AtomRegistry } from "effect/unstable/reactivity";
 import { makeClientFixture } from "../../testing/clientFixture.ts";
@@ -9,13 +14,17 @@ import {
   type TuiThreadCommand,
 } from "./interactions.ts";
 
-function fixture(dispatch: (command: TuiThreadCommand) => Promise<boolean>) {
+function fixture(
+  dispatch: (command: TuiThreadCommand) => Promise<boolean>,
+  loadImageAttachment?: (path: string) => Promise<UploadChatImageAttachment>,
+) {
   const data = makeClientFixture();
   const registry = AtomRegistry.make();
   const actions = makeThreadInteractions({
     thread: data.client.thread,
     connection: data.client.connection,
     dispatch: (_registry, command) => dispatch(command),
+    ...(loadImageAttachment ? { loadImageAttachment } : {}),
   });
   const id = data.details[0]!.id;
   return { ...data, registry, actions, id };
@@ -65,6 +74,63 @@ describe("thread interactions", () => {
       expect(await f.actions.send(f.registry, f.id)).toBe(true);
       expect(commands[1]).toEqual(commands[0]);
       expect(f.registry.get(f.actions.state(f.id)).draft).toBe("");
+    } finally {
+      f.registry.dispose();
+    }
+  });
+
+  it("sends attachment-only prompts and keeps images available for a failed retry", async () => {
+    const commands: TuiThreadCommand[] = [];
+    const image = {
+      type: "image" as const,
+      id: "fixture-image",
+      name: "photo.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+      dataUrl: "data:image/png;base64,iVBORw==",
+    };
+    const f = fixture(
+      async (command) => {
+        commands.push(command);
+        return commands.length > 1;
+      },
+      async () => image,
+    );
+    try {
+      expect(await f.actions.attachImages(f.registry, f.id, ["/tmp/photo.png"])).toBe(true);
+      expect(f.registry.get(f.actions.state(f.id)).attachments).toEqual([image]);
+      expect(await f.actions.send(f.registry, f.id)).toBe(false);
+      expect(commands[0]).toMatchObject({
+        type: "thread.turn.start",
+        message: { text: "", attachments: [image] },
+      });
+      expect(f.registry.get(f.actions.state(f.id)).attachments).toEqual([image]);
+      expect(await f.actions.send(f.registry, f.id)).toBe(true);
+      expect(commands[1]).toEqual(commands[0]);
+      expect(f.registry.get(f.actions.state(f.id)).attachments).toEqual([]);
+    } finally {
+      f.registry.dispose();
+    }
+  });
+
+  it("folds pastes over 200 characters in the draft and expands them when sending", async () => {
+    const commands: TuiThreadCommand[] = [];
+    const f = fixture(async (command) => {
+      commands.push(command);
+      return true;
+    });
+    const paste = "p".repeat(201);
+    try {
+      expect(f.actions.addPaste(f.registry, f.id, "p".repeat(200))).toBe(false);
+      expect(f.actions.addPaste(f.registry, f.id, paste)).toBe(true);
+      expect(f.registry.get(f.actions.state(f.id)).draft).toBe("[paste 201 characters]");
+      expect(await f.actions.send(f.registry, f.id)).toBe(true);
+      expect(commands[0]).toMatchObject({
+        type: "thread.turn.start",
+        message: { text: paste },
+      });
+      expect(f.registry.get(f.actions.state(f.id)).draft).toBe("");
+      expect(f.registry.get(f.actions.state(f.id)).pastes).toEqual([]);
     } finally {
       f.registry.dispose();
     }
