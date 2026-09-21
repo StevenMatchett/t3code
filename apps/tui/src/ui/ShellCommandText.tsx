@@ -4,6 +4,7 @@ import { useUi } from "./context.tsx";
 import { Stack, Text } from "./primitives.tsx";
 import { shellHighlightTokens, type ShellTokenKind } from "./shellHighlight.ts";
 import type { ThemeToken } from "./theme.ts";
+import { textMatches } from "./textSearch.ts";
 
 const themeKey: Record<Exclude<ShellTokenKind, "plain">, ThemeToken> = {
   command: "syntaxCommand",
@@ -14,8 +15,33 @@ const themeKey: Record<Exclude<ShellTokenKind, "plain">, ThemeToken> = {
   number: "syntaxNumber",
 };
 
-export function ConversationText({ line }: { readonly line: ConversationLine }) {
+export function ConversationText({
+  line,
+  search = "",
+}: {
+  readonly line: ConversationLine;
+  readonly search?: string;
+}) {
   const { capabilities, theme } = useUi();
+  const matches = textMatches(line.text, search);
+  const highlight = (text: string, start: number) => {
+    const parts = [];
+    let cursor = 0;
+    for (const match of matches) {
+      const from = Math.max(0, match.start - start);
+      const to = Math.min(text.length, match.end - start);
+      if (from >= to) continue;
+      parts.push(text.slice(cursor, from));
+      parts.push(
+        <span key={from} attributes={TextAttributes.INVERSE | TextAttributes.BOLD}>
+          {text.slice(from, to)}
+        </span>,
+      );
+      cursor = to;
+    }
+    parts.push(text.slice(cursor));
+    return parts;
+  };
   let offset = 0;
   const backgroundColor = line.highlight && capabilities.color ? theme.selection : undefined;
   return (
@@ -48,7 +74,7 @@ export function ConversationText({ line }: { readonly line: ConversationLine }) 
                     ? { fg: theme.syntaxString, bg: theme.selection }
                     : {})}
                 >
-                  {span.text}
+                  {highlight(span.text, offset - span.text.length)}
                 </span>
               );
             })
@@ -60,11 +86,11 @@ export function ConversationText({ line }: { readonly line: ConversationLine }) 
                   capabilities.color && token.kind !== "plain" ? theme[themeKey[token.kind]] : null;
                 return (
                   <span key={key} {...(color ? { fg: color } : {})}>
-                    {token.text}
+                    {highlight(token.text, offset - token.text.length)}
                   </span>
                 );
               })
-            : line.text}
+            : highlight(line.text, 0)}
       </Text>
     </Stack>
   );

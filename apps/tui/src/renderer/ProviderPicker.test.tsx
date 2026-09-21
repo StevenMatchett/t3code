@@ -130,9 +130,10 @@ describe("composer dropdowns and slash skills", () => {
     },
   );
 
-  it("opens slash search from history and allows choosing a result by mouse", async () => {
+  it("opens slash skills in the composer and allows choosing a result by mouse", async () => {
     const { driver, fixture, id } = await setup(true);
     await driver.input.pressKey("ESCAPE");
+    await driver.input.pressKey("i");
     await driver.input.pressKey("/");
     expect(driver.captureFrame()).toContain("Review changes");
     await clickLabel(driver, "Review changes");

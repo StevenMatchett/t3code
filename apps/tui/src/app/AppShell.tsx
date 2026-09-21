@@ -179,7 +179,7 @@ function Help() {
       <Text>Enter / i Write prompt Esc Return to history</Text>
       <Text>Enter Send Shift+Enter New line</Text>
       <Text>Click model/reasoning or Tab then Enter</Text>
-      <Text>/ Search skills Enter Choose Esc Dismiss</Text>
+      <Text>/ Find in thread · In message box: search skills</Text>
       <Text>Mouse wheel / Up/Down / PgUp/PgDn Scroll End Follow latest</Text>
       <Text>A Requests T Tool detail Ctrl+X Stop turn</Text>
       <Text>Ctrl+T Open thread shell Ctrl+\ Release shell focus</Text>

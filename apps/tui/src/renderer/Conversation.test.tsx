@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { act } from "react";
+import { TextAttributes } from "@opentui/core";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
 import { AppShell } from "./AppShell.tsx";
@@ -57,6 +58,37 @@ async function request(
 }
 
 describe("conversation interaction", () => {
+  it("searches output, navigates matches, and closes without changing the draft", async () => {
+    const { driver, fixture, id } = await setup();
+    await driver.input.pressKey("i");
+    await driver.input.typeText("saved draft");
+    await driver.input.pressKey("ESCAPE");
+    await driver.input.pressKey("/");
+    expect(driver.renderer.root.findDescendantById("thread-search-input")).toBeDefined();
+    await driver.input.typeText("visible line 1");
+    expect(driver.captureFrame()).toContain("1/11");
+    expect(driver.captureFrame()).toContain("Visible line 1");
+    expect(
+      driver
+        .captureSpans()
+        .lines.flatMap((line) => line.spans)
+        .some(
+          (span) =>
+            span.text === "Visible line 1" && (span.attributes & TextAttributes.INVERSE) !== 0,
+        ),
+    ).toBe(true);
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("2/11");
+    await driver.input.pressKey("RETURN", { shift: true });
+    expect(driver.captureFrame()).toContain("1/11");
+    await driver.input.typeText("missing");
+    expect(driver.captureFrame()).toContain("No matches");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.renderer.root.findDescendantById("thread-search-input")).toBeUndefined();
+    expect(driver.captureFrame()).toContain("CONVERSATION");
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe("saved draft");
+    expect(fixture.commands).toHaveLength(0);
+  });
   it("focuses inline questions, preserves the chat draft, and keeps answers when returning to history", async () => {
     const { driver, fixture, id } = await setup();
     await driver.input.pressKey("i");

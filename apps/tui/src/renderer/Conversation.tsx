@@ -17,6 +17,7 @@ import { suggestedReplies as parseSuggestedReplies } from "../features/chat/sugg
 import { ThreadActivityIndicator } from "../ui/ThreadActivityIndicator.tsx";
 import { conversationLines } from "../ui/conversationLines.ts";
 import { ConversationText } from "../ui/ShellCommandText.tsx";
+import { textMatches } from "../ui/textSearch.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
@@ -67,6 +68,7 @@ export function Conversation({
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [agentOutputStart, setAgentOutputStart] = useState(0);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
+  const [search, setSearch] = useState<{ query: string; index: number } | null>(null);
   const requests = useMemo(() => derivePendingRequests(thread?.activities ?? []), [thread]);
   const question = requests.userInputs.find(
     (request) =>
@@ -110,6 +112,7 @@ export function Conversation({
       ? parseSuggestedReplies(latestMessage.text)
       : [];
   const activateComposer = () => {
+    setSearch(null);
     setAnchor(null);
     setMode("composer");
   };
@@ -119,7 +122,7 @@ export function Conversation({
     setMode("agents");
   };
   usePaste((event) => {
-    if (!active || selectedAgent || mode === "questions" || terminalOpen) return;
+    if (!active || selectedAgent || mode === "questions" || terminalOpen || search) return;
     const text = decodePasteBytes(event.bytes);
     const paths = pastedImagePaths(text);
     if (!paths && !client.actions.addPaste(registry, threadId, text)) return;
@@ -132,6 +135,12 @@ export function Conversation({
     if (thread) client.actions.observe(registry, thread.id);
   }, [client, registry, thread]);
   const hints = useMemo<readonly HotkeyHint[]>(() => {
+    if (search)
+      return [
+        { key: "Enter/↓", label: "Next match" },
+        { key: "Shift+Enter/↑", label: "Previous" },
+        { key: "Esc", label: "Close search" },
+      ];
     const terminalHint = client.terminals ? [{ key: "Ctrl+T", label: "Terminal" }] : [];
     if (selectedAgent)
       return [
@@ -204,6 +213,7 @@ export function Conversation({
       { key: "Enter", label: "Write" },
       ...terminalHint,
       { key: "↑↓", label: "Scroll" },
+      { key: "/", label: "Find text" },
       { key: "A", label: "Requests" },
       ...(agents.length ? [{ key: "Tab", label: "Agents" }] : []),
       { key: "T", label: "Details" },
@@ -220,6 +230,7 @@ export function Conversation({
     mode,
     queued,
     selectedAgent,
+    search,
     suggestedReplies.length,
     thread?.latestTurn?.state,
     width,
@@ -276,6 +287,7 @@ export function Conversation({
       gap -
       agentPanelHeight -
       questionHeight -
+      (search ? 1 : 0) -
       (interaction.error ? 1 : 0) -
       (queued ? 2 : 0) -
       (thread?.worktreePath ? 1 : 0),
@@ -289,20 +301,33 @@ export function Conversation({
     [timeline, width, showDetails],
   );
   const maxStart = Math.max(0, lines.length - count);
+  const searchQuery = search?.query ?? "";
+  const matches = useMemo(
+    () =>
+      searchQuery
+        ? lines.flatMap((line, lineIndex) =>
+            textMatches(line.text, searchQuery).map((match) => ({ ...match, lineIndex })),
+          )
+        : [],
+    [lines, searchQuery],
+  );
+  const matchIndex = matches.length ? (search?.index ?? 0) % matches.length : 0;
   const anchorIndex =
     anchor === null
       ? -1
       : lines.findIndex((line) => line.id === anchor.id && line.line >= anchor.line);
   const start =
-    anchor === null
-      ? maxStart
-      : Math.max(
-          0,
-          Math.min(
-            maxStart,
-            anchorIndex < 0 ? lines.findIndex((line) => line.id === anchor.id) : anchorIndex,
-          ),
-        );
+    search && matches.length
+      ? Math.min(maxStart, matches[matchIndex]!.lineIndex)
+      : anchor === null
+        ? maxStart
+        : Math.max(
+            0,
+            Math.min(
+              maxStart,
+              anchorIndex < 0 ? lines.findIndex((line) => line.id === anchor.id) : anchorIndex,
+            ),
+          );
   const page = Option.getOrNull(state.page);
   const scrollTo = (next: number) => {
     const target = Math.max(0, Math.min(maxStart, next));
@@ -314,6 +339,26 @@ export function Conversation({
   };
   useKeyboard((key) => {
     if (!active) return;
+    if (search && !terminalOpen && !selectedAgent && mode === "history") {
+      if (key.name === "escape") {
+        scrollTo(start);
+        setSearch(null);
+      } else if (
+        key.name === "return" ||
+        key.name === "enter" ||
+        key.name === "up" ||
+        key.name === "down"
+      ) {
+        const direction = key.shift || key.name === "up" ? -1 : 1;
+        setSearch({
+          ...search,
+          index: matches.length ? (matchIndex + direction + matches.length) % matches.length : 0,
+        });
+      } else return;
+      key.preventDefault();
+      key.stopPropagation();
+      return;
+    }
     if (selectedAgent) {
       if (key.ctrl || key.meta || key.option) return;
       const visible = Math.max(1, height - 4);
@@ -382,12 +427,7 @@ export function Conversation({
     if (key.ctrl || key.meta || key.option || mode !== "history") return;
     switch (key.name) {
       case "/":
-        client.actions.setDraft(
-          registry,
-          threadId,
-          `${interaction.draft}${interaction.draft && !/\s$/u.test(interaction.draft) ? " " : ""}/`,
-        );
-        activateComposer();
+        setSearch({ query: "", index: 0 });
         break;
       case "return":
       case "enter":
@@ -548,9 +588,35 @@ export function Conversation({
         ) : (
           lines
             .slice(start, start + count)
-            .map((line) => <ConversationText key={`${line.id}:${line.line}`} line={line} />)
+            .map((line) => (
+              <ConversationText
+                key={`${line.id}:${line.line}`}
+                line={line}
+                search={search?.query ?? ""}
+              />
+            ))
         )}
       </Stack>
+      {search ? (
+        <Stack height={1} flexShrink={0} flexDirection="row">
+          <Text tone="accent">Find: </Text>
+          <input
+            id="thread-search-input"
+            flexGrow={1}
+            focused={active && mode === "history" && !terminalOpen && !selectedAgent}
+            value={search.query}
+            placeholder="Search loaded output..."
+            onInput={(query) => setSearch({ query, index: 0 })}
+          />
+          <Text tone={search.query && !matches.length ? "warning" : "muted"}>
+            {matches.length
+              ? `${matchIndex + 1}/${matches.length}`
+              : search.query
+                ? "No matches"
+                : "Type to search"}
+          </Text>
+        </Stack>
+      ) : null}
       {interaction.error ? (
         <Text height={1} flexShrink={0} tone="danger" wrapMode="none" truncate>
           {interaction.error}

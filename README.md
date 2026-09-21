@@ -229,7 +229,11 @@ Escape closes the dropdown without discarding your prompt. Only options advertis
 provider/account are offered. Providers that lock a started conversation require a new thread;
 a running turn must finish or be stopped before changing models.
 
-Type `/` to open the inline skills menu. Continue typing to filter it, then use Up/Down and Enter
+While browsing a thread's output, press `/` to search the loaded, displayed text. Matches are
+highlighted as you type; Enter/Down moves to the next match and Shift+Enter/Up moves to the previous
+one. Esc closes search and returns to browsing. Expand Details to include tool details in search.
+
+In the message box, type `/` to open the inline skills menu. Continue typing to filter it, then use Up/Down and Enter
 or click a result. Selection replaces the slash query and prepares the provider-native invocation
 at the start of the draft, preserving surrounding text. It never sends automatically. Escape
 leaves the slash text untouched; edit the arguments and press Enter when ready to send. Skills come
