@@ -56,6 +56,7 @@ import {
   type OrchestrationThreadSearchMatch,
   type OrchestrationThreadShell,
   type ThreadId,
+  type GitResolvedPullRequest,
 } from "@t3tools/contracts";
 import { makeNewThreadActions, type NewThreadActions } from "../features/chat/newThread.ts";
 import { makeNewProjectActions, type NewProjectActions } from "../features/projects/newProject.ts";
@@ -77,6 +78,10 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import type { ReattachedAuthenticatedTuiEnvironment } from "./authenticatedEnvironment.ts";
 
 export interface TuiClient {
+  readonly resolvePullRequest: (
+    registry: AtomRegistry.AtomRegistry,
+    target: { readonly cwd: string; readonly branch: string | null },
+  ) => Promise<GitResolvedPullRequest>;
   readonly diffs: Pick<
     ReturnType<typeof createOrchestrationEnvironmentAtoms>,
     "fullThreadDiff" | "turnDiff"
@@ -360,6 +365,14 @@ export function createTuiClient(
     label: "tui.recover-worktree",
     tag: WS_METHODS.vcsListRefs,
   });
+  const resolvePullRequest = createEnvironmentRpcCommand(runtime, {
+    label: "tui.resolve-pull-request",
+    tag: WS_METHODS.gitResolvePullRequest,
+  });
+  const refreshVcsStatus = createEnvironmentRpcCommand(runtime, {
+    label: "tui.pr-branch-status",
+    tag: WS_METHODS.vcsRefreshStatus,
+  });
   const browseFilesystem = createEnvironmentRpcCommand(runtime, {
     label: "tui.browse-filesystem",
     tag: WS_METHODS.filesystemBrowse,
@@ -471,6 +484,28 @@ export function createTuiClient(
     threadSearch,
     diffs: orchestration,
     review: createReviewEnvironmentAtoms(runtime),
+    resolvePullRequest: async (registry, target) => {
+      let branch = target.branch;
+      if (!branch) {
+        const status = await refreshVcsStatus.run(registry, {
+          environmentId,
+          input: { cwd: target.cwd },
+        });
+        if (!AsyncResult.isSuccess(status) || !status.value.isRepo)
+          throw new Error("Could not read this project's Git branch.");
+        branch = status.value.refName;
+      }
+      if (!branch) throw new Error("This checkout has no branch (detached HEAD).");
+      const result = await resolvePullRequest.run(registry, {
+        environmentId,
+        input: { cwd: target.cwd, reference: branch },
+      });
+      if (!AsyncResult.isSuccess(result))
+        throw new Error(
+          `Could not find a PR for ${branch}. Check that it exists and the server is signed in to your Git host.`,
+        );
+      return result.value.pullRequest;
+    },
     settings: server.settingsValueAtom(environmentId),
     providers,
     terminals,
