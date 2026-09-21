@@ -26,6 +26,7 @@ import {
   type EnvironmentThreadState,
 } from "@t3tools/client-runtime/state/threads";
 import * as Option from "effect/Option";
+import * as DateTime from "effect/DateTime";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import {
   EMPTY_TERMINAL_BUFFER_STATE,
@@ -450,6 +451,15 @@ export function makeClientFixture(
     refreshArchivedThreads: () => {},
     threadSearch,
     diffs: {
+      turnDiff: ({ input }) =>
+        Atom.make(
+          AsyncResult.success({
+            threadId: input.threadId,
+            fromTurnCount: input.fromTurnCount,
+            toTurnCount: input.toTurnCount,
+            diff: "diff --git a/turn.ts b/turn.ts\n--- a/turn.ts\n+++ b/turn.ts\n@@ -1 +1 @@\n-before turn\n+after turn",
+          }),
+        ),
       fullThreadDiff: () =>
         Atom.make(
           AsyncResult.success({
@@ -457,6 +467,27 @@ export function makeClientFixture(
             fromTurnCount: 0,
             toTurnCount: 1,
             diff: "diff --git a/example.ts b/example.ts\n--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old value\n+new value",
+          }),
+        ),
+    },
+    review: {
+      diffPreview: ({ input }) =>
+        Atom.make(
+          AsyncResult.success({
+            cwd: input.cwd,
+            generatedAt: DateTime.makeUnsafe(time),
+            sources: [
+              {
+                id: "working",
+                kind: "working-tree" as const,
+                title: "Working tree",
+                baseRef: null,
+                headRef: null,
+                diffHash: "fixture",
+                truncated: false,
+                diff: "diff --git a/work.ts b/work.ts\n--- a/work.ts\n+++ b/work.ts\n@@ -1 +1 @@\n-old workspace\n+new workspace\ndiff --git a/second.ts b/second.ts\n--- a/second.ts\n+++ b/second.ts\n@@ -1 +1 @@\n-old second\n+new second",
+              },
+            ],
           }),
         ),
     },

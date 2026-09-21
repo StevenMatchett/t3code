@@ -52,6 +52,7 @@ export function Conversation({
   const shell = useAtomValue(client.shell);
   const connection = useAtomValue(client.connection);
   const interaction = useAtomValue(client.actions.state(threadId));
+  const queued = interaction.queue[0];
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
   const [mode, setMode] = useState<"history" | "composer" | "requests" | "agents">("history");
@@ -110,6 +111,7 @@ export function Conversation({
     if (thread) client.actions.observe(registry, thread.id);
   }, [client, registry, thread]);
   const hints = useMemo<readonly HotkeyHint[]>(() => {
+    const terminalHint = client.terminals ? [{ key: "Ctrl+T", label: "Terminal" }] : [];
     if (selectedAgent)
       return [
         { key: "↑↓", label: "Scroll" },
@@ -122,6 +124,7 @@ export function Conversation({
       if (composerMenuOpen)
         return [
           { key: "↑↓", label: "Select" },
+          ...terminalHint,
           { key: "Enter/Tab", label: "Choose" },
           { key: "⇧Tab/Esc", label: "Close" },
           { key: "Ctrl+K", label: "Search" },
@@ -130,17 +133,22 @@ export function Conversation({
         return suggestedReplies.length
           ? [
               { key: "↑↓", label: "Choose reply" },
+              ...terminalHint,
               { key: "Enter", label: "Select" },
               { key: "Tab", label: "Options" },
               { key: "Ctrl+K", label: "Search" },
               { key: "Esc", label: "History" },
             ]
           : [
-              { key: "Enter", label: "Send" },
+              {
+                key: "Enter",
+                label: thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send",
+              },
+              ...terminalHint,
               { key: "Ctrl+J", label: "New line" },
               { key: "/", label: "Skills" },
               { key: "Tab", label: agents.length ? "Options/agents" : "Options" },
-              ...(thread?.latestTurn?.state === "running"
+              ...(thread?.latestTurn?.state === "running" || queued
                 ? [{ key: "Ctrl+X", label: "Cancel" }]
                 : []),
               { key: "Ctrl+K", label: "Search" },
@@ -150,6 +158,7 @@ export function Conversation({
       return [
         { key: "↑↓", label: "Select" },
         { key: "Enter", label: "Review" },
+        ...terminalHint,
         { key: "PgUp/Dn", label: "Details" },
         { key: "Ctrl+K", label: "Search" },
         { key: "Esc", label: "Back" },
@@ -158,17 +167,18 @@ export function Conversation({
       return [
         { key: "↑↓", label: "Select" },
         { key: "Enter", label: "Toggle/open" },
+        ...terminalHint,
         { key: "Ctrl+K", label: "Search" },
         { key: "Tab/Esc", label: "Back" },
       ];
     return [
       { key: "Enter", label: "Write" },
+      ...terminalHint,
       { key: "↑↓", label: "Scroll" },
       { key: "A", label: "Requests" },
       ...(agents.length ? [{ key: "Tab", label: "Agents" }] : []),
       { key: "T", label: "Details" },
       { key: "D", label: "Diff" },
-      ...(width >= 58 ? [{ key: "Ctrl+T", label: "Shell" }] : []),
       { key: "N", label: "New thread" },
       { key: "Ctrl+K", label: "Search" },
       { key: "Esc", label: "Threads" },
@@ -176,8 +186,10 @@ export function Conversation({
     ];
   }, [
     agents.length,
+    client.terminals,
     composerMenuOpen,
     mode,
+    queued,
     selectedAgent,
     suggestedReplies.length,
     thread?.latestTurn?.state,
@@ -216,6 +228,7 @@ export function Conversation({
       gap -
       agentPanelHeight -
       (interaction.error ? 1 : 0) -
+      (queued ? 2 : 0) -
       (thread?.worktreePath ? 1 : 0),
   );
   const timeline = useMemo(
@@ -280,6 +293,13 @@ export function Conversation({
       return;
     }
     if (terminalOpen) return;
+    if (queued && key.ctrl && (key.name === "y" || key.name === "u")) {
+      key.preventDefault();
+      key.stopPropagation();
+      if (key.name === "y") void client.actions.flushQueue(registry, threadId, true);
+      else if (client.actions.editQueued(registry, threadId)) activateComposer();
+      return;
+    }
     if (key.ctrl && key.name === "x") {
       key.preventDefault();
       key.stopPropagation();
@@ -488,6 +508,23 @@ export function Conversation({
         </Text>
       ) : null}
       {gap ? <Stack height={gap} flexShrink={0} /> : null}
+      {queued ? (
+        <Stack id="queued-message" height={2} flexShrink={0}>
+          <Text tone="warning" height={1} wrapMode="none" truncate>
+            {queued.status === "sending"
+              ? "Sending queued message"
+              : queued.status === "held"
+                ? "Queue paused"
+                : "Queued"}
+            {` (${interaction.queue.length}): ${inlineTerminalText(queued.command.message.text) || "[image]"}`}
+          </Text>
+          <Text tone="muted" height={1} wrapMode="none" truncate>
+            {queued.status === "sending"
+              ? "Sending to the agent..."
+              : "Ctrl+Y Send now · Ctrl+U Edit · Ctrl+X Stop/pause"}
+          </Text>
+        </Stack>
+      ) : null}
       <Stack id="conversation-activity" height={1} flexShrink={0} flexDirection="row">
         <Text
           id="thread-diff-action"
@@ -508,7 +545,9 @@ export function Conversation({
             ? "  A: respond to requests"
             : interaction.pending
               ? "  Sending command..."
-              : "  T: tool details"}
+              : queued?.status === "queued"
+                ? "  Sends after next tool call / turn end"
+                : (interaction.notice ?? "  T: tool details")}
         </Text>
         <Text tone="muted" flexShrink={0}>
           {anchor !== null ? "History / End: live" : page?.hasMore ? "Home: earlier" : ""}
@@ -531,7 +570,7 @@ export function Conversation({
           setAnchor(null);
           void client.actions.send(registry, threadId);
         }}
-        {...(thread?.latestTurn?.state === "running"
+        {...(thread?.latestTurn?.state === "running" || queued
           ? { onCancel: cancelTurn, cancelPending: interaction.pending === "stop" }
           : {})}
       />

@@ -48,6 +48,33 @@ export type TuiThreadCommand = Extract<
   }
 >;
 type PromptCommand = Extract<TuiThreadCommand, { readonly type: "thread.turn.start" }>;
+interface QueuedPrompt {
+  readonly command: PromptCommand;
+  readonly attachments: readonly UploadChatImageAttachment[];
+  readonly afterTool: string | null;
+  readonly afterTurn: string;
+  readonly status: "queued" | "sending" | "held";
+  readonly attempted: boolean;
+}
+
+function toolBoundary(thread: OrchestrationThread): string | null {
+  const completed = thread.activities.filter((activity) => activity.kind === "tool.completed");
+  return (
+    completed.reduce<(typeof completed)[number] | null>(
+      (latest, activity) =>
+        !latest ||
+        (activity.sequence ?? -1) > (latest.sequence ?? -1) ||
+        ((activity.sequence ?? -1) === (latest.sequence ?? -1) &&
+          activity.createdAt > latest.createdAt)
+          ? activity
+          : latest,
+      null,
+    )?.id ?? null
+  );
+}
+
+const turnBoundary = (thread: OrchestrationThread) =>
+  `${thread.latestTurn?.turnId ?? ""}:${thread.latestTurn?.state ?? ""}`;
 export type QuestionAnswers = Readonly<Record<string, string | readonly string[]>>;
 interface ReplyReceipt {
   readonly requestId: ApprovalRequestId;
@@ -60,6 +87,7 @@ interface PastedText {
   readonly text: string;
 }
 export interface ThreadInteractionState {
+  readonly queue: readonly QueuedPrompt[];
   readonly draft: string;
   readonly pastes: readonly PastedText[];
   readonly pending: "send" | "stop" | "reply" | "model" | null;
@@ -79,6 +107,7 @@ export interface ThreadInteractionState {
   readonly replies: readonly ReplyReceipt[];
 }
 const initial: ThreadInteractionState = {
+  queue: [],
   draft: "",
   pastes: [],
   pending: null,
@@ -173,11 +202,24 @@ export function makeThreadInteractions(options: {
   const state = Atom.family((_threadId: ThreadId) =>
     Atom.make<ThreadInteractionState>(initial).pipe(Atom.keepAlive),
   );
+  const queuedThreads = Atom.make<readonly ThreadId[]>([]).pipe(Atom.keepAlive);
   const update = (
     registry: AtomRegistry.AtomRegistry,
     threadId: ThreadId,
     patch: Partial<ThreadInteractionState>,
-  ) => registry.update(state(threadId), (current) => ({ ...current, ...patch }));
+  ) => {
+    registry.update(state(threadId), (current) => ({ ...current, ...patch }));
+    if (patch.queue) {
+      const ids = registry.get(queuedThreads);
+      if (patch.queue.length > 0 && !ids.includes(threadId))
+        registry.set(queuedThreads, [...ids, threadId]);
+      else if (patch.queue.length === 0 && ids.includes(threadId))
+        registry.set(
+          queuedThreads,
+          ids.filter((id) => id !== threadId),
+        );
+    }
+  };
   const error = (registry: AtomRegistry.AtomRegistry, threadId: ThreadId, message: string) => {
     update(registry, threadId, { error: message, notice: null });
     return false;
@@ -293,8 +335,112 @@ export function makeThreadInteractions(options: {
       update(registry, command.threadId, { pending: null });
     }
   };
+  const flushQueue = async (
+    registry: AtomRegistry.AtomRegistry,
+    threadId: ThreadId,
+    sendNow = false,
+  ) => {
+    const current = registry.get(state(threadId));
+    const next = current.queue[0];
+    if (!next || current.pending || next.status === "sending") return false;
+    const value = registry.get(options.thread(threadId));
+    const thread = Option.getOrNull(value.data);
+    if (
+      !thread ||
+      value.status !== "live" ||
+      Option.isSome(value.error) ||
+      registry.get(options.connection).phase !== "connected"
+    )
+      return false;
+    // A lost command receipt must not cause an already accepted prompt to be sent twice.
+    if (thread.messages.some((message) => message.id === next.command.message.messageId)) {
+      update(registry, threadId, {
+        queue: current.queue.slice(1),
+        error: null,
+        notice: "Queued message sent.",
+      });
+      return true;
+    }
+    if (
+      thread.deletedAt !== null ||
+      thread.archivedAt !== null ||
+      current.modelPending ||
+      current.attempt
+    )
+      return false;
+    if (
+      !sendNow &&
+      next.status === "queued" &&
+      (thread.latestTurn?.state === "interrupted" || thread.latestTurn?.state === "error")
+    ) {
+      update(registry, threadId, {
+        queue: current.queue.map((entry) => ({ ...entry, status: "held" })),
+      });
+      return false;
+    }
+    const requests = derivePendingRequests(thread.activities);
+    if (
+      requests.approvals.length ||
+      requests.userInputs.length ||
+      thread.session?.status === "starting"
+    )
+      return false;
+    const afterTool = toolBoundary(thread);
+    const afterTurn = turnBoundary(thread);
+    if (
+      !sendNow &&
+      (next.status === "held" ||
+        (thread.latestTurn?.state === "running"
+          ? next.afterTool === afterTool
+          : next.afterTurn === afterTurn))
+    )
+      return false;
+    // Re-anchor the rest so only one message is delivered at each boundary.
+    update(registry, threadId, {
+      queue: current.queue.map((entry, index) => ({
+        ...entry,
+        afterTool,
+        afterTurn,
+        status: index === 0 ? "sending" : entry.status,
+        attempted: index === 0 || entry.attempted,
+      })),
+    });
+    const accepted = await run(registry, next.command, "send");
+    const queue = registry.get(state(threadId)).queue;
+    update(registry, threadId, {
+      queue: accepted ? queue.slice(1) : queue.map((entry) => ({ ...entry, status: "held" })),
+      notice: accepted ? "Queued message sent." : null,
+    });
+    return accepted;
+  };
   return {
     state,
+    queuedThreads,
+    flushQueue,
+    editQueued: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => {
+      const current = registry.get(state(threadId));
+      const next = current.queue[0];
+      if (!next || current.pending || current.attachmentPending) return false;
+      if (current.draft || current.attachments.length)
+        return error(
+          registry,
+          threadId,
+          "Clear or queue your draft before editing the queued message.",
+        );
+      update(registry, threadId, {
+        queue: current.queue.slice(1),
+        draft: next.command.message.text,
+        pastes: [],
+        attachments: next.attachments,
+        skill: null,
+        // Held messages may have reached the server despite a lost receipt.
+        attempt: next.attempted ? next.command : null,
+        attemptDraft: next.attempted ? next.command.message.text : null,
+        error: null,
+        notice: "Queued message returned to the composer.",
+      });
+      return true;
+    },
     setDraft: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId, draft: string) => {
       const current = registry.get(state(threadId));
       const skill = current.skill;
@@ -500,14 +646,10 @@ export function makeThreadInteractions(options: {
           current.attachments.map((attachment) => attachment.id).join("\0")
           ? current.attempt
           : null;
-      if (!retry && thread.latestTurn?.state === "running")
-        return error(
-          registry,
-          threadId,
-          "A turn is running. Wait for it or use Ctrl+X to stop it.",
-        );
       const requests = derivePendingRequests(thread.activities);
-      if (!retry && (requests.approvals.length || requests.userInputs.length))
+      const shouldQueue =
+        !retry && (thread.latestTurn?.state === "running" || current.queue.length > 0);
+      if (!retry && !shouldQueue && (requests.approvals.length || requests.userInputs.length))
         return error(
           registry,
           threadId,
@@ -529,6 +671,28 @@ export function makeThreadInteractions(options: {
         runtimeMode: thread.runtimeMode,
         interactionMode: thread.interactionMode,
       };
+      if (shouldQueue) {
+        update(registry, threadId, {
+          queue: [
+            ...current.queue,
+            {
+              command,
+              attachments: [...current.attachments],
+              afterTool: toolBoundary(thread),
+              afterTurn: turnBoundary(thread),
+              status: current.queue.some((entry) => entry.status === "held") ? "held" : "queued",
+              attempted: false,
+            },
+          ],
+          draft: "",
+          pastes: [],
+          attachments: [],
+          skill: null,
+          error: null,
+          notice: "Queued — sends after the next tool call or when the turn ends.",
+        });
+        return true;
+      }
       update(registry, threadId, { attempt: command, attemptDraft: current.draft });
       if (!(await run(registry, command, "send"))) {
         observe(registry, threadId);
@@ -548,8 +712,15 @@ export function makeThreadInteractions(options: {
     },
     interrupt: async (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => {
       if (registry.get(state(threadId)).pending) return false;
+      const queue = registry.get(state(threadId)).queue;
+      if (queue.length)
+        update(registry, threadId, {
+          queue: queue.map((entry) => ({ ...entry, status: "held" })),
+          notice: "Queued messages paused.",
+        });
       const thread = currentThread(registry, threadId);
       if (!thread) return false;
+      if (queue.length && thread.latestTurn?.state !== "running") return true;
       if (thread.latestTurn?.state !== "running")
         return error(registry, threadId, "There is no running turn to stop.");
       const accepted = await run(

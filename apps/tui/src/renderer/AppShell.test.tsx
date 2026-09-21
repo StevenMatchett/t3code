@@ -57,10 +57,31 @@ const describeWithNativeFfi = runtime.process?.getBuiltinModule?.("node:ffi")
 describeWithNativeFfi("connected AppShell", () => {
   it("opens saved diffs and preserves the draft when closing", async () => {
     const { driver, fixture } = await renderShell({ width: 100, height: 28 });
+    const working = vi.spyOn(fixture.client.review, "diffPreview");
+    const turn = vi.spyOn(fixture.client.diffs, "turnDiff");
     await driver.input.pressKey("RETURN");
     await driver.input.pressKey("RETURN");
     await driver.input.pressKey("d");
     expect(driver.captureFrame()).toContain("No saved changes yet");
+    await driver.input.pressKey("w");
+    expect(driver.captureFrame()).toContain("Uncommitted workspace changes");
+    expect(working).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { cwd: "/workspace/alpha" },
+      }),
+    );
+    expect(driver.captureFrame()).toContain("+new workspace");
+    await driver.input.pressKey("ARROW_DOWN");
+    expect(driver.captureFrame()).toContain("+new second");
+    expect(driver.captureFrame()).not.toContain("+new workspace");
+    await driver.resize(60, 28);
+    expect(driver.captureFrame()).toContain("second.ts");
+    expect(driver.captureFrame()).not.toContain("+new second");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("+new second");
+    await driver.input.pressKey("ARROW_LEFT");
+    expect(driver.captureFrame()).not.toContain("+new second");
+    await driver.resize(100, 28);
     await driver.input.pressKey("ESCAPE");
     await act(async () => {
       driver.registry.update(fixture.states[0]!, (state) => ({
@@ -87,6 +108,18 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.mouse.click(action.screenX + 1, action.screenY, MouseButtons.LEFT, { delayMs: 0 });
     expect(driver.captureFrame()).toContain("Saved changes through turn 1");
     expect(driver.captureFrame()).toContain("-old value");
+    expect(driver.captureFrame()).toContain("+new value");
+    await driver.input.pressKey("]");
+    await driver.input.pressKey("]");
+    expect(driver.captureFrame()).toContain("Turn 1 changes");
+    expect(turn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { threadId: fixture.details[0]!.id, fromTurnCount: 0, toTurnCount: 1 },
+      }),
+    );
+    expect(driver.captureFrame()).toContain("+after turn");
+    expect(driver.captureFrame()).not.toContain("+new value");
+    await driver.input.pressKey("s");
     expect(driver.captureFrame()).toContain("+new value");
     await driver.input.pressKey("ESCAPE");
     expect(driver.captureFrame()).toContain("keep draft");
@@ -186,6 +219,21 @@ describeWithNativeFfi("connected AppShell", () => {
 
     await driver.input.pressKey("ESCAPE");
     expect(driver.captureFrame()).toContain("CONVERSATION");
+  });
+
+  it.each([34, 44, 80])("keeps the terminal shortcut visible at width %i", async (width) => {
+    const { driver, fixture } = await renderShell({ width, height: 24, kittyKeyboard: true });
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    const footer = () => driver.captureFrame().trimEnd().split("\n").slice(-2).join("\n");
+    expect(footer()).toContain("Ctrl+T");
+    expect(footer()).toContain("Terminal");
+
+    await driver.input.pressKey("i");
+    expect(footer()).toContain("Ctrl+T");
+    expect(footer()).toContain("Terminal");
+    await driver.input.pressKey("t", { ctrl: true });
+    expect(fixture.terminalAttachInputs.at(-1)).toMatchObject({ terminalId: "term-1" });
   });
 
   it("searches projects and threads from the global command palette", async () => {
@@ -347,6 +395,58 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.input.typeText("new prompt");
     expect(driver.captureFrame()).toContain("Visible line 59");
     expect(driver.captureFrame()).not.toContain("History / End: live");
+  });
+
+  it("shows queued prompts, allows editing, and delivers them after navigating away", async () => {
+    const { driver, fixture } = await renderShell({ width: 100, height: 28, kittyKeyboard: true });
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    const thread = fixture.details[0]!;
+    const latestTurn = {
+      turnId: TurnId.make("queued-turn"),
+      state: "running" as const,
+      requestedAt: thread.createdAt,
+      startedAt: thread.createdAt,
+      completedAt: null,
+      assistantMessageId: null,
+    };
+    await act(async () => {
+      driver.registry.update(fixture.states[0]!, (value) => ({
+        ...value,
+        data: Option.some({ ...thread, latestTurn }),
+      }));
+    });
+    await driver.input.pressKey("i");
+    await driver.input.typeText("Follow up after tool");
+    await driver.input.pressKey("RETURN");
+    expect(fixture.commands).toHaveLength(0);
+    expect(driver.captureFrame()).toContain("Queued (1): Follow up after tool");
+    expect(driver.captureFrame()).toContain("Sends after next tool call");
+    await driver.input.pressKey("u", { ctrl: true });
+    expect(driver.renderer.root.findDescendantById("queued-message")).toBeUndefined();
+    expect(driver.registry.get(fixture.client.actions.state(thread.id)).draft).toBe(
+      "Follow up after tool",
+    );
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("ESCAPE");
+    await driver.input.pressKey("ESCAPE");
+    await act(async () => {
+      driver.registry.update(fixture.states[0]!, (value) => ({
+        ...value,
+        data: Option.some({
+          ...thread,
+          latestTurn,
+          activities: [agentActivity("tool.completed", "Finished tool", {})],
+        }),
+      }));
+    });
+    await driver.flush();
+    expect(fixture.commands).toHaveLength(1);
+    expect(fixture.commands[0]).toMatchObject({
+      type: "thread.turn.start",
+      message: { text: "Follow up after tool" },
+    });
+    expect(driver.registry.get(fixture.client.actions.state(thread.id)).queue).toEqual([]);
   });
 
   it("places thread activity immediately above the message composer", async () => {

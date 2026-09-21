@@ -4,6 +4,7 @@ import {
   EventId,
   TurnId,
   type UploadChatImageAttachment,
+  type OrchestrationThread,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AtomRegistry } from "effect/unstable/reactivity";
@@ -29,6 +30,189 @@ function fixture(
   const id = data.details[0]!.id;
   return { ...data, registry, actions, id };
 }
+
+function changeThread(f: ReturnType<typeof fixture>, patch: Partial<OrchestrationThread>) {
+  f.registry.update(f.states[0]!, (value) => ({
+    ...value,
+    data: Option.some({ ...Option.getOrThrow(value.data), ...patch }),
+  }));
+}
+
+const runningTurn = {
+  turnId: TurnId.make("queue-turn"),
+  state: "running" as const,
+  requestedAt: "2026-01-01T00:00:00.000Z",
+  startedAt: null,
+  completedAt: null,
+  assistantMessageId: null,
+};
+
+const completedTool = (sequence: number) => ({
+  id: EventId.make(`tool-${sequence}`),
+  kind: "tool.completed",
+  sequence,
+  tone: "tool" as const,
+  summary: "Tool finished",
+  turnId: runningTurn.turnId,
+  createdAt: "2026-01-01T00:00:01.000Z",
+  payload: {},
+});
+
+describe("queued prompts", () => {
+  it("sends one immutable prompt per completed tool, preserving the live draft", async () => {
+    const commands: TuiThreadCommand[] = [];
+    const f = fixture(async (command) => {
+      commands.push(command);
+      return true;
+    });
+    try {
+      changeThread(f, { latestTurn: runningTurn, activities: [completedTool(1)] });
+      f.actions.addPaste(f.registry, f.id, "p".repeat(201));
+      expect(await f.actions.send(f.registry, f.id)).toBe(true);
+      f.actions.setDraft(f.registry, f.id, "second");
+      await f.actions.send(f.registry, f.id);
+      f.actions.setDraft(f.registry, f.id, "still editing");
+      expect(commands).toHaveLength(0);
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(false);
+      changeThread(f, { activities: [completedTool(2), completedTool(1)] });
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(true);
+      expect(commands[0]).toMatchObject({ message: { text: "p".repeat(201) } });
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(false);
+      changeThread(f, { activities: [completedTool(3)] });
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(true);
+      expect(commands[1]).toMatchObject({ message: { text: "second" } });
+      expect(f.registry.get(f.actions.state(f.id)).draft).toBe("still editing");
+      expect(f.registry.get(f.actions.queuedThreads)).toEqual([]);
+    } finally {
+      f.registry.dispose();
+    }
+  });
+
+  it("waits for live data and also delivers when the turn finishes without a tool", async () => {
+    const f = fixture(async () => true);
+    try {
+      changeThread(f, { latestTurn: runningTurn });
+      f.actions.setDraft(f.registry, f.id, "follow up");
+      await f.actions.send(f.registry, f.id);
+      changeThread(f, { latestTurn: { ...runningTurn, state: "completed" } });
+      f.registry.update(f.states[0]!, (value) => ({ ...value, status: "cached" as const }));
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(false);
+      f.registry.update(f.states[0]!, (value) => ({ ...value, status: "live" as const }));
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(true);
+      expect(f.registry.get(f.actions.state(f.id)).queue).toEqual([]);
+    } finally {
+      f.registry.dispose();
+    }
+  });
+
+  it("holds failed sends for an explicit idempotent retry and prevents concurrent sends", async () => {
+    const receipt = Promise.withResolvers<boolean>();
+    const commands: TuiThreadCommand[] = [];
+    const f = fixture(async (command) => {
+      commands.push(command);
+      return commands.length === 1 ? receipt.promise : true;
+    });
+    try {
+      changeThread(f, { latestTurn: runningTurn });
+      f.actions.setDraft(f.registry, f.id, "retry queued");
+      await f.actions.send(f.registry, f.id);
+      changeThread(f, { activities: [completedTool(1)] });
+      const sending = f.actions.flushQueue(f.registry, f.id);
+      expect(f.registry.get(f.actions.state(f.id)).queue[0]?.status).toBe("sending");
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(false);
+      receipt.resolve(false);
+      expect(await sending).toBe(false);
+      expect(f.registry.get(f.actions.state(f.id)).queue[0]?.status).toBe("held");
+      changeThread(f, { activities: [completedTool(2)] });
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(false);
+      expect(await f.actions.flushQueue(f.registry, f.id, true)).toBe(true);
+      expect(commands[1]).toEqual(commands[0]);
+    } finally {
+      f.registry.dispose();
+    }
+  });
+
+  it("reconciles a lost receipt from shared state without sending the message again", async () => {
+    const commands: TuiThreadCommand[] = [];
+    const f = fixture(async (command) => {
+      commands.push(command);
+      return false;
+    });
+    try {
+      changeThread(f, { latestTurn: runningTurn });
+      f.actions.setDraft(f.registry, f.id, "already accepted");
+      await f.actions.send(f.registry, f.id);
+      await f.actions.flushQueue(f.registry, f.id, true);
+      const command = f.registry.get(f.actions.state(f.id)).queue[0]!.command;
+      changeThread(f, {
+        messages: [
+          {
+            id: command.message.messageId,
+            text: command.message.text,
+            role: "user",
+            turnId: runningTurn.turnId,
+            streaming: false,
+            createdAt: command.createdAt,
+            updatedAt: command.createdAt,
+          },
+        ],
+      });
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(true);
+      expect(commands).toHaveLength(1);
+      expect(f.registry.get(f.actions.state(f.id)).queue).toEqual([]);
+    } finally {
+      f.registry.dispose();
+    }
+  });
+
+  it("does not restart the agent after Stop, and returns queued images to the composer", async () => {
+    const image = {
+      type: "image" as const,
+      id: "queued-image",
+      name: "image.png",
+      mimeType: "image/png",
+      sizeBytes: 4,
+      dataUrl: "data:image/png;base64,iVBORw==",
+    };
+    const f = fixture(
+      async () => true,
+      async () => image,
+    );
+    try {
+      changeThread(f, { latestTurn: runningTurn });
+      await f.actions.attachImages(f.registry, f.id, ["image.png"]);
+      await f.actions.send(f.registry, f.id);
+      await f.actions.interrupt(f.registry, f.id);
+      changeThread(f, { latestTurn: { ...runningTurn, state: "interrupted" } });
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(false);
+      expect(f.actions.editQueued(f.registry, f.id)).toBe(true);
+      expect(f.registry.get(f.actions.state(f.id)).attachments).toEqual([image]);
+      expect(f.registry.get(f.actions.state(f.id)).attempt).toBeNull();
+    } finally {
+      f.registry.dispose();
+    }
+  });
+
+  it("holds messages behind approvals, even when Send now is requested", async () => {
+    const f = fixture(async () => true);
+    const approval = {
+      ...completedTool(2),
+      kind: "approval.requested",
+      payload: { requestId: ApprovalRequestId.make("queue-approval"), requestKind: "file-read" },
+    };
+    try {
+      changeThread(f, { latestTurn: runningTurn, activities: [approval] });
+      f.actions.setDraft(f.registry, f.id, "after approval");
+      expect(await f.actions.send(f.registry, f.id)).toBe(true);
+      changeThread(f, { activities: [completedTool(1), approval] });
+      expect(await f.actions.flushQueue(f.registry, f.id, true)).toBe(false);
+      changeThread(f, { activities: [completedTool(1)] });
+      expect(await f.actions.flushQueue(f.registry, f.id)).toBe(true);
+    } finally {
+      f.registry.dispose();
+    }
+  });
+});
 
 describe("thread interactions", () => {
   it("submits the selected thread's exact model and modes and retains edits made while waiting", async () => {
@@ -196,13 +380,16 @@ describe("thread interactions", () => {
         status: "live",
         data: Option.some({ ...f.details[0]!, latestTurn }),
       });
-      expect(await f.actions.send(f.registry, f.id)).toBe(false);
+      expect(await f.actions.send(f.registry, f.id)).toBe(true);
+      expect(f.registry.get(f.actions.state(f.id)).queue).toHaveLength(1);
       expect(await f.actions.interrupt(f.registry, f.id)).toBe(true);
       expect(commands[0]).toMatchObject({
         type: "thread.turn.interrupt",
         turnId: latestTurn.turnId,
         threadId: f.id,
       });
+      expect(f.registry.get(f.actions.state(f.id)).queue[0]?.status).toBe("held");
+      expect(f.actions.editQueued(f.registry, f.id)).toBe(true);
       expect(f.registry.get(f.actions.state(f.id)).draft).toBe("keep me");
     } finally {
       f.registry.dispose();

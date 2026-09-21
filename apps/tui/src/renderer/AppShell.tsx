@@ -22,6 +22,7 @@ import type { OrchestrationThreadShell } from "@t3tools/contracts";
 import type { HotkeyState } from "../ui/HotkeyBar.tsx";
 import { CommandPalette, type CommandPaletteItem } from "./CommandPalette.tsx";
 import { ThreadDiff } from "./ThreadDiff.tsx";
+import { QueuedMessages } from "./QueuedMessages.tsx";
 
 type PaletteEntry = CommandPaletteItem & {
   readonly target:
@@ -342,6 +343,7 @@ export function AppShell({
             : "Connecting";
   return (
     <ActivityClockProvider>
+      <QueuedMessages client={client} />
       <AppShellView
         environmentId={client.environmentId}
         live={
@@ -364,9 +366,9 @@ export function AppShell({
                 title: "Thread changes",
                 context: "Diff",
                 hints: [
-                  { key: "↑↓", label: "Scroll" },
-                  { key: "PgUp/Dn", label: "Page" },
-                  { key: "Tab", label: "Next file" },
+                  { key: "S/W", label: "Saved/working" },
+                  { key: "[/]", label: "Change scope/turn" },
+                  { key: "Tab", label: "Files/diff" },
                   { key: "R", label: "Refresh" },
                   { key: "Esc", label: "Close" },
                 ],

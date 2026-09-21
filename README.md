@@ -9,23 +9,104 @@
 This branch connects to an existing T3 environment to browse projects and threads, send text
 prompts, follow agent output, stop turns, respond to approvals and questions, choose models/options,
 and invoke provider skills. New threads can use the current checkout or an isolated Git worktree.
-Switching provider accounts in existing threads, attachments, Git review/actions, and the
-server-backed terminal UI remain unfinished. macOS implementation is proceeding; Linux and Windows
-certification remains a release requirement.
+It also includes conversation search, Markdown output, saved/per-turn/working-tree diff review,
+and an embedded terminal. Switching provider accounts in existing threads and Git write actions
+remain unfinished. Cross-platform certification remains a release requirement.
 
-## Share an existing T3 Code environment
+## Getting started with T3 TUI
 
-The TUI attaches to the saved T3 environment by default. It does not copy its database or start a
-second server against its data. Keep the existing T3 desktop app or server running while attached.
+### 1. Install and launch T3 Code first
 
-For first-time pairing, create a pairing link in that environment's Connections settings.
-Set `T3_ORIGIN` to the backend's HTTP(S) origin, including the port, without a path or token.
-Copy the complete pairing link or its token. On macOS, send the clipboard through stdin:
+T3 TUI connects to a running T3 Code environment. Install the desktop app using the
+[installation instructions below](#installation), then launch it. Set up and authenticate at
+least one provider in T3 Code before sending prompts from the TUI.
+
+Alternatively, with Node.js and npm installed, start the T3 Code server and web app in a terminal:
+
+```bash
+npx t3@latest
+```
+
+Keep the desktop app or server running while using the TUI. The TUI shares its projects, threads,
+and agents; it does not copy the database or start a second server against that data.
+
+### 2. Prepare this TUI checkout
+
+The commands below use Bash on macOS or Linux. Clone this fork and install its dependencies
+with [Vite+](#install-vp):
+
+```bash
+git clone https://github.com/StevenMatchett/t3code.git
+cd t3code
+vp i
+```
+
+If you already have the checkout, run `vp i` from its root. The `start-tui.sh` launcher compiles
+the TUI and uses `npx` to run Node 26.4.0, including the required FFI support. Its first run may
+download that Node version.
+
+### 3. Generate a pairing key from the running T3 Code environment
+
+On the machine running T3 Code, open another terminal and run this **outside a development
+checkout**, so the command discovers your installed environment rather than a worktree's dev server:
+
+```bash
+npx t3@latest pair --label "T3 TUI"
+```
+
+This prints a QR code and a **Pairing URL** containing a one-time token (the pairing key).
+Copy the complete URL. The default expiry is five minutes; generate another if it expires or
+has already been used. Do not open the link in a browser before pairing the TUI.
+
+For a server using a custom T3 home, supply the same base directory:
+
+```bash
+npx t3@latest pair --base-dir /absolute/path/to/t3-home --label "T3 TUI"
+```
+
+You can also create a pairing link in **T3 Code → Settings → Connections**. If your installed
+version does not recognize the `pair` command, use that screen or update T3 Code.
+
+### 4. Pair once, then start T3 TUI
+
+Return to this checkout's root. Set `T3_ORIGIN` to the HTTP(S) origin in your pairing URL,
+including its port, but without `/pair` or the token. For example, if the link starts with
+`http://127.0.0.1:3773/pair`, use:
+
+```bash
+T3_ORIGIN='http://127.0.0.1:3773'
+```
+
+Replace that example with your actual address. For a hosted pairing link, use its embedded
+backend address, not `https://app.t3.codes`. When connecting from another machine, use a reachable
+network address; see [remote access](./docs/user/remote-access.md).
+
+In Bash, paste the complete pairing URL at the hidden prompt and press Enter:
+
+```bash
+read -r -s -p 'Paste the pairing URL, then press Enter: ' T3_PAIRING_URL
+printf '\n'
+printf '%s\n' "$T3_PAIRING_URL" | ./start-tui.sh --connect "$T3_ORIGIN" --pair-stdin
+unset T3_PAIRING_URL
+```
+
+Or, on macOS, copy the URL and read it directly from the clipboard:
 
 ```bash
 pbpaste | ./start-tui.sh --connect "$T3_ORIGIN" --pair-stdin
+```
+
+Pairing saves the connection and exits. Now launch the TUI:
+
+```bash
 ./start-tui.sh
 ```
+
+On subsequent launches, run `./start-tui.sh` again with T3 Code running. You only need a new
+pairing link if the saved connection is no longer authorized. Closing the TUI leaves T3 Code
+and its agents running.
+
+### Connection details
 
 Pairing saves a derived bearer credential under `~/.t3-tui`, then exits. macOS and Linux use a
 mode-`0600` file. The Windows implementation encrypts the credential with current-user DPAPI through
@@ -75,8 +156,13 @@ In an open conversation, Enter or `i` focuses the composer. Enter sends; Ctrl+J 
 in legacy and enhanced terminals, and Shift+Enter also inserts one where the terminal supports it.
 Escape returns to history without discarding the draft. Text pasted into the composer is never
 submitted automatically. Drafts survive thread navigation within the TUI session but are not saved
-across process exits. Prompts use the thread's existing model, options, and runtime mode; wait for
-an active turn to finish or press Ctrl+X to request a stop before sending another prompt.
+across process exits. Prompts use the thread's existing model, options, and runtime mode. During
+an active turn, Enter queues your message for the next completed tool call or the end of the turn.
+The queue above the composer shows what is waiting and when it is sending. Messages leave one at
+a time, even if you navigate to another thread. Pending approvals and questions hold delivery.
+Ctrl+Y sends the first queued message now; Ctrl+U returns it to an empty composer for editing.
+Cancel or Ctrl+X stops the active turn and pauses the queue. Failed sends also pause it; Ctrl+Y
+retries without duplicating the command. Queued messages are kept only for this TUI session.
 
 Use the model and reasoning dropdowns on the composer to change the shared thread's selection.
 Click a control, or Tab from the text editor to it and press Enter. Choose a value to apply it;
