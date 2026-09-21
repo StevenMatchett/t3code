@@ -140,7 +140,7 @@ function Approval({
   );
 }
 
-function Questions({
+export function Questions({
   request,
   client,
   threadId,
@@ -148,7 +148,8 @@ function Questions({
   width,
   height,
   onBack,
-}: RequestViewProps & { readonly request: PendingUserInput }) {
+  inline = false,
+}: RequestViewProps & { readonly request: PendingUserInput; readonly inline?: boolean }) {
   const registry = useContext(RegistryContext);
   const state = useAtomValue(client.actions.state(threadId));
   const [questionIndex, setQuestionIndex] = useState(0);
@@ -326,7 +327,7 @@ function Questions({
             height={1}
             flexShrink={0}
             onMouseDown={(event) => {
-              if (event.button !== 0 || waiting || editing) return;
+              if (event.button !== 0 || !active || waiting || editing) return;
               event.preventDefault();
               event.stopPropagation();
               activate(itemIndex);
@@ -335,7 +336,7 @@ function Questions({
             <SelectionRow
               label={item.label}
               selected={itemIndex === choice}
-              active={!waiting && !editing}
+              active={active && !waiting && !editing}
             />
           </Stack>
         );
@@ -352,7 +353,7 @@ function Questions({
               setChoice(continueIndex);
             }
           }}
-          focused={active}
+          focused={active && !waiting}
           placeholder="Your answer..."
           height={editorHeight}
         />
@@ -363,8 +364,8 @@ function Questions({
           : editing
             ? "Enter keeps answer | Shift+Enter newline | Esc cancel"
             : canCustom
-              ? "Up/Down choose | Enter select | E type answer | Esc requests"
-              : "Up/Down choose | Space/Enter select | Esc requests"}
+              ? `Up/Down choose | Enter select | E type answer | Esc ${inline ? "chat" : "requests"}`
+              : `Up/Down choose | Space/Enter select | Esc ${inline ? "chat" : "requests"}`}
       </Text>
       <Text height={1} wrapMode="none">
         {state.error ?? "Select an answer, then Continue or Submit. PgUp/PgDn scroll details."}

@@ -3,11 +3,11 @@ import { decodePasteBytes } from "@opentui/core";
 import { useKeyboard, usePaste } from "@opentui/react";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { useMemo, useState, useContext, useEffect } from "react";
+import { useMemo, useState, useContext, useEffect, useRef } from "react";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import { foldSubagentActivities } from "@t3tools/client-runtime/state/subagentRuntime";
 import { AgentOutputOverlay, AgentSwarmPanel, agentOutputLines } from "./AgentSwarm.tsx";
-import { RequestsPanel } from "./RequestsPanel.tsx";
+import { Questions, RequestsPanel } from "./RequestsPanel.tsx";
 import { ComposerControls } from "./ProviderPicker.tsx";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { projectRecordedThreadTimeline } from "../features/chat/timeline.ts";
@@ -55,7 +55,9 @@ export function Conversation({
   const queued = interaction.queue[0];
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
-  const [mode, setMode] = useState<"history" | "composer" | "requests" | "agents">("history");
+  const [mode, setMode] = useState<"history" | "composer" | "requests" | "questions" | "agents">(
+    "history",
+  );
   const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
@@ -66,12 +68,31 @@ export function Conversation({
   const [agentOutputStart, setAgentOutputStart] = useState(0);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const requests = useMemo(() => derivePendingRequests(thread?.activities ?? []), [thread]);
+  const question = requests.userInputs.find(
+    (request) =>
+      !interaction.replies.some(
+        (reply) => reply.kind === "user-input" && reply.requestId === request.requestId,
+      ),
+  );
+  const focusedQuestion = useRef<string | null>(null);
+  const questionId = question?.requestId ?? null;
   const agents = useMemo(
     () => foldSubagentActivities(thread?.activities ?? []),
     [thread?.activities],
   );
   const resolvedAgentCursor = Math.max(-1, Math.min(agentCursor, agents.length - 1));
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
+  useEffect(() => {
+    if (!active || terminalOpen || selectedAgent || mode === "requests") return;
+    if (questionId && focusedQuestion.current !== questionId) {
+      focusedQuestion.current = questionId;
+      setMode("questions");
+    } else if (!questionId) {
+      focusedQuestion.current = null;
+      // oxlint-disable-next-line react/set-state-in-effect -- Return keyboard focus when the server question is resolved or its response is accepted.
+      if (mode === "questions") setMode("composer");
+    }
+  }, [active, terminalOpen, selectedAgent, questionId, mode]);
   const selectedAgentLines = useMemo(
     () =>
       selectedAgent
@@ -98,7 +119,7 @@ export function Conversation({
     setMode("agents");
   };
   usePaste((event) => {
-    if (!active || selectedAgent) return;
+    if (!active || selectedAgent || mode === "questions" || terminalOpen) return;
     const text = decodePasteBytes(event.bytes);
     const paths = pastedImagePaths(text);
     if (!paths && !client.actions.addPaste(registry, threadId, text)) return;
@@ -119,6 +140,14 @@ export function Conversation({
         { key: "Home/End", label: "Jump" },
         { key: "Ctrl+K", label: "Search" },
         { key: "Esc", label: "Close agent" },
+      ];
+    if (mode === "questions")
+      return [
+        { key: "↑↓/Tab", label: "Choose" },
+        { key: "Enter", label: "Select/submit" },
+        { key: "E", label: "Type answer" },
+        { key: "PgUp/Dn", label: "Details" },
+        { key: "Esc", label: "Chat" },
       ];
     if (mode === "composer")
       if (composerMenuOpen)
@@ -197,15 +226,17 @@ export function Conversation({
   ]);
   const hotkeyContext = selectedAgent
     ? "Agent output"
-    : mode === "composer"
-      ? composerMenuOpen
-        ? "Menu"
-        : "Message"
-      : mode === "requests"
-        ? "Requests"
-        : mode === "agents"
-          ? "Agents"
-          : "Conversation";
+    : mode === "questions"
+      ? "Question"
+      : mode === "composer"
+        ? composerMenuOpen
+          ? "Menu"
+          : "Message"
+        : mode === "requests"
+          ? "Requests"
+          : mode === "agents"
+            ? "Agents"
+            : "Conversation";
   useEffect(() => {
     onHintsChange?.({ context: hotkeyContext, hints });
   }, [hints, hotkeyContext, onHintsChange]);
@@ -220,6 +251,23 @@ export function Conversation({
   const agentPanelHeight =
     agents.length > 0 ? (agentsExpanded ? Math.min(6, agents.length + 3) : 3) : 0;
   const gap = height >= 12 ? 1 : 0;
+  const questionHeight = question
+    ? Math.max(
+        6,
+        Math.min(
+          15,
+          Math.floor(height / 2),
+          height -
+            (editorHeight + attachmentHeight + suggestedReplyHeight + 3) -
+            agentPanelHeight -
+            gap -
+            (interaction.error ? 1 : 0) -
+            (queued ? 2 : 0) -
+            (thread?.worktreePath ? 1 : 0) -
+            3,
+        ),
+      )
+    : 0;
   const count = Math.max(
     1,
     height -
@@ -227,6 +275,7 @@ export function Conversation({
       (editorHeight + attachmentHeight + suggestedReplyHeight + 3) -
       gap -
       agentPanelHeight -
+      questionHeight -
       (interaction.error ? 1 : 0) -
       (queued ? 2 : 0) -
       (thread?.worktreePath ? 1 : 0),
@@ -349,7 +398,7 @@ export function Conversation({
         onNewThread?.();
         break;
       case "a":
-        setMode("requests");
+        setMode(question && requests.approvals.length === 0 ? "questions" : "requests");
         break;
       case "g":
         if (agents.length === 0) return;
@@ -508,6 +557,35 @@ export function Conversation({
         </Text>
       ) : null}
       {gap ? <Stack height={gap} flexShrink={0} /> : null}
+      {question ? (
+        <Panel
+          id="inline-question"
+          title={mode === "questions" ? "Agent question" : "Agent question · click to answer"}
+          height={questionHeight}
+          flexShrink={0}
+          width="100%"
+          flexDirection="column"
+          borderTone={mode === "questions" ? "borderFocused" : "warning"}
+          onMouseDown={(event) => {
+            if (!active || event.button !== 0 || mode === "questions") return;
+            event.preventDefault();
+            event.stopPropagation();
+            setMode("questions");
+          }}
+        >
+          <Questions
+            key={question.requestId}
+            request={question}
+            client={client}
+            threadId={threadId}
+            active={active && mode === "questions" && !selectedAgent}
+            width={Math.max(1, width - 2)}
+            height={questionHeight - 2}
+            inline
+            onBack={() => setMode("history")}
+          />
+        </Panel>
+      ) : null}
       {queued ? (
         <Stack id="queued-message" height={2} flexShrink={0}>
           <Text tone="warning" height={1} wrapMode="none" truncate>

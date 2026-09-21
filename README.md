@@ -239,9 +239,12 @@ only report the provider-level catalog, so project skills may require a server u
 execution remains the provider's responsibility; the TUI does not load local skill files or add
 its own tool runtime.
 
-Press `a` from conversation history to review pending approvals or agent questions. Approval choices
-come from the provider and require a separate confirmation. For questions, Space toggles choices;
-select Continue or Submit after answering. Custom text is offered only when permitted. Responses
+Agent questions appear inside the conversation and take keyboard focus when you are viewing that
+thread. Your chat draft is preserved. Use arrows to choose, Space to toggle choices, and Enter to
+select Continue or Submit after answering. Custom text is offered only when permitted. Escape
+returns to history; click the question to resume. An open terminal keeps focus until you leave it.
+Press `a` from history to revisit a question or review pending approvals. Approval choices come
+from the provider and require a separate confirmation. Responses
 remain pending until the server reports the result, including responses made in another client.
 The TUI honors the server's output-streaming preference; some servers buffer text until a turn
 finishes or pauses.

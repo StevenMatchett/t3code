@@ -57,6 +57,103 @@ async function request(
 }
 
 describe("conversation interaction", () => {
+  it("focuses inline questions, preserves the chat draft, and keeps answers when returning to history", async () => {
+    const { driver, fixture, id } = await setup();
+    await driver.input.pressKey("i");
+    await driver.input.typeText("Keep this draft");
+    const requestId = ApprovalRequestId.make("inline-choice");
+    await request(driver, fixture, "user-input.requested", {
+      requestId,
+      questions: [
+        {
+          id: "theme",
+          header: "Theme",
+          question: "Which theme?",
+          multiSelect: false,
+          allowCustomAnswer: false,
+          options: [{ label: "Dark", value: "dark", description: "Dark theme" }],
+        },
+      ],
+    });
+    expect(driver.captureFrame()).toContain("QUESTION");
+    expect(driver.captureFrame()).toContain("Keep this draft");
+    expect(driver.renderer.root.findDescendantById("conversation-history")).toBeDefined();
+    const panel = driver.renderer.root.findDescendantById("inline-question")!;
+    const composer = driver.renderer.root.findDescendantById("conversation-composer")!;
+    expect(panel.screenY + panel.height).toBeLessThanOrEqual(composer.screenY);
+    await driver.input.pressKey("RETURN");
+    expect(fixture.commands).toHaveLength(0);
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("CONVERSATION");
+    await driver.input.pressKey("a");
+    expect(driver.captureFrame()).toContain("[x] Dark");
+    await driver.input.pressKey("RETURN");
+    expect(fixture.commands).toHaveLength(1);
+    expect(fixture.commands[0]).toMatchObject({
+      type: "thread.user-input.respond",
+      requestId,
+      answers: { theme: "dark" },
+    });
+    expect(driver.renderer.root.findDescendantById("inline-question")).toBeUndefined();
+    expect(driver.captureFrame()).toContain("MESSAGE");
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe("Keep this draft");
+  });
+
+  it("routes long pasted answers into the inline question rather than the chat draft", async () => {
+    const { driver, fixture, id } = await setup();
+    await driver.resize(44, 24);
+    const requestId = ApprovalRequestId.make("inline-text");
+    await request(driver, fixture, "user-input.requested", {
+      requestId,
+      questions: [
+        {
+          id: "details",
+          header: "Details",
+          question: "What should change?",
+          multiSelect: false,
+          allowCustomAnswer: true,
+          options: [],
+        },
+      ],
+    });
+    const answer = "Detailed answer. ".repeat(20).trim();
+    await driver.input.paste(answer);
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe("");
+    await driver.input.pressKey("RETURN");
+    expect(fixture.commands).toHaveLength(0);
+    await driver.input.pressKey("RETURN");
+    expect(fixture.commands[0]).toMatchObject({
+      type: "thread.user-input.respond",
+      answers: { details: answer },
+    });
+  });
+
+  it("defers question focus until the active terminal is closed", async () => {
+    const { driver, fixture } = await setup();
+    await driver.input.pressKey("t", { ctrl: true });
+    await request(driver, fixture, "user-input.requested", {
+      requestId: ApprovalRequestId.make("terminal-question"),
+      questions: [
+        {
+          id: "choice",
+          header: "Choice",
+          question: "Continue?",
+          multiSelect: false,
+          allowCustomAnswer: false,
+          options: [{ label: "Yes", value: "yes", description: "Continue" }],
+        },
+      ],
+    });
+    expect(driver.captureFrame()).toContain("[term-1]");
+    expect(driver.renderer.root.findDescendantById("inline-question")).toBeUndefined();
+    await driver.input.typeText("echo test");
+    expect(fixture.terminalWrites.join("")).toContain("echo test");
+    await driver.input.pressKey("\\", { ctrl: true });
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("QUESTION");
+    expect(driver.captureFrame()).toContain("Continue?");
+    expect(fixture.commands).toHaveLength(0);
+  });
   it.each([false, true])(
     "owns editing keys and submits multiline pasted prompts only on Enter (kitty=%s)",
     async (kittyKeyboard) => {
@@ -269,8 +366,8 @@ describe("conversation interaction", () => {
         },
       ],
     });
-    await driver.input.pressKey("a");
-    await driver.input.pressKey("RETURN");
+    expect(driver.renderer.root.findDescendantById("conversation-history")).toBeDefined();
+    expect(driver.renderer.root.findDescendantById("inline-question")).toBeDefined();
     await driver.input.pressKey(" ");
     await driver.input.pressKey("ARROW_DOWN");
     await driver.input.pressKey(" ");
@@ -309,8 +406,6 @@ describe("conversation interaction", () => {
       ],
     });
 
-    await driver.input.pressKey("a");
-    await driver.input.pressKey("RETURN");
     expect(driver.captureFrame()).toContain("E type answer");
     await driver.input.pressKey("e");
     await driver.input.typeText("Straight ahead");
