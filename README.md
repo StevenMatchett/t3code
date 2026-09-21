@@ -13,6 +13,58 @@ It also includes conversation search, Markdown output, saved/per-turn/working-tr
 and an embedded terminal. Switching provider accounts in existing threads and Git write actions
 remain unfinished. Cross-platform certification remains a release requirement.
 
+## See it in action
+
+Real TUI renders with synthetic demo conversations, tool output, and agent activity—no private
+workspace data or credentials. The walkthroughs are scripted examples, not live agent sessions.
+
+![T3 TUI conversation with Markdown, a workspace sidebar, and contextual keyboard shortcuts](./docs/media/tui/conversation.png)
+
+<details>
+<summary>Screenshot gallery: queued messages, agents, diffs, search, and terminal</summary>
+
+Queue a follow-up while the agent works. It sends after a tool completes or the turn ends.
+
+![A queued follow-up with send-now, edit, and stop controls](./docs/media/tui/queued-message.png)
+
+See the agent list, then open an agent's output without leaving the conversation.
+
+![Two agents listed beneath the message composer](./docs/media/tui/agent-swarm.png)
+
+![An agent's attributed tool output in a floating panel](./docs/media/tui/agent-output.png)
+
+Review saved changes by file; switch to working-tree or individual-turn changes with the hotkeys.
+
+![File navigation and a color-coded saved diff](./docs/media/tui/diff-review.png)
+
+Find a thread by its conversation text with `Ctrl+K`.
+
+![Searching conversation output from the command palette](./docs/media/tui/command-palette.png)
+
+Open the project's terminal with `Ctrl+T`. `Ctrl+\` releases keyboard focus to the shell controls.
+
+![The embedded terminal showing sample command output](./docs/media/tui/terminal.png)
+
+</details>
+
+<details>
+<summary>Watch: queue a follow-up message (10 seconds)</summary>
+
+![Compose a follow-up, queue it, and see confirmation after tool completion](./docs/media/tui/queue-walkthrough.gif)
+
+[Download the MP4 walkthrough](./docs/media/tui/queue-walkthrough.mp4).
+
+</details>
+
+<details>
+<summary>Watch: agents, diff review, and terminal (13 seconds)</summary>
+
+![Explore an agent's output, review the diff, and open the embedded terminal](./docs/media/tui/review-walkthrough.gif)
+
+[Download the MP4 walkthrough](./docs/media/tui/review-walkthrough.mp4).
+
+</details>
+
 ## Getting started with T3 TUI
 
 ### 1. Install and launch T3 Code first
