@@ -34,6 +34,7 @@ export function Conversation({
   onHelp,
   onNewThread,
   onDiff,
+  onOpenPullRequest,
   onHintsChange,
   onTerminalFocusChange,
 }: {
@@ -46,6 +47,7 @@ export function Conversation({
   readonly onHelp: () => void;
   readonly onNewThread?: () => void;
   readonly onDiff?: () => void;
+  readonly onOpenPullRequest?: () => void;
   readonly onHintsChange?: (state: HotkeyState) => void;
   readonly onTerminalFocusChange?: (focused: boolean) => void;
 }) {
@@ -218,6 +220,7 @@ export function Conversation({
       ...(agents.length ? [{ key: "Tab", label: "Agents" }] : []),
       { key: "T", label: "Details" },
       { key: "D", label: "Diff" },
+      { key: "O", label: "Open PR" },
       { key: "N", label: "New thread" },
       { key: "Ctrl+K", label: "Search" },
       { key: "Esc", label: "Threads" },
@@ -449,6 +452,9 @@ export function Conversation({
         break;
       case "d":
         onDiff?.();
+        break;
+      case "o":
+        onOpenPullRequest?.();
         break;
       case "escape":
       case "left":

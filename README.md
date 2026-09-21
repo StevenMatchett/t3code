@@ -223,6 +223,11 @@ Ctrl+Y sends the first queued message now; Ctrl+U returns it to an empty compose
 Cancel or Ctrl+X stops the active turn and pauses the queue. Failed sends also pause it; Ctrl+Y
 retries without duplicating the command. Queued messages are kept only for this TUI session.
 
+While browsing a thread, press `O` to open its branch's pull request in your browser, or choose
+“Open pull request in browser” from `Ctrl+K`. The lookup uses the thread's repository/worktree
+on the connected server. Over SSH or without a desktop, the TUI shows the link instead; `C`
+copies it to your terminal's clipboard. Esc closes the PR panel.
+
 Use the model and reasoning dropdowns on the composer to change the shared thread's selection.
 Click a control, or Tab from the text editor to it and press Enter. Choose a value to apply it;
 Escape closes the dropdown without discarding your prompt. Only options advertised by the current

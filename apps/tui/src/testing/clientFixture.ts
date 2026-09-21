@@ -437,6 +437,14 @@ export function makeClientFixture(
     refreshArchived: () => {},
   });
   const client: TuiClient = {
+    resolvePullRequest: async (_registry, target) => ({
+      number: 42,
+      title: "Fixture pull request",
+      url: "https://github.com/example/repo/pull/42",
+      baseBranch: "main",
+      headBranch: target.branch ?? "feature",
+      state: "open",
+    }),
     environmentId: EnvironmentId.make("renderer-fixture"),
     label: "Shared test environment",
     httpOrigin: "http://localhost:43110",
