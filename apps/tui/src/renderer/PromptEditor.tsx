@@ -106,6 +106,14 @@ export function PromptEditor({
         if (key.repeated && (key.name === "return" || key.name === "enter")) {
           key.preventDefault();
           key.stopPropagation();
+          return;
+        }
+        // Some terminal bindings send ESC+CR for Shift+Enter without a Shift
+        // modifier. Treat that legacy sequence as a newline (also Alt+Enter).
+        if (key.sequence === "\x1b\r") {
+          key.preventDefault();
+          key.stopPropagation();
+          editor.current?.newLine();
         }
       }}
       onCursorChange={() => {

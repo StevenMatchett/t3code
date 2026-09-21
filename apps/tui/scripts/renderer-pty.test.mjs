@@ -14,7 +14,7 @@ const pty = requireServer("node-pty");
 const childPath = NodeURL.fileURLToPath(new URL("./renderer-pty-child.mjs", import.meta.url));
 
 async function scenario(action, expectedCode) {
-  const child = pty.spawn(process.execPath, ["--experimental-ffi", childPath], {
+  const child = pty.spawn(process.execPath, ["--experimental-ffi", childPath, action], {
     name: "xterm-256color",
     cols: 80,
     rows: 24,
@@ -23,6 +23,7 @@ async function scenario(action, expectedCode) {
   let output = "";
   let acted = false;
   let followedUp = false;
+  let keyboardDetected = false;
   let exited = false;
   let timer;
   const done = new Promise((resolve, reject) => {
@@ -35,11 +36,28 @@ async function scenario(action, expectedCode) {
     }, 15_000);
     child.onData((chunk) => {
       output += chunk;
-      if (!acted && output.includes("__TUI_READY__")) {
+      if (action === "SHIFT_ENTER" && !keyboardDetected && output.includes("\x1b[?u")) {
+        keyboardDetected = true;
+        child.write("\x1b[?0u");
+      }
+      // oxlint-disable-next-line no-control-regex -- Match terminal keyboard negotiation sequences.
+      const requests = [...output.matchAll(/\x1b\[[>=](\d+)(?:;\d+)?u/g)];
+      if (
+        !acted &&
+        output.includes("__TUI_READY__") &&
+        (action !== "SHIFT_ENTER" || requests.length > 0)
+      ) {
         acted = true;
         if (action.startsWith("SIG")) child.kill(action);
         else if (action === "CTRL_C") child.write("\x03");
-        else child.write(action);
+        else if (action === "SHIFT_ENTER") {
+          // Emulate Enter's legacy encoding unless the app requests all keys.
+          const flags = Number(requests.at(-1)?.[1] ?? 0);
+          const shiftEnter = flags & 8 ? "\x1b[13;2u" : "\r";
+          child.write(
+            `\x1b[102u\x1b[105u\x1b[114u\x1b[115u\x1b[116u\x1b[101;1;233u${shiftEnter}second\x1b[13u`,
+          );
+        } else child.write(action);
       }
       if (action === "CTRL_C" && !followedUp && output.includes("__TUI_CTRL_C__")) {
         followedUp = true;
@@ -67,6 +85,7 @@ async function scenario(action, expectedCode) {
       rendererDestroyed: true,
       errors: expectedCode === 1 ? 1 : 0,
       exitCode: expectedCode,
+      ...(action === "SHIFT_ENTER" ? { submissions: ["firsté\nsecond"] } : {}),
     });
     const beforeReceipt = output.slice(0, match.index);
     const modes = new Map();
@@ -88,6 +107,7 @@ async function scenario(action, expectedCode) {
 }
 
 for (const [action, code] of [
+  ["SHIFT_ENTER", 0],
   ["q", 0],
   ["CTRL_C", 0],
   ["SIGINT", 130],

@@ -211,8 +211,8 @@ While browsing the sidebar, Left selects projects and Right selects recent threa
 selects a row and Enter opens it. Project sublines are indented and dimmed within the terminal's
 fixed-size text grid.
 
-In an open conversation, Enter or `i` focuses the composer. Enter sends; Ctrl+J inserts a newline
-in legacy and enhanced terminals, and Shift+Enter also inserts one where the terminal supports it.
+In an open conversation, Enter or `i` focuses the composer. Enter sends; Shift+Enter inserts a
+newline. Terminals that cannot distinguish Shift+Enter from Enter can use Ctrl+J as a fallback.
 Escape returns to history without discarding the draft. Text pasted into the composer is never
 submitted automatically. Drafts survive thread navigation within the TUI session but are not saved
 across process exits. Prompts use the thread's existing model, options, and runtime mode. During

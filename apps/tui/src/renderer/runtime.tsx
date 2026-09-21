@@ -121,7 +121,14 @@ export async function startRendererRuntime(
 
   try {
     renderer = await (
-      options.createRenderer ?? (() => createCliRenderer({ exitOnCtrlC: false }))
+      options.createRenderer ??
+      (() =>
+        createCliRenderer({
+          exitOnCtrlC: false,
+          // Enter can retain its legacy encoding unless all keys are reported.
+          // Request associated text too so composed/non-ASCII input is preserved.
+          useKittyKeyboard: { allKeysAsEscapes: true, reportText: true },
+        }))
     )();
     root = createRoot(renderer);
     const destroyed = Promise.withResolvers<void>();

@@ -154,6 +154,36 @@ describe("conversation interaction", () => {
     expect(driver.captureFrame()).toContain("Continue?");
     expect(fixture.commands).toHaveLength(0);
   });
+  it.each(["kitty", "ghostty", "escape-return"])(
+    "inserts a newline with Shift+Enter (%s) and sends only on Enter",
+    async (input) => {
+      const { driver, fixture, id } = await setup();
+      await driver.input.pressKey("i");
+      await driver.input.typeText("first");
+      if (input !== "kitty") {
+        await act(async () => {
+          driver.renderer.stdin.emit(
+            "data",
+            Buffer.from(input === "ghostty" ? "\x1b[13;2u" : "\x1b\r"),
+          );
+        });
+        await driver.flush();
+      } else {
+        await driver.input.pressKey("RETURN", { shift: true });
+      }
+      await driver.input.typeText("second");
+      expect(fixture.commands).toHaveLength(0);
+      expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe("first\nsecond");
+      expect(driver.captureFrame()).toContain("Shift+Enter");
+      await driver.input.pressKey("RETURN");
+      expect(fixture.commands).toHaveLength(1);
+      expect(fixture.commands[0]).toMatchObject({
+        type: "thread.turn.start",
+        message: { text: "first\nsecond" },
+      });
+    },
+  );
+
   it.each([false, true])(
     "owns editing keys and submits multiline pasted prompts only on Enter (kitty=%s)",
     async (kittyKeyboard) => {

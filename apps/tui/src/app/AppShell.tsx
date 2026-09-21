@@ -177,7 +177,7 @@ function Help() {
       <Text>Ctrl+K Search conversation output, projects, threads, and commands</Text>
       <Text tone="accent">CONVERSATION</Text>
       <Text>Enter / i Write prompt Esc Return to history</Text>
-      <Text>Enter Send Ctrl+J New line</Text>
+      <Text>Enter Send Shift+Enter New line</Text>
       <Text>Click model/reasoning or Tab then Enter</Text>
       <Text>/ Search skills Enter Choose Esc Dismiss</Text>
       <Text>Mouse wheel / Up/Down / PgUp/PgDn Scroll End Follow latest</Text>

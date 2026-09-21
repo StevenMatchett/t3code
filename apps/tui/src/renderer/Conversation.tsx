@@ -174,7 +174,7 @@ export function Conversation({
                 label: thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send",
               },
               ...terminalHint,
-              { key: "Ctrl+J", label: "New line" },
+              { key: "Shift+Enter", label: "New line" },
               { key: "/", label: "Skills" },
               { key: "Tab", label: agents.length ? "Options/agents" : "Options" },
               ...(thread?.latestTurn?.state === "running" || queued
