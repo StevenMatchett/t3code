@@ -30,6 +30,7 @@ type PaletteEntry = CommandPaletteItem & {
     | { readonly type: "new-thread" }
     | { readonly type: "archived" }
     | { readonly type: "help" }
+    | { readonly type: "toggle-sidebar-view" }
     | { readonly type: "diff" }
     | { readonly type: "manage"; readonly thread: OrchestrationThreadShell }
     | { readonly type: "project"; readonly projectId: OrchestrationThreadShell["projectId"] }
@@ -148,6 +149,16 @@ export function AppShell({
     );
     const commands: PaletteEntry[] = [
       {
+        id: "command:sidebar-view",
+        label:
+          state.sidebarView === "recent"
+            ? "Show projects in sidebar"
+            : "Show recent threads in sidebar",
+        detail: "Command · Ctrl+B",
+        keywords: "toggle view navigation",
+        target: { type: "toggle-sidebar-view" },
+      },
+      {
         id: "command:new-project",
         label: "New project",
         detail: "Command",
@@ -225,6 +236,7 @@ export function AppShell({
     rows.threads,
     selectedThread,
     state.projectId,
+    state.sidebarView,
     threadSearch.matches,
   ]);
   const choosePaletteEntry = (id: string) => {
@@ -232,6 +244,9 @@ export function AppShell({
     if (!entry) return;
     closePalette();
     switch (entry.target.type) {
+      case "toggle-sidebar-view":
+        dispatch({ type: "toggle-sidebar-view" });
+        break;
       case "diff":
         setThreadOverlay({ type: "diff" });
         break;
@@ -264,6 +279,12 @@ export function AppShell({
   };
   useKeyboard((key) => {
     if (!active || terminalFocused) return;
+    if (key.ctrl && key.name === "b" && !state.modal && !threadOverlay) {
+      key.preventDefault();
+      key.stopPropagation();
+      dispatch({ type: "toggle-sidebar-view" });
+      return;
+    }
     if (
       key.ctrl &&
       key.name.toLowerCase() === "k" &&
@@ -283,6 +304,12 @@ export function AppShell({
       !key.option &&
       state.modal === null
     ) {
+      if (key.name === "left" || key.name === "right") {
+        key.preventDefault();
+        key.stopPropagation();
+        dispatch({ type: "set-sidebar-view", view: key.name === "left" ? "projects" : "recent" });
+        return;
+      }
       if (key.name.toLowerCase() === "d" && selectedThread) {
         key.preventDefault();
         key.stopPropagation();
@@ -345,6 +372,7 @@ export function AppShell({
     <ActivityClockProvider>
       <QueuedMessages client={client} />
       <AppShellView
+        onToggleSidebarView={() => dispatch({ type: "toggle-sidebar-view" })}
         environmentId={client.environmentId}
         live={
           connection.phase === "connected" && shell.status === "live" && Option.isNone(shell.error)

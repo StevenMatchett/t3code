@@ -6,6 +6,7 @@ export type ShellFocusTarget = "project-list" | "thread-list" | "conversation";
 export type ShellModal = "help" | "new-project" | "new-thread";
 
 export interface ShellState {
+  readonly sidebarView?: "projects" | "recent";
   readonly route: ShellRoute;
   readonly projectId: ProjectId | null;
   readonly threadId: ThreadId | null;
@@ -18,6 +19,8 @@ export interface ShellRows {
 }
 
 export type ShellCommand =
+  | { readonly type: "set-sidebar-view"; readonly view: "projects" | "recent" }
+  | { readonly type: "toggle-sidebar-view" }
   | { readonly type: "move"; readonly offset: number; readonly wrap: boolean }
   | { readonly type: "activate" }
   | { readonly type: "back" }
@@ -80,6 +83,19 @@ export function shellCommandFromKey(key: ShellKey): ShellCommand | undefined {
 }
 
 function reconcile(state: ShellState, rows: ShellRows): ShellState {
+  if (state.sidebarView === "recent") {
+    const threads = rows.threads.filter((thread) =>
+      rows.projects.some((project) => project.id === thread.projectId),
+    );
+    const selected = threads.find((thread) => thread.id === state.threadId) ?? threads[0];
+    const threadId = selected?.id ?? null;
+    const projectId = selected?.projectId ?? rows.projects[0]?.id ?? null;
+    const route =
+      state.route === "conversation" && threadId === state.threadId ? "conversation" : "threads";
+    return threadId === state.threadId && projectId === state.projectId && route === state.route
+      ? state
+      : { ...state, threadId, projectId, route };
+  }
   const projectId = rows.projects.some((project) => project.id === state.projectId)
     ? state.projectId
     : (rows.projects[0]?.id ?? null);
@@ -104,6 +120,31 @@ export function dispatchShellCommand(
   rows: ShellRows,
 ): ShellState {
   const state = reconcile(previous, rows);
+  if (command.type === "set-sidebar-view") {
+    if (state.modal || state.route === "conversation") return state;
+    return reconcile(
+      {
+        ...state,
+        sidebarView: command.view,
+        route: command.view === "recent" ? "threads" : "projects",
+      },
+      rows,
+    );
+  }
+  if (command.type === "toggle-sidebar-view")
+    return reconcile(
+      {
+        ...state,
+        sidebarView: state.sidebarView === "recent" ? "projects" : "recent",
+        route:
+          state.route === "conversation"
+            ? "conversation"
+            : state.sidebarView === "recent"
+              ? "projects"
+              : "threads",
+      },
+      rows,
+    );
   if (command.type === "reconcile") return state;
   if (command.type === "close-modal") return { ...state, modal: null };
   if (command.type === "new-project") return { ...state, modal: "new-project" };
@@ -114,6 +155,7 @@ export function dispatchShellCommand(
       ? reconcile(
           {
             ...state,
+            sidebarView: "projects",
             route: "threads",
             projectId: command.projectId,
             threadId: null,
@@ -127,6 +169,7 @@ export function dispatchShellCommand(
       (thread) => thread.id === command.threadId && thread.projectId === command.projectId,
     )
       ? {
+          ...state,
           route: "conversation",
           projectId: command.projectId,
           threadId: command.threadId,
@@ -139,7 +182,8 @@ export function dispatchShellCommand(
       ? { ...state, modal: null }
       : state;
   if (command.type === "back")
-    return state.route === "projects"
+    return state.route === "projects" ||
+      (state.sidebarView === "recent" && state.route === "threads")
       ? state
       : { ...state, route: state.route === "conversation" ? "threads" : "projects" };
   if (command.type === "activate") {
@@ -153,7 +197,9 @@ export function dispatchShellCommand(
   const items =
     state.route === "projects"
       ? rows.projects
-      : rows.threads.filter((thread) => thread.projectId === state.projectId);
+      : rows.threads.filter(
+          (thread) => state.sidebarView === "recent" || thread.projectId === state.projectId,
+        );
   if (items.length === 0) return state;
   const current = items.findIndex(
     (item) => item.id === (state.route === "projects" ? state.projectId : state.threadId),
@@ -167,6 +213,10 @@ export function dispatchShellCommand(
       ? state
       : reconcile({ ...state, projectId, threadId: null }, rows);
   }
-  const threadId = rows.threads.filter((thread) => thread.projectId === state.projectId)[next]!.id;
-  return threadId === state.threadId ? state : { ...state, threadId };
+  const selected = rows.threads.filter(
+    (thread) => state.sidebarView === "recent" || thread.projectId === state.projectId,
+  )[next]!;
+  return selected.id === state.threadId
+    ? state
+    : { ...state, threadId: selected.id, projectId: selected.projectId };
 }

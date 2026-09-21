@@ -55,6 +55,63 @@ const describeWithNativeFfi = runtime.process?.getBuiltinModule?.("node:ffi")
   : describe.skip;
 
 describeWithNativeFfi("connected AppShell", () => {
+  it.each([44, 120])(
+    "switches sidebar views with Left/Right at width %i without intercepting editor arrows",
+    async (width) => {
+      const { driver, fixture } = await renderShell({ width, height: 28, kittyKeyboard: true });
+      await driver.input.pressKey("ARROW_RIGHT");
+      expect(driver.captureFrame()).toContain("Recent threads (3)");
+      await driver.input.pressKey("ARROW_RIGHT");
+      expect(driver.captureFrame()).toContain("Recent threads (3)");
+      await driver.input.pressKey("ARROW_LEFT");
+      expect(driver.captureFrame()).toContain("Projects (2)");
+      await driver.input.pressKey("b", { ctrl: true });
+      expect(driver.captureFrame()).toContain("Recent threads (3)");
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("i");
+      await driver.input.typeText("draft");
+      await driver.input.pressKey("ARROW_LEFT");
+      await driver.input.typeText("!");
+      expect(driver.registry.get(fixture.client.actions.state(fixture.details[0]!.id)).draft).toBe(
+        "draf!t",
+      );
+      expect(driver.captureFrame()).toContain("MESSAGE");
+    },
+  );
+  it("toggles the recent sidebar, orders across projects, and opens threads with their project context", async () => {
+    const { driver, fixture } = await renderShell({ width: 120, height: 32, kittyKeyboard: true });
+    await act(async () =>
+      driver.registry.update(fixture.shell, (value) => ({
+        ...value,
+        snapshot: Option.map(value.snapshot, (snapshot) => ({
+          ...snapshot,
+          threads: snapshot.threads.map((thread) => ({
+            ...thread,
+            updatedAt: thread.id === "thread-2" ? "2026-02-01T00:00:00.000Z" : thread.updatedAt,
+          })),
+        })),
+      })),
+    );
+    await driver.input.pressKey("b", { ctrl: true });
+    expect(driver.captureFrame()).toContain("Recent threads (3)");
+    const newest = driver.renderer.root.findDescendantById("navigation-thread-2")!;
+    const older = driver.renderer.root.findDescendantById("navigation-thread-0")!;
+    expect(newest.screenY).toBeLessThan(older.screenY);
+    expect(newest.height).toBe(2);
+    expect(driver.captureFrame().split("\n")[newest.screenY + 1]).toContain("Beta");
+    await driver.input.pressKey("ARROW_UP");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("reply-2");
+    const toggle = driver.renderer.root.findDescendantById("sidebar-view-toggle")!;
+    await driver.mouse.click(toggle.screenX + 1, toggle.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    expect(driver.captureFrame()).toContain("Threads (1) - Beta");
+    expect(driver.captureFrame()).toContain("reply-2");
+    await driver.input.pressKey("b", { ctrl: true });
+    await driver.resize(44, 22);
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("Recent threads (3)");
+    expect(driver.captureFrame()).toContain("Beta");
+  });
   it("opens saved diffs and preserves the draft when closing", async () => {
     const { driver, fixture } = await renderShell({ width: 100, height: 28 });
     const working = vi.spyOn(fixture.client.review, "diffPreview");
@@ -158,7 +215,7 @@ describeWithNativeFfi("connected AppShell", () => {
       expect(driver.captureFrame()).toContain("> Beta");
       await driver.input.pressKey("RETURN");
       expect(driver.captureFrame()).toContain("Threads (1) - Beta");
-      await driver.input.pressKey("ARROW_RIGHT");
+      await driver.input.pressKey("RETURN");
       expect(driver.captureFrame()).toContain("reply-2");
       await driver.input.pressKey("ARROW_LEFT");
       expect(driver.captureFrame()).toContain("> Other project conversation");

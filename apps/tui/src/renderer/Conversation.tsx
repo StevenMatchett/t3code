@@ -541,13 +541,14 @@ export function Conversation({
         </Text>
         <ThreadActivityIndicator phase={phase} visible={active} />
         <Text tone={requestCount ? "warning" : "muted"} flexGrow={1} wrapMode="none" truncate>
+          {"  "}
           {requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
-            ? "  A: respond to requests"
+            ? "A: respond to requests"
             : interaction.pending
-              ? "  Sending command..."
+              ? "Sending command..."
               : queued?.status === "queued"
-                ? "  Sends after next tool call / turn end"
-                : (interaction.notice ?? "  T: tool details")}
+                ? "Sends after next tool call / turn end"
+                : (interaction.notice ?? "T: tool details")}
         </Text>
         <Text tone="muted" flexShrink={0}>
           {anchor !== null ? "History / End: live" : page?.hasMore ? "Home: earlier" : ""}

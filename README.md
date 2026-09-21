@@ -204,6 +204,13 @@ If creation is not confirmed, Retry reuses the same thread ID and checks for the
 Close hides the form without cancelling an in-flight server operation. Start over requires
 confirmation and retains any created thread, branch, or worktree; it never deletes them.
 
+Use `Ctrl+B` or the sidebar's view toggle to switch between project navigation and recent threads
+across all projects. Recent threads are ordered by last update and show their project underneath.
+Switching views preserves the open conversation. The same toggle is available in `Ctrl+K` search.
+While browsing the sidebar, Left selects projects and Right selects recent threads; Up/Down
+selects a row and Enter opens it. Project sublines are indented and dimmed within the terminal's
+fixed-size text grid.
+
 In an open conversation, Enter or `i` focuses the composer. Enter sends; Ctrl+J inserts a newline
 in legacy and enhanced terminals, and Shift+Enter also inserts one where the terminal supports it.
 Escape returns to history without discarding the draft. Text pasted into the composer is never

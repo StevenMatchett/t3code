@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
 import { useEffect, useReducer, useCallback, type ReactNode } from "react";
+import { TextAttributes } from "@opentui/core";
 import type {
   EnvironmentId,
   OrchestrationProjectShell,
@@ -57,6 +58,7 @@ export interface AppShellViewProps {
   readonly onOpenArchived?: () => void;
   readonly onManageThread?: () => void;
   readonly onOpenPalette?: () => void;
+  readonly onToggleSidebarView?: () => void;
 }
 
 export function useAppShellState(
@@ -93,6 +95,7 @@ function List({
   readonly items: ReadonlyArray<{
     readonly id: string;
     readonly text: string;
+    readonly subline?: string;
     readonly phase?: ThreadActivityPhase;
   }>;
   readonly selectedId: string | null;
@@ -121,7 +124,8 @@ function List({
             key={item.id}
             id={`navigation-${item.id}`}
             width="100%"
-            height={1}
+            height={item.subline ? 2 : 1}
+            flexDirection="column"
             flexShrink={0}
             onMouseDown={(event) => {
               if (event.button !== 0) return;
@@ -138,6 +142,15 @@ function List({
                 ) : undefined
               }
             />
+            {item.subline ? (
+              <Text
+                height={1}
+                tone="muted"
+                attributes={TextAttributes.DIM}
+                wrapMode="none"
+                truncate
+              >{`    ${inlineTerminalText(item.subline)}`}</Text>
+            ) : null}
           </Stack>
         ))
       )}
@@ -157,8 +170,10 @@ function Help() {
     <Stack flexDirection="column" gap={1}>
       <Text strong>Keyboard help</Text>
       <Text tone="accent">NAVIGATION</Text>
-      <Text>Up/Down or Tab Select Enter / Right Open</Text>
-      <Text>Esc / Left Back R Reconnect</Text>
+      <Text>Up/Down or Tab Select Enter Open</Text>
+      <Text>Left Projects Right Recent threads (sidebar)</Text>
+      <Text>Esc Back R Reconnect</Text>
+      <Text>Ctrl+B Toggle project / recent-thread sidebar</Text>
       <Text>Ctrl+K Search conversation output, projects, threads, and commands</Text>
       <Text tone="accent">CONVERSATION</Text>
       <Text>Enter / i Write prompt Esc Return to history</Text>
@@ -204,18 +219,23 @@ export function AppShellView({
   onOpenArchived,
   onManageThread,
   onOpenPalette,
+  onToggleSidebarView,
 }: AppShellViewProps) {
   const layout = calculateShellLayout(width, height);
   const background = useThemeColor("panel");
   const project = projects.find((item) => item.id === state.projectId);
+  const recent = state.sidebarView === "recent";
   const projectThreads = threads.filter((item) => item.projectId === state.projectId);
   const selectedThread = projectThreads.find((item) => item.id === state.threadId);
-  const browsingProjects = state.route === "projects";
+  const browsingProjects = !recent && state.route === "projects";
+  const visibleThreads = recent ? threads : projectThreads;
   const conversation = state.route === "conversation";
   const navigationHints: readonly HotkeyHint[] = browsingProjects
     ? [
         { key: "↑↓", label: "Select" },
         { key: "Enter", label: "Open" },
+        { key: "←/→", label: "View" },
+        { key: "Ctrl+B", label: "Toggle view" },
         { key: "P", label: "New project" },
         { key: "⇧A", label: "Archived" },
         { key: "Ctrl+K", label: "Search" },
@@ -224,6 +244,8 @@ export function AppShellView({
     : [
         { key: "↑↓", label: "Select" },
         { key: "Enter", label: "Open" },
+        { key: "←/→", label: "View" },
+        { key: "Ctrl+B", label: "Toggle view" },
         { key: "N", label: "New thread" },
         { key: "M", label: "Manage" },
         { key: "D", label: "Diff" },
@@ -231,9 +253,11 @@ export function AppShellView({
         { key: "Ctrl+K", label: "Search" },
         { key: "Esc", label: "Projects" },
       ];
-  const title = browsingProjects
-    ? `Projects (${projects.length})`
-    : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
+  const title = recent
+    ? `Recent threads (${threads.length})`
+    : browsingProjects
+      ? `Projects (${projects.length})`
+      : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
   const priorities: Record<ThreadActivityPhase, number> = {
     idle: 0,
     completed: 1,
@@ -259,10 +283,17 @@ export function AppShellView({
         text: item.title,
         phase: projectActivity.get(item.id) ?? "idle",
       }))
-    : projectThreads.map((item) => ({
+    : visibleThreads.map((item) => ({
         id: item.id,
         text: `${item.title}${item.worktreePath ? " [WT]" : ""}`,
         phase: phases.get(item.id)!,
+        ...(recent
+          ? {
+              subline:
+                projects.find((project) => project.id === item.projectId)?.title ??
+                "Unknown project",
+            }
+          : {}),
       }));
   const empty = error
     ? "Connection unavailable. R retries."
@@ -270,18 +301,30 @@ export function AppShellView({
       ? "Loading your workspace..."
       : browsingProjects
         ? "No projects in this environment."
-        : "No active threads in this project.";
+        : recent
+          ? "No active threads in this environment."
+          : "No active threads in this project.";
   const navigation = (
     <Stack flexDirection="column" height="100%" gap={1}>
-      <Text height={1} tone="muted" wrapMode="none" truncate>
-        {browsingProjects
-          ? "Choose a workspace"
-          : inlineTerminalText(project?.title ?? "Workspace")}
+      <Text
+        id="sidebar-view-toggle"
+        height={1}
+        tone="accent"
+        wrapMode="none"
+        truncate
+        onMouseDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleSidebarView?.();
+        }}
+      >
+        {recent ? "← Projects [Recent] →" : "← [Projects] Recent →"}
       </Text>
       <List
         items={items}
         selectedId={browsingProjects ? state.projectId : state.threadId}
-        count={Math.max(1, layout.contentHeight - 4)}
+        count={Math.max(1, Math.floor((layout.contentHeight - 4) / (recent ? 2 : 1)))}
         empty={empty}
         active={!conversation}
         visible={state.modal === null}
@@ -291,7 +334,7 @@ export function AppShellView({
             if (selected) onOpenProject?.(selected.id);
             return;
           }
-          const selected = projectThreads.find((item) => item.id === id);
+          const selected = visibleThreads.find((item) => item.id === id);
           if (selected) onOpenThread?.(selected.projectId, selected.id);
         }}
       />
@@ -300,7 +343,9 @@ export function AppShellView({
           ? "Enter to browse threads"
           : conversation
             ? "Esc to browse threads"
-            : "Esc to projects"}
+            : recent
+              ? "Ctrl+B to projects"
+              : "Esc to projects"}
       </Text>
     </Stack>
   );

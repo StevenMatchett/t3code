@@ -26,6 +26,30 @@ function initial() {
 }
 
 describe("shell coordination", () => {
+  it("navigates recent threads across projects and preserves the open thread when toggling", () => {
+    const recent = dispatchShellCommand(initial(), { type: "toggle-sidebar-view" }, rows);
+    expect(recent.route).toBe("threads");
+    const selected = dispatchShellCommand(recent, { type: "move", offset: 2, wrap: false }, rows);
+    expect(selected).toMatchObject({ threadId: t3, projectId: p2 });
+    const open = dispatchShellCommand(selected, { type: "activate" }, rows);
+    expect(dispatchShellCommand(open, { type: "toggle-sidebar-view" }, rows)).toMatchObject({
+      route: "conversation",
+      threadId: t3,
+      projectId: p2,
+      sidebarView: "projects",
+    });
+    const removed = dispatchShellCommand(
+      open,
+      { type: "reconcile" },
+      { ...rows, threads: rows.threads.slice(0, 2) },
+    );
+    expect(removed).toMatchObject({
+      route: "threads",
+      threadId: t1,
+      projectId: p1,
+      sidebarView: "recent",
+    });
+  });
   it("selects real project and thread IDs with arrows and Enter and preserves them on back", () => {
     const selected = dispatchShellCommand(
       initial(),
