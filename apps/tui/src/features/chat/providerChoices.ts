@@ -6,6 +6,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   getProviderSkillsForSlashMenu,
+  resolveProviderSkillSourceKind,
   resolveProviderSkillsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
 import {
@@ -19,7 +20,13 @@ export interface ProviderCatalog {
 }
 
 export function selectableSkills(provider: ServerProvider, cwd: string | null) {
-  return getProviderSkillsForSlashMenu(resolveProviderSkillsForCwd(provider, cwd), true);
+  const rank = (skill: ServerProviderSkill) => {
+    const source = resolveProviderSkillSourceKind(skill);
+    return source === "repo" || source === "project" ? 0 : 1;
+  };
+  return getProviderSkillsForSlashMenu(resolveProviderSkillsForCwd(provider, cwd), true).toSorted(
+    (left, right) => rank(left) - rank(right),
+  );
 }
 
 export function skillPrefix(provider: ServerProvider, skill: ServerProviderSkill) {
