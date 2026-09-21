@@ -12,9 +12,61 @@ export interface ConversationLine {
   readonly shell?: boolean;
   readonly highlight?: boolean;
   readonly spans?: readonly MarkdownSpan[];
+  readonly toolGroupId?: string;
 }
 
 export function conversationLines(
+  rows: readonly TimelineRow[],
+  width: number,
+  expanded: boolean,
+  expandedGroups: ReadonlyMap<string, boolean> = new Map(),
+): readonly ConversationLine[] {
+  const result: ConversationLine[] = [];
+  let pending: TimelineRow[] = [];
+  const flush = () => {
+    const tools = pending.filter((row) => row.kind === "tool");
+    const first = tools[0];
+    if (tools.length < 2 || !first || (expanded && !expandedGroups.has(`tools:${first.id}`))) {
+      result.push(...renderRows(pending, width, expanded));
+    } else {
+      const id = `tools:${first.id}`;
+      const open = expandedGroups.get(id) ?? expanded;
+      result.push(
+        ...wrapTerminalLines(
+          `${open ? "v" : ">"} ${tools.length} tool calls · click to ${open ? "collapse" : "expand"} · T details`,
+          width,
+        ).map((text, line): ConversationLine => ({
+          id,
+          line,
+          text,
+          tone: "muted",
+          strong: true,
+          toolGroupId: id,
+        })),
+      );
+      if (open) result.push(...renderRows(pending, width, true));
+    }
+    pending = [];
+  };
+  for (const row of rows) {
+    // Hidden activity can sit between tools, but messages, turns, and problems
+    // must remain distinct. Live tools stay visible outside collapsed groups.
+    const groupable =
+      row.source === "activity" &&
+      row.kind !== "error" &&
+      row.activityTone !== "error" &&
+      row.status !== "failed" &&
+      row.status !== "declined" &&
+      row.status !== "inProgress";
+    if (!groupable || (pending.length > 0 && pending[0]?.turnId !== row.turnId)) flush();
+    if (groupable) pending.push(row);
+    else result.push(...renderRows([row], width, expanded));
+  }
+  flush();
+  return result;
+}
+
+function renderRows(
   rows: readonly TimelineRow[],
   width: number,
   expanded: boolean,

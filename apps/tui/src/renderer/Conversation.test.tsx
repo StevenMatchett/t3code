@@ -8,6 +8,7 @@ import {
 import * as Option from "effect/Option";
 import { act } from "react";
 import { TextAttributes } from "@opentui/core";
+import { MouseButtons } from "@opentui/core/testing";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
 import { AppShell } from "./AppShell.tsx";
@@ -58,6 +59,44 @@ async function request(
 }
 
 describe("conversation interaction", () => {
+  it("expands grouped tools by mouse and toggles all details with T", async () => {
+    const { driver, fixture } = await setup();
+    const activities: OrchestrationThreadActivity[] = ["first", "second", "third"].map((name) => ({
+      id: EventId.make(name),
+      kind: "tool.completed",
+      tone: "tool",
+      summary: `echo ${name}`,
+      payload: { command: `echo ${name}`, toolCallId: name, status: "completed" },
+      turnId: null,
+      createdAt: fixture.details[0]!.createdAt,
+    }));
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({ ...fixture.details[0]!, messages: [], activities }),
+      }),
+    );
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("3 tool calls");
+    expect(driver.captureFrame()).not.toContain("echo first");
+    const clickGroup = async () => {
+      const lines = driver.captureRawFrame().split("\n");
+      const y = lines.findIndex((line) => line.includes("3 tool calls"));
+      expect(y).toBeGreaterThanOrEqual(0);
+      await driver.mouse.click(lines[y]!.indexOf("3 tool calls"), y, MouseButtons.LEFT, {
+        delayMs: 0,
+      });
+    };
+    await clickGroup();
+    expect(driver.captureFrame()).toContain("echo first");
+    await clickGroup();
+    expect(driver.captureFrame()).not.toContain("echo first");
+    await driver.input.pressKey("t");
+    expect(driver.captureFrame()).toContain("echo first");
+    await driver.input.pressKey("t");
+    expect(driver.captureFrame()).not.toContain("echo first");
+  });
+
   it("searches output, navigates matches, and closes without changing the draft", async () => {
     const { driver, fixture, id } = await setup();
     await driver.input.pressKey("i");

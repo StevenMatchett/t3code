@@ -18,9 +18,11 @@ const themeKey: Record<Exclude<ShellTokenKind, "plain">, ThemeToken> = {
 export function ConversationText({
   line,
   search = "",
+  onToggleToolGroup,
 }: {
   readonly line: ConversationLine;
   readonly search?: string;
+  readonly onToggleToolGroup?: (id: string) => void;
 }) {
   const { capabilities, theme } = useUi();
   const matches = textMatches(line.text, search);
@@ -51,6 +53,11 @@ export function ConversationText({
       width="100%"
       flexDirection="row"
       paddingX={line.highlight ? 1 : 0}
+      onMouseDown={(event) => {
+        if (event.button === 0 && line.toolGroupId && onToggleToolGroup) {
+          onToggleToolGroup(line.toolGroupId);
+        }
+      }}
       {...(backgroundColor ? { backgroundColor } : {})}
     >
       <Text

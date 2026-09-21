@@ -10,6 +10,68 @@ const base = {
 };
 
 describe("conversationLines", () => {
+  const tool = (
+    id: string,
+    status = "completed" as "completed" | "inProgress" | "failed",
+  ): TimelineRow => ({
+    ...base,
+    id,
+    source: "activity",
+    kind: "tool",
+    text: id,
+    activityKind: "tool.completed",
+    activityTone: "tool",
+    status,
+    command: `echo ${id}`,
+    detail: `output ${id}`,
+  });
+
+  it("collapses completed tools and supports individual and global expansion", () => {
+    const rows = [tool("a"), tool("b"), tool("c")];
+    const collapsed = conversationLines(rows, 100, false);
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]).toMatchObject({
+      toolGroupId: "tools:a",
+      text: expect.stringContaining("3 tool calls"),
+    });
+    for (const lines of [
+      conversationLines(rows, 100, true),
+      conversationLines(rows, 100, false, new Map([["tools:a", true]])),
+    ]) {
+      expect(lines.map((line) => line.text).join("\n")).toContain("output c");
+    }
+    expect(conversationLines(rows, 100, true, new Map([["tools:a", false]]))).toHaveLength(1);
+  });
+
+  it("keeps running and failed tools visible and never groups across turns or messages", () => {
+    const rows: TimelineRow[] = [
+      tool("a"),
+      tool("b"),
+      tool("live", "inProgress"),
+      tool("failed", "failed"),
+      tool("c"),
+      { ...tool("d"), turnId: TurnId.make("turn-2") },
+      {
+        ...base,
+        id: "reply",
+        sourceId: MessageId.make("reply"),
+        source: "message",
+        kind: "assistant",
+        text: "Reply",
+        streaming: false,
+      },
+      tool("e"),
+    ];
+    const lines = conversationLines(rows, 100, false);
+    expect(lines.filter((line) => line.toolGroupId)).toHaveLength(1);
+    const text = lines.map((line) => line.text).join("\n");
+    expect(text).toContain("[running] echo live");
+    expect(text).toContain("[failed] echo failed");
+    expect(text).toContain("echo c");
+    expect(text).toContain("echo d");
+    expect(text).toContain("Reply");
+  });
+
   it("shows tool calls with their files by default and hides reasoning until expanded", () => {
     const rows: TimelineRow[] = [
       {

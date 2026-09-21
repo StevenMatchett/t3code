@@ -64,6 +64,9 @@ export function Conversation({
   const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [expandedToolGroups, setExpandedToolGroups] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
+  );
   const [agentCursor, setAgentCursor] = useState(-1);
   const [agentsExpanded, setAgentsExpanded] = useState(true);
   const [agentReturnMode, setAgentReturnMode] = useState<"history" | "composer">("history");
@@ -300,8 +303,8 @@ export function Conversation({
     [thread],
   );
   const lines = useMemo(
-    () => conversationLines(timeline, width, showDetails),
-    [timeline, width, showDetails],
+    () => conversationLines(timeline, width, showDetails, expandedToolGroups),
+    [timeline, width, showDetails, expandedToolGroups],
   );
   const maxStart = Math.max(0, lines.length - count);
   const searchQuery = search?.query ?? "";
@@ -449,6 +452,7 @@ export function Conversation({
         break;
       case "t":
         setShowDetails((value) => !value);
+        setExpandedToolGroups(new Map());
         break;
       case "d":
         onDiff?.();
@@ -592,15 +596,21 @@ export function Conversation({
         {lines.length === 0 ? (
           <Text tone="muted">{empty}</Text>
         ) : (
-          lines
-            .slice(start, start + count)
-            .map((line) => (
-              <ConversationText
-                key={`${line.id}:${line.line}`}
-                line={line}
-                search={search?.query ?? ""}
-              />
-            ))
+          lines.slice(start, start + count).map((line) => (
+            <ConversationText
+              key={`${line.id}:${line.line}`}
+              line={line}
+              search={search?.query ?? ""}
+              onToggleToolGroup={(id) => {
+                setAnchor({ id, line: 0 });
+                setExpandedToolGroups((groups) => {
+                  const next = new Map(groups);
+                  next.set(id, !(groups.get(id) ?? showDetails));
+                  return next;
+                });
+              }}
+            />
+          ))
         )}
       </Stack>
       {search ? (
