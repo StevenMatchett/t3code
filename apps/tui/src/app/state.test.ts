@@ -26,6 +26,44 @@ function initial() {
 }
 
 describe("shell coordination", () => {
+  it.each(["toggle", "set"])(
+    "resets both sidebar lists to the top when switching with %s",
+    (method) => {
+      const project = dispatchShellCommand(
+        initial(),
+        { type: "move", offset: 1, wrap: false },
+        rows,
+      );
+      const recent = dispatchShellCommand(
+        project,
+        method === "toggle"
+          ? { type: "toggle-sidebar-view" }
+          : { type: "set-sidebar-view", view: "recent" },
+        rows,
+      );
+      expect(recent).toMatchObject({
+        sidebarView: "recent",
+        route: "threads",
+        projectId: p1,
+        threadId: t1,
+      });
+      const last = dispatchShellCommand(recent, { type: "move", offset: 2, wrap: false }, rows);
+      const projects = dispatchShellCommand(
+        last,
+        method === "toggle"
+          ? { type: "toggle-sidebar-view" }
+          : { type: "set-sidebar-view", view: "projects" },
+        rows,
+      );
+      expect(projects).toMatchObject({
+        sidebarView: "projects",
+        route: "projects",
+        projectId: p1,
+        threadId: t1,
+      });
+    },
+  );
+
   it("navigates recent threads across projects and preserves the open thread when toggling", () => {
     const recent = dispatchShellCommand(initial(), { type: "toggle-sidebar-view" }, rows);
     expect(recent.route).toBe("threads");

@@ -127,6 +127,9 @@ export function dispatchShellCommand(
         ...state,
         sidebarView: command.view,
         route: command.view === "recent" ? "threads" : "projects",
+        ...((state.sidebarView ?? "projects") !== command.view
+          ? { projectId: null, threadId: null }
+          : {}),
       },
       rows,
     );
@@ -136,6 +139,7 @@ export function dispatchShellCommand(
       {
         ...state,
         sidebarView: state.sidebarView === "recent" ? "projects" : "recent",
+        ...(state.route !== "conversation" ? { projectId: null, threadId: null } : {}),
         route:
           state.route === "conversation"
             ? "conversation"

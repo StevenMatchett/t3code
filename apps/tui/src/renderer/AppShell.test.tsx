@@ -112,6 +112,33 @@ describeWithNativeFfi("connected AppShell", () => {
     expect(driver.captureFrame()).toContain("Recent threads (3)");
     expect(driver.captureFrame()).toContain("Beta");
   });
+  it.each(["arrows", "shortcut", "mouse"])(
+    "resets sidebar selection when switching views with %s",
+    async (method) => {
+      const { driver } = await renderShell({ width: 120, height: 32, kittyKeyboard: true });
+      const switchView = async (key: "ARROW_LEFT" | "ARROW_RIGHT") => {
+        if (method === "arrows") await driver.input.pressKey(key);
+        else if (method === "shortcut") await driver.input.pressKey("b", { ctrl: true });
+        else {
+          const toggle = driver.renderer.root.findDescendantById("sidebar-view-toggle")!;
+          await driver.mouse.click(toggle.screenX + 1, toggle.screenY, MouseButtons.LEFT, {
+            delayMs: 0,
+          });
+        }
+      };
+      await driver.input.pressKey("ARROW_DOWN");
+      await switchView("ARROW_RIGHT");
+      await driver.input.pressKey("RETURN");
+      expect(driver.captureFrame()).toContain("┌─First conversation");
+      await driver.input.pressKey("ESCAPE");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("ARROW_DOWN");
+      await switchView("ARROW_LEFT");
+      await driver.input.pressKey("RETURN");
+      expect(driver.captureFrame()).toContain("Threads (2) - Alpha");
+    },
+  );
+
   it("opens saved diffs and preserves the draft when closing", async () => {
     const { driver, fixture } = await renderShell({ width: 100, height: 28 });
     const working = vi.spyOn(fixture.client.review, "diffPreview");
