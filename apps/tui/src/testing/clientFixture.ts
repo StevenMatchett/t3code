@@ -1,6 +1,8 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   type ServerSettings,
+  type ProjectCloneStartInput,
+  type OrchestrationThreadSearchMatch,
   type VcsCreateWorktreeInput,
   EnvironmentId,
   MessageId,
@@ -31,6 +33,11 @@ import {
 } from "@t3tools/client-runtime/state/terminal";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { makeNewThreadActions, type CreateThreadCommand } from "../features/chat/newThread.ts";
+import { makeNewProjectActions } from "../features/projects/newProject.ts";
+import {
+  makeThreadManagementActions,
+  type ThreadManagementCommand,
+} from "../features/threads/management.ts";
 import type { ProviderCatalog } from "../features/chat/providerChoices.ts";
 import { makeThreadInteractions, type TuiThreadCommand } from "../features/chat/interactions.ts";
 
@@ -302,6 +309,132 @@ export function makeClientFixture(
       return true;
     },
   });
+  const projectCloneTracking = Atom.make(true);
+  const projectCloneRequests: ProjectCloneStartInput[] = [];
+  const addProjectToShell = (
+    registry: Parameters<Parameters<typeof makeNewProjectActions>[0]["dispatch"]>[0],
+    project: OrchestrationProjectShell,
+  ) => {
+    projects.push(project);
+    registry.update(shell, (value) => ({
+      ...value,
+      snapshot: Option.map(value.snapshot, (snapshot) => ({
+        ...snapshot,
+        projects: [...snapshot.projects, project],
+        snapshotSequence: snapshot.snapshotSequence + 1,
+      })),
+    }));
+  };
+  const newProjects = makeNewProjectActions({
+    shell,
+    connection,
+    projectCloneTracking,
+    browse: async (_registry, partialPath) => ({
+      parentPath: partialPath === "~/" ? "~/" : "~/",
+      entries:
+        partialPath === "~/"
+          ? [
+              { name: "code", fullPath: "~/code/" },
+              { name: "projects", fullPath: "~/projects/" },
+            ]
+          : [],
+    }),
+    dispatch: async (registry, command) => {
+      addProjectToShell(registry, {
+        id: command.projectId,
+        title: command.title,
+        workspaceRoot: command.workspaceRoot,
+        defaultModelSelection: modelSelection,
+        scripts: [],
+        createdAt: command.createdAt,
+        updatedAt: command.createdAt,
+      });
+      return true;
+    },
+    startClone: async (registry, input) => {
+      projectCloneRequests.push(input);
+      addProjectToShell(registry, {
+        id: input.projectId,
+        title: input.title,
+        workspaceRoot: input.destinationPath,
+        defaultModelSelection: modelSelection,
+        scripts: [],
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      });
+      return true;
+    },
+    cloneRepository: async (_registry, input) => ({
+      cwd: input.destinationPath,
+      remoteUrl: input.remoteUrl!,
+      repository: null,
+    }),
+  });
+  const archivedRows: OrchestrationThreadShell[] = [];
+  const archivedThreads = Atom.make<{
+    readonly status: "loading" | "live" | "error";
+    readonly threads: readonly OrchestrationThreadShell[];
+  }>({ status: "live", threads: archivedRows });
+  const threadSearch = Atom.family((query: string) =>
+    Atom.make(() => {
+      const normalized = query.trim().toLocaleLowerCase();
+      const matches: OrchestrationThreadSearchMatch[] = [];
+      if (normalized.length >= 2)
+        for (const thread of details) {
+          const message = thread.messages.find((item) =>
+            item.text.toLocaleLowerCase().includes(normalized),
+          );
+          if (!message || (message.role !== "user" && message.role !== "assistant")) continue;
+          const index = message.text.toLocaleLowerCase().indexOf(normalized);
+          matches.push({
+            threadId: thread.id,
+            projectId: thread.projectId,
+            source: message.role,
+            snippet: message.text.slice(Math.max(0, index - 60), index + normalized.length + 120),
+            messageCreatedAt: message.createdAt,
+          });
+        }
+      return { matches, loading: false, failed: false };
+    }),
+  );
+  const managementCommands: ThreadManagementCommand[] = [];
+  const threadManagement = makeThreadManagementActions({
+    dispatch: async (registry, command) => {
+      managementCommands.push(command);
+      if (command.type === "thread.meta.update" && command.title) {
+        const detail = details.find((item) => item.id === command.threadId);
+        if (detail) Object.assign(detail, { title: command.title });
+        const row = threads.find((item) => item.id === command.threadId);
+        if (row) Object.assign(row, { title: command.title });
+        const archived = archivedRows.find((item) => item.id === command.threadId);
+        if (archived) Object.assign(archived, { title: command.title });
+      } else if (command.type === "thread.archive") {
+        const index = threads.findIndex((item) => item.id === command.threadId);
+        if (index >= 0) archivedRows.push({ ...threads.splice(index, 1)[0]!, archivedAt: time });
+      } else if (command.type === "thread.unarchive") {
+        const index = archivedRows.findIndex((item) => item.id === command.threadId);
+        if (index >= 0) threads.push({ ...archivedRows.splice(index, 1)[0]!, archivedAt: null });
+      } else if (command.type === "thread.delete") {
+        const activeIndex = threads.findIndex((item) => item.id === command.threadId);
+        if (activeIndex >= 0) threads.splice(activeIndex, 1);
+        const archivedIndex = archivedRows.findIndex((item) => item.id === command.threadId);
+        if (archivedIndex >= 0) archivedRows.splice(archivedIndex, 1);
+      }
+      registry.update(shell, (value) =>
+        Option.map(value.snapshot, (snapshot) => ({
+          ...value,
+          snapshot: Option.some({
+            ...snapshot,
+            threads: [...threads],
+            snapshotSequence: snapshot.snapshotSequence + 1,
+          }),
+        })).pipe(Option.getOrElse(() => value)),
+      );
+      registry.set(archivedThreads, { status: "live", threads: [...archivedRows] });
+      return true;
+    },
+    refreshArchived: () => {},
+  });
   const client: TuiClient = {
     environmentId: EnvironmentId.make("renderer-fixture"),
     label: "Shared test environment",
@@ -311,6 +444,22 @@ export function makeClientFixture(
     thread,
     actions,
     newThreads,
+    newProjects,
+    threadManagement,
+    archivedThreads,
+    refreshArchivedThreads: () => {},
+    threadSearch,
+    diffs: {
+      fullThreadDiff: () =>
+        Atom.make(
+          AsyncResult.success({
+            threadId: details[0]!.id,
+            fromTurnCount: 0,
+            toTurnCount: 1,
+            diff: "diff --git a/example.ts b/example.ts\n--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old value\n+new value",
+          }),
+        ),
+    },
     settings,
     providers,
     terminals,
@@ -335,5 +484,8 @@ export function makeClientFixture(
     terminalAttachInputs,
     terminalBuffer,
     terminalCloseInputs,
+    projectCloneRequests,
+    managementCommands,
+    archivedRows,
   };
 }

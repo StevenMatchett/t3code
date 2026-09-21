@@ -12,6 +12,7 @@ import type { TuiClient } from "../connection/clientRuntime.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { EmbeddedTerminalSurface } from "./embedded-terminal/index.ts";
+import type { HotkeyState } from "../ui/HotkeyBar.tsx";
 
 const discardedByClient = new WeakMap<TuiClient, Map<string, Set<string>>>();
 
@@ -45,6 +46,7 @@ export function ThreadTerminal({
   active,
   onBack,
   onHintsChange,
+  onFocusChange,
 }: {
   readonly client: TuiClient;
   readonly environmentId: EnvironmentId;
@@ -53,7 +55,8 @@ export function ThreadTerminal({
   readonly worktreePath: string | null;
   readonly active: boolean;
   readonly onBack: () => void;
-  readonly onHintsChange?: (hints: string) => void;
+  readonly onHintsChange?: (state: HotkeyState) => void;
+  readonly onFocusChange?: (focused: boolean) => void;
 }) {
   const terminals = client.terminals!;
   const registry = useContext(RegistryContext);
@@ -100,12 +103,24 @@ export function ThreadTerminal({
   );
   const attachFailed = AsyncResult.isFailure(attachResult);
   useEffect(() => {
-    onHintsChange?.(
-      focused
-        ? "Ctrl+\\ Shell controls"
-        : "Enter Focus  Left/Right Shell  N New  X Close  Esc Chat",
-    );
+    onHintsChange?.({
+      context: focused ? "Terminal" : "Shell controls",
+      hints: focused
+        ? [{ key: "Ctrl+\\", label: "Shell controls" }]
+        : [
+            { key: "Enter", label: "Focus shell" },
+            { key: "←→", label: "Switch shell" },
+            { key: "N", label: "New shell" },
+            { key: "X", label: "Close shell" },
+            { key: "Ctrl+K", label: "Search" },
+            { key: "Esc", label: "Chat" },
+          ],
+    });
   }, [focused, onHintsChange]);
+  useEffect(() => {
+    onFocusChange?.(focused);
+    return () => onFocusChange?.(false);
+  }, [focused, onFocusChange]);
   const nextTerminal = () => {
     const used = new Set(terminalIds);
     const id = nextTerminalId(client, threadId, used);

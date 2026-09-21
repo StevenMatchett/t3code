@@ -84,6 +84,16 @@ describe("shell coordination", () => {
     expect(dispatchShellCommand(help, { type: "activate" }, rows)).toEqual(state);
   });
 
+  it("opens project creation without requiring an existing project", () => {
+    const empty = { projects: [], threads: [] };
+    const modal = dispatchShellCommand(createInitialShellState(), { type: "new-project" }, empty);
+    expect(modal.modal).toBe("new-project");
+    expect(shellCommandFromKey({ name: "p" })).toEqual({ type: "new-project" });
+    expect(
+      dispatchShellCommand(modal, { type: "open-project", projectId: p2 }, rows),
+    ).toMatchObject({ route: "threads", projectId: p2, threadId: t3, modal: null });
+  });
+
   it("maps arrows, Enter, and Tab without stealing modified keys", () => {
     expect(shellCommandFromKey({ name: "down" })).toEqual({ type: "move", offset: 1, wrap: false });
     expect(shellCommandFromKey({ name: "up" })).toEqual({ type: "move", offset: -1, wrap: false });

@@ -33,6 +33,9 @@ npx --yes t3@<version> pair --base-dir "$HOME/.t3" \
 
 - **Connection/pairing** to an existing T3 environment; second-client reattachment.
 - **Browse** projects and threads; live-updating conversation history; scroll + follow.
+- **Add projects** (`p` or the header action): browse folders on the connected environment or clone
+  a GitHub URL into an editable destination. New servers clone in the background; older servers use
+  the blocking clone RPC before creating the project.
 - **Send prompts and interact**: composer with draft preservation, stop turn (Ctrl+X),
   approvals, and agent questions (opaque option values preserved).
 - **Models & skills** (no function keys):

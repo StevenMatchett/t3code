@@ -2,6 +2,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { useKeyboard } from "@opentui/react";
 import { createElement, useEffect } from "react";
 
 import { runTuiLifecycle } from "../dist/cli/lifecycle.js";
@@ -23,6 +24,13 @@ let runtime;
 
 function Probe() {
   const failed = useAtomValue(broken);
+  useKeyboard((key) => {
+    if (key.ctrl && key.name.toLowerCase() === "c") {
+      key.preventDefault();
+      key.stopPropagation();
+      NodeFS.writeSync(1, "\n__TUI_CTRL_C__\n");
+    }
+  });
   useEffect(() => {
     NodeFS.writeSync(1, "\n__TUI_READY__\n");
   }, []);

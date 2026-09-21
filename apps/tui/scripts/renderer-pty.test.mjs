@@ -22,6 +22,7 @@ async function scenario(action, expectedCode) {
   });
   let output = "";
   let acted = false;
+  let followedUp = false;
   let exited = false;
   let timer;
   const done = new Promise((resolve, reject) => {
@@ -37,7 +38,12 @@ async function scenario(action, expectedCode) {
       if (!acted && output.includes("__TUI_READY__")) {
         acted = true;
         if (action.startsWith("SIG")) child.kill(action);
+        else if (action === "CTRL_C") child.write("\x03");
         else child.write(action);
+      }
+      if (action === "CTRL_C" && !followedUp && output.includes("__TUI_CTRL_C__")) {
+        followedUp = true;
+        child.write("q");
       }
     });
     child.onExit((event) => {
@@ -48,6 +54,9 @@ async function scenario(action, expectedCode) {
   try {
     const exit = await done;
     NodeAssert.equal(acted, true, "renderer reached ready state");
+    if (action === "CTRL_C") {
+      NodeAssert.equal(followedUp, true, "Ctrl+C reached the React keyboard handler");
+    }
     NodeAssert.equal(exit.exitCode, expectedCode, JSON.stringify(output.slice(-1000)));
     const match = /__TUI_RESULT__(\{[^\r\n]+\})/.exec(output);
     NodeAssert.ok(match, `missing restoration receipt: ${JSON.stringify(output.slice(-1000))}`);
@@ -80,6 +89,7 @@ async function scenario(action, expectedCode) {
 
 for (const [action, code] of [
   ["q", 0],
+  ["CTRL_C", 0],
   ["SIGINT", 130],
   ["SIGTERM", 143],
   ["SIGHUP", 129],

@@ -72,7 +72,7 @@ describe("conversationLines", () => {
     expect(text).toContain("src/b.ts  +5 -0 (added)");
   });
 
-  it("omits role headings and marks only user messages for right alignment", () => {
+  it("omits role headings and highlights user content without highlighting its spacer", () => {
     const rows: TimelineRow[] = [
       {
         ...base,
@@ -97,7 +97,29 @@ describe("conversationLines", () => {
     const lines = conversationLines(rows, 40, false);
 
     expect(lines.map((line) => line.text)).toEqual(["hello", "", "hi there", ""]);
-    expect(lines.slice(0, 2).every((line) => line.align === "right")).toBe(true);
-    expect(lines.slice(2).every((line) => line.align === undefined)).toBe(true);
+    expect(lines[0]).toMatchObject({ highlight: true, tone: "text", strong: false });
+    expect(lines.slice(1).every((line) => line.highlight === undefined)).toBe(true);
+  });
+
+  it("reserves horizontal padding when wrapping highlighted user messages", () => {
+    const lines = conversationLines(
+      [
+        {
+          ...base,
+          id: "user",
+          source: "message",
+          sourceId: MessageId.make("user-message"),
+          kind: "user",
+          text: "123456789",
+          streaming: false,
+        },
+      ],
+      10,
+      false,
+    );
+
+    expect(lines.map((line) => line.text)).toEqual(["12345678", "9", ""]);
+    expect(lines.slice(0, 2).every((line) => line.highlight)).toBe(true);
+    expect(lines[2]?.highlight).toBeUndefined();
   });
 });

@@ -44,16 +44,25 @@ server and update when another client changes them.
 
 Use Up/Down or Tab to select a project or thread, Enter or Right to open it, and Escape or Left to
 go back. Within a conversation, Up/Down and Page Up/Down scroll; End follows the latest output.
-Home moves to the top and requests earlier turns when available. `?` opens help, `R` reconnects,
-and Ctrl+C quits. Wide terminals keep the thread list beside the conversation; smaller terminals
-use a single pane. The composer stays visible, with its border indicating when it owns keyboard
-input. Routine tool activity is collapsed by default; press `t` from history to expand it. Errors
-and pending requests remain visible.
+The mouse wheel scrolls conversation history, and project or thread rows can be opened with a
+click. Typing in the composer returns history to the latest output. Home moves to the top and
+requests earlier turns when available. `?` opens help and `R` reconnects. Ctrl+C opens a
+confirmation before closing the TUI; closing it does not stop agents on the shared environment.
+Wide terminals keep the thread list beside the conversation; smaller terminals use a single pane.
+The composer stays visible, with its border indicating when it owns keyboard input. Routine tool
+activity is collapsed by default; press `t` from history to expand it. Errors and pending requests
+remain visible.
 
 To start a conversation, select a project and click **New thread**, or press `n` from navigation
 or conversation history. Choose a title, provider/model, and **Current checkout** or **New worktree**.
 Permissions initially follow the project's/environment's settings. Creating the thread does not
 send a prompt or start an agent.
+
+To add a project, click **New project** or press `p`. Choose **Local folder** to browse directories
+on the connected environment, including remote environments, or choose **GitHub URL** to clone a
+repository there. The clone destination starts from the environment's configured add-project base
+directory and remains editable. Private repositories use the GitHub credentials installed on that
+environment.
 
 A new worktree uses the base ref's committed files (`HEAD` by default), with a generated branch
 and a server-managed location. It does not copy uncommitted changes, fetch remotes, or run setup

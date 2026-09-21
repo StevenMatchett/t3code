@@ -25,8 +25,13 @@ export function ComposerControls({
   suggestedReplies,
   availableHeight,
   onActivate,
+  onDraftChange,
   onBlur,
   onSubmit,
+  onFocusNext,
+  onMenuChange,
+  onCancel,
+  cancelPending = false,
 }: {
   readonly client: TuiClient;
   readonly threadId: ThreadId;
@@ -36,8 +41,13 @@ export function ComposerControls({
   readonly suggestedReplies: readonly string[];
   readonly availableHeight: number;
   readonly onActivate: () => void;
+  readonly onDraftChange?: () => void;
   readonly onBlur: () => void;
   readonly onSubmit: () => void;
+  readonly onFocusNext?: () => void;
+  readonly onMenuChange?: (open: boolean) => void;
+  readonly onCancel?: () => void;
+  readonly cancelPending?: boolean;
 }) {
   const registry = useContext(RegistryContext);
   const catalog = useAtomValue(client.providers);
@@ -90,6 +100,9 @@ export function ComposerControls({
     : null;
   const slashOpen = focused && focus === 0 && completion !== null && completionKey !== dismissed;
   const menu = active && focused ? (dropdown ?? (slashOpen ? "skills" : null)) : null;
+  useEffect(() => {
+    onMenuChange?.(menu !== null);
+  }, [menu, onMenuChange]);
   const refresh = (models: boolean) => {
     const generation = ++refreshGeneration.current;
     setRefreshing(true);
@@ -117,6 +130,7 @@ export function ComposerControls({
     if (next.text !== snapshot.text || next.cursor !== snapshot.cursor) setCursor(0);
   };
   const updateDraft = (value: string) => {
+    onDraftChange?.();
     client.actions.setDraft(registry, threadId, value);
     const dropped = trailingPastedImagePaths(value);
     if (!dropped || interaction.attachmentPending) return;
@@ -154,6 +168,8 @@ export function ComposerControls({
     client.actions.setDraft(registry, threadId, reply);
     onSubmit();
   };
+  const cancelIndex = suggestedReplies.length + descriptors.length + 2;
+  const focusCount = cancelIndex + (onCancel ? 1 : 0);
   const needle = (menu === "skills" ? (completion?.query ?? "") : query).toLocaleLowerCase();
   const skills = provider
     ? selectableSkills(provider, cwd).filter((skill) =>
@@ -285,13 +301,10 @@ export function ComposerControls({
           return offset < 0 ? suggestedReplies.length : 1;
         return ((current - 1 + offset + suggestedReplies.length) % suggestedReplies.length) + 1;
       });
-    } else if (key.name === "tab")
-      setFocus(
-        (value) =>
-          (value + (key.shift ? suggestedReplies.length + descriptors.length + 1 : 1)) %
-          (suggestedReplies.length + descriptors.length + 2),
-      );
-    else if (key.name === "escape") {
+    } else if (key.name === "tab") {
+      if (!key.shift && onFocusNext && focus === focusCount - 1) onFocusNext();
+      else setFocus((value) => (value + (key.shift ? focusCount - 1 : 1)) % focusCount);
+    } else if (key.name === "escape") {
       if (focus > 0) setFocus(0);
       else onBlur();
     } else if (
@@ -300,7 +313,9 @@ export function ComposerControls({
     ) {
       if (!key.repeated) {
         if (focus <= suggestedReplies.length) chooseSuggestedReply(focus - 1);
-        else {
+        else if (onCancel && focus === cancelIndex) {
+          if (!cancelPending) onCancel();
+        } else {
           const controlIndex = focus - suggestedReplies.length;
           open(
             controlIndex === 1 ? "models" : `option:${descriptors[controlIndex - 2]!.id}`,
@@ -329,7 +344,13 @@ export function ComposerControls({
     })),
   ];
   return (
-    <Stack height={height} flexShrink={0} width="100%" overflow="visible">
+    <Stack
+      id="conversation-composer"
+      height={height}
+      flexShrink={0}
+      width="100%"
+      overflow="visible"
+    >
       <Panel
         title={
           focused
@@ -463,9 +484,42 @@ export function ComposerControls({
             </Stack>
           ))}
           {descriptors.length === 0 ? (
-            <Text tone="muted" height={1} wrapMode="none" truncate flexGrow={1}>
+            <Text
+              tone="muted"
+              height={1}
+              wrapMode="none"
+              truncate
+              flexGrow={1}
+              flexBasis={0}
+              minWidth={0}
+            >
               Reasoning: provider default
             </Text>
+          ) : null}
+          {onCancel ? (
+            <Stack
+              id="conversation-cancel-turn"
+              height={1}
+              flexGrow={1}
+              flexBasis={0}
+              minWidth={0}
+              {...(focused && focus === cancelIndex && selectedBackground
+                ? { backgroundColor: selectedBackground }
+                : {})}
+              onMouseDown={(event) => {
+                if (event.button !== 0 || cancelPending) return;
+                event.preventDefault();
+                event.stopPropagation();
+                onActivate();
+                setDropdown(null);
+                setFocus(cancelIndex);
+                onCancel();
+              }}
+            >
+              <Text height={1} tone="danger" strong wrapMode="none" truncate>
+                Cancel
+              </Text>
+            </Stack>
           ) : null}
         </Stack>
       </Panel>

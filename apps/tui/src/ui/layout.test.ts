@@ -7,6 +7,7 @@ describe("responsive shell layout", () => {
     const wide = calculateShellLayout(120, 32);
     expect(wide.split).toBe(true);
     expect(wide.sidebarWidth + wide.mainWidth + 3).toBe(120);
+    expect(wide.bodyHeight).toBe(28);
     expect(wide.contentWidth).toBeGreaterThanOrEqual(64);
     expect(calculateShellLayout(80, 24).split).toBe(false);
     expect(calculateShellLayout(120, 14).split).toBe(false);

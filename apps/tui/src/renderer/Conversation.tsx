@@ -5,6 +5,8 @@ import type { ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useMemo, useState, useContext, useEffect } from "react";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
+import { foldSubagentActivities } from "@t3tools/client-runtime/state/subagentRuntime";
+import { AgentOutputOverlay, AgentSwarmPanel, agentOutputLines } from "./AgentSwarm.tsx";
 import { RequestsPanel } from "./RequestsPanel.tsx";
 import { ComposerControls } from "./ProviderPicker.tsx";
 import type { TuiClient } from "../connection/clientRuntime.ts";
@@ -19,6 +21,7 @@ import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { ThreadTerminal } from "./ThreadTerminal.tsx";
+import type { HotkeyHint, HotkeyState } from "../ui/HotkeyBar.tsx";
 
 export function Conversation({
   client,
@@ -29,7 +32,9 @@ export function Conversation({
   onBack,
   onHelp,
   onNewThread,
+  onDiff,
   onHintsChange,
+  onTerminalFocusChange,
 }: {
   readonly client: TuiClient;
   readonly threadId: ThreadId;
@@ -39,7 +44,9 @@ export function Conversation({
   readonly onBack: () => void;
   readonly onHelp: () => void;
   readonly onNewThread?: () => void;
-  readonly onHintsChange?: (hints: string) => void;
+  readonly onDiff?: () => void;
+  readonly onHintsChange?: (state: HotkeyState) => void;
+  readonly onTerminalFocusChange?: (focused: boolean) => void;
 }) {
   const state = useAtomValue(client.thread(threadId));
   const shell = useAtomValue(client.shell);
@@ -47,10 +54,30 @@ export function Conversation({
   const interaction = useAtomValue(client.actions.state(threadId));
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
-  const [mode, setMode] = useState<"history" | "composer" | "requests">("history");
+  const [mode, setMode] = useState<"history" | "composer" | "requests" | "agents">("history");
+  const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [agentCursor, setAgentCursor] = useState(-1);
+  const [agentsExpanded, setAgentsExpanded] = useState(true);
+  const [agentReturnMode, setAgentReturnMode] = useState<"history" | "composer">("history");
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [agentOutputStart, setAgentOutputStart] = useState(0);
+  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const requests = useMemo(() => derivePendingRequests(thread?.activities ?? []), [thread]);
+  const agents = useMemo(
+    () => foldSubagentActivities(thread?.activities ?? []),
+    [thread?.activities],
+  );
+  const resolvedAgentCursor = Math.max(-1, Math.min(agentCursor, agents.length - 1));
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
+  const selectedAgentLines = useMemo(
+    () =>
+      selectedAgent
+        ? agentOutputLines(selectedAgent, thread?.activities ?? [], Math.max(1, width - 4))
+        : [],
+    [selectedAgent, thread?.activities, width],
+  );
   const requestCount = requests.approvals.length + requests.userInputs.length;
   const latestMessage = thread?.messages.at(-1);
   const suggestedReplies =
@@ -60,32 +87,116 @@ export function Conversation({
     thread?.latestTurn?.state !== "running"
       ? parseSuggestedReplies(latestMessage.text)
       : [];
+  const activateComposer = () => {
+    setAnchor(null);
+    setMode("composer");
+  };
+  const activateAgents = (returnMode: "history" | "composer") => {
+    setAgentReturnMode(returnMode);
+    setAgentCursor(-1);
+    setMode("agents");
+  };
   usePaste((event) => {
-    if (!active) return;
+    if (!active || selectedAgent) return;
     const text = decodePasteBytes(event.bytes);
     const paths = pastedImagePaths(text);
     if (!paths && !client.actions.addPaste(registry, threadId, text)) return;
     event.preventDefault();
     event.stopPropagation();
-    setMode("composer");
+    activateComposer();
     if (paths) void client.actions.attachImages(registry, threadId, paths);
   });
   useEffect(() => {
     if (thread) client.actions.observe(registry, thread.id);
   }, [client, registry, thread]);
-  const hints =
-    mode === "composer"
-      ? suggestedReplies.length
-        ? "Arrows Choose reply  Enter Select  Tab Model  Esc History"
-        : "Enter Send  / Skills  Tab Model/options  Ctrl+T Shell  Esc History"
+  const hints = useMemo<readonly HotkeyHint[]>(() => {
+    if (selectedAgent)
+      return [
+        { key: "↑↓", label: "Scroll" },
+        { key: "PgUp/Dn", label: "Page" },
+        { key: "Home/End", label: "Jump" },
+        { key: "Ctrl+K", label: "Search" },
+        { key: "Esc", label: "Close agent" },
+      ];
+    if (mode === "composer")
+      if (composerMenuOpen)
+        return [
+          { key: "↑↓", label: "Select" },
+          { key: "Enter/Tab", label: "Choose" },
+          { key: "⇧Tab/Esc", label: "Close" },
+          { key: "Ctrl+K", label: "Search" },
+        ];
+      else
+        return suggestedReplies.length
+          ? [
+              { key: "↑↓", label: "Choose reply" },
+              { key: "Enter", label: "Select" },
+              { key: "Tab", label: "Options" },
+              { key: "Ctrl+K", label: "Search" },
+              { key: "Esc", label: "History" },
+            ]
+          : [
+              { key: "Enter", label: "Send" },
+              { key: "Ctrl+J", label: "New line" },
+              { key: "/", label: "Skills" },
+              { key: "Tab", label: agents.length ? "Options/agents" : "Options" },
+              ...(thread?.latestTurn?.state === "running"
+                ? [{ key: "Ctrl+X", label: "Cancel" }]
+                : []),
+              { key: "Ctrl+K", label: "Search" },
+              { key: "Esc", label: "History" },
+            ];
+    if (mode === "requests")
+      return [
+        { key: "↑↓", label: "Select" },
+        { key: "Enter", label: "Review" },
+        { key: "PgUp/Dn", label: "Details" },
+        { key: "Ctrl+K", label: "Search" },
+        { key: "Esc", label: "Back" },
+      ];
+    if (mode === "agents")
+      return [
+        { key: "↑↓", label: "Select" },
+        { key: "Enter", label: "Toggle/open" },
+        { key: "Ctrl+K", label: "Search" },
+        { key: "Tab/Esc", label: "Back" },
+      ];
+    return [
+      { key: "Enter", label: "Write" },
+      { key: "↑↓", label: "Scroll" },
+      { key: "A", label: "Requests" },
+      ...(agents.length ? [{ key: "Tab", label: "Agents" }] : []),
+      { key: "T", label: "Details" },
+      { key: "D", label: "Diff" },
+      ...(width >= 58 ? [{ key: "Ctrl+T", label: "Shell" }] : []),
+      { key: "N", label: "New thread" },
+      { key: "Ctrl+K", label: "Search" },
+      { key: "Esc", label: "Threads" },
+      ...(width >= 58 ? [{ key: "?", label: "Help" }] : []),
+    ];
+  }, [
+    agents.length,
+    composerMenuOpen,
+    mode,
+    selectedAgent,
+    suggestedReplies.length,
+    thread?.latestTurn?.state,
+    width,
+  ]);
+  const hotkeyContext = selectedAgent
+    ? "Agent output"
+    : mode === "composer"
+      ? composerMenuOpen
+        ? "Menu"
+        : "Message"
       : mode === "requests"
-        ? "Up/Down Select  Enter Review  Esc Back  PgUp/PgDn Details"
-        : width < 58
-          ? "Enter Write  A Requests  Ctrl+T Shell  Esc Back"
-          : "Enter Write  A Requests  Ctrl+T Shell  Esc Back  ? Help";
+        ? "Requests"
+        : mode === "agents"
+          ? "Agents"
+          : "Conversation";
   useEffect(() => {
-    onHintsChange?.(hints);
-  }, [hints, onHintsChange]);
+    onHintsChange?.({ context: hotkeyContext, hints });
+  }, [hints, hotkeyContext, onHintsChange]);
   const editorHeight =
     mode === "composer"
       ? Math.max(2, Math.min(4, Math.floor(height / 4)))
@@ -94,6 +205,8 @@ export function Conversation({
         : 1;
   const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
   const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;
+  const agentPanelHeight =
+    agents.length > 0 ? (agentsExpanded ? Math.min(6, agents.length + 3) : 3) : 0;
   const gap = height >= 12 ? 1 : 0;
   const count = Math.max(
     1,
@@ -101,10 +214,10 @@ export function Conversation({
       1 -
       (editorHeight + attachmentHeight + suggestedReplyHeight + 3) -
       gap -
+      agentPanelHeight -
       (interaction.error ? 1 : 0) -
       (thread?.worktreePath ? 1 : 0),
   );
-  const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(null);
   const timeline = useMemo(
     () => (thread === null ? [] : projectRecordedThreadTimeline(thread)),
     [thread],
@@ -134,8 +247,32 @@ export function Conversation({
     const line = lines[target];
     setAnchor(target === maxStart || line === undefined ? null : { id: line.id, line: line.line });
   };
+  const cancelTurn = () => {
+    void client.actions.interrupt(registry, threadId);
+  };
   useKeyboard((key) => {
     if (!active) return;
+    if (selectedAgent) {
+      if (key.ctrl || key.meta || key.option) return;
+      const visible = Math.max(1, height - 4);
+      const maximum = Math.max(0, selectedAgentLines.length - visible);
+      if (key.name === "escape") {
+        setSelectedAgentId(null);
+        setAgentOutputStart(0);
+      } else if (key.name === "up") setAgentOutputStart((current) => Math.max(0, current - 1));
+      else if (key.name === "down")
+        setAgentOutputStart((current) => Math.min(maximum, current + 1));
+      else if (key.name === "pageup")
+        setAgentOutputStart((current) => Math.max(0, current - visible));
+      else if (key.name === "pagedown")
+        setAgentOutputStart((current) => Math.min(maximum, current + visible));
+      else if (key.name === "home") setAgentOutputStart(0);
+      else if (key.name === "end") setAgentOutputStart(maximum);
+      else return;
+      key.preventDefault();
+      key.stopPropagation();
+      return;
+    }
     if (key.ctrl && key.name === "t" && !terminalOpen && client.terminals) {
       key.preventDefault();
       key.stopPropagation();
@@ -146,7 +283,31 @@ export function Conversation({
     if (key.ctrl && key.name === "x") {
       key.preventDefault();
       key.stopPropagation();
-      void client.actions.interrupt(registry, threadId);
+      cancelTurn();
+      return;
+    }
+    if (mode === "agents") {
+      if (key.ctrl || key.meta || key.option || agents.length === 0) return;
+      const selectableCount = agentsExpanded ? agents.length + 1 : 1;
+      if (key.name === "up") {
+        const position = (resolvedAgentCursor + selectableCount) % selectableCount;
+        setAgentCursor(position - 1);
+      } else if (key.name === "down") {
+        const position = (resolvedAgentCursor + 2) % selectableCount;
+        setAgentCursor(position - 1);
+      } else if (key.name === "return" || key.name === "enter" || key.name === "space") {
+        if (resolvedAgentCursor === -1) setAgentsExpanded((current) => !current);
+        else {
+          const agent = agents[resolvedAgentCursor];
+          if (agent) {
+            setSelectedAgentId(agent.id);
+            setAgentOutputStart(0);
+          }
+        }
+      } else if (key.name === "escape" || key.name === "tab") setMode(agentReturnMode);
+      else return;
+      key.preventDefault();
+      key.stopPropagation();
       return;
     }
     if (key.ctrl || key.meta || key.option || mode !== "history") return;
@@ -157,12 +318,12 @@ export function Conversation({
           threadId,
           `${interaction.draft}${interaction.draft && !/\s$/u.test(interaction.draft) ? " " : ""}/`,
         );
-        setMode("composer");
+        activateComposer();
         break;
       case "return":
       case "enter":
       case "i":
-        setMode("composer");
+        activateComposer();
         break;
       case "n":
         onNewThread?.();
@@ -170,14 +331,24 @@ export function Conversation({
       case "a":
         setMode("requests");
         break;
+      case "g":
+        if (agents.length === 0) return;
+        activateAgents("history");
+        break;
       case "t":
         setShowDetails((value) => !value);
+        break;
+      case "d":
+        onDiff?.();
         break;
       case "escape":
       case "left":
       case "backspace":
-      case "tab":
         onBack();
+        break;
+      case "tab":
+        if (agents.length > 0 && !key.shift) activateAgents("history");
+        else onBack();
         break;
       case "?":
         onHelp();
@@ -251,6 +422,7 @@ export function Conversation({
         cwd={terminalCwd}
         worktreePath={thread?.worktreePath ?? null}
         active={active}
+        {...(onTerminalFocusChange ? { onFocusChange: onTerminalFocusChange } : {})}
         {...(onHintsChange ? { onHintsChange } : {})}
         onBack={() => setTerminalOpen(false)}
       />
@@ -275,7 +447,7 @@ export function Conversation({
       </Panel>
     );
   return (
-    <Stack flexDirection="column" width="100%" height="100%" overflow="hidden">
+    <Stack position="relative" flexDirection="column" width="100%" height="100%" overflow="hidden">
       {thread?.worktreePath ? (
         <Text
           height={1}
@@ -285,20 +457,23 @@ export function Conversation({
           truncate
         >{`Worktree: ${inlineTerminalText(thread.worktreePath)}`}</Text>
       ) : null}
-      <Stack height={1} flexShrink={0} flexDirection="row">
-        <ThreadActivityIndicator phase={phase} visible={active} />
-        <Text tone={requestCount ? "warning" : "muted"} flexGrow={1} wrapMode="none" truncate>
-          {requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
-            ? "  A: respond to requests"
-            : interaction.pending
-              ? "  Sending command..."
-              : "  T: tool details"}
-        </Text>
-        <Text tone="muted" flexShrink={0}>
-          {anchor !== null ? "History / End: live" : page?.hasMore ? "Home: earlier" : ""}
-        </Text>
-      </Stack>
-      <Stack flexGrow={1} flexDirection="column" overflow="hidden">
+      <Stack
+        id="conversation-history"
+        flexGrow={1}
+        flexDirection="column"
+        overflow="hidden"
+        onMouseScroll={(event) => {
+          const direction = event.scroll?.direction;
+          if (direction !== "up" && direction !== "down") return;
+          const distance = Math.max(3, Math.round(Math.abs(event.scroll?.delta ?? 1)));
+          scrollTo(start + (direction === "up" ? -distance : distance));
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onMouseDown={(event) => {
+          if (event.button === 0) setMode("history");
+        }}
+      >
         {lines.length === 0 ? (
           <Text tone="muted">{empty}</Text>
         ) : (
@@ -313,6 +488,32 @@ export function Conversation({
         </Text>
       ) : null}
       {gap ? <Stack height={gap} flexShrink={0} /> : null}
+      <Stack id="conversation-activity" height={1} flexShrink={0} flexDirection="row">
+        <Text
+          id="thread-diff-action"
+          tone="accent"
+          flexShrink={0}
+          onMouseDown={(event) => {
+            if (!active || event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onDiff?.();
+          }}
+        >
+          [D Changes]{" "}
+        </Text>
+        <ThreadActivityIndicator phase={phase} visible={active} />
+        <Text tone={requestCount ? "warning" : "muted"} flexGrow={1} wrapMode="none" truncate>
+          {requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
+            ? "  A: respond to requests"
+            : interaction.pending
+              ? "  Sending command..."
+              : "  T: tool details"}
+        </Text>
+        <Text tone="muted" flexShrink={0}>
+          {anchor !== null ? "History / End: live" : page?.hasMore ? "Home: earlier" : ""}
+        </Text>
+      </Stack>
       <ComposerControls
         client={client}
         threadId={threadId}
@@ -321,13 +522,48 @@ export function Conversation({
         editorHeight={editorHeight}
         suggestedReplies={suggestedReplies}
         availableHeight={height - 1}
-        onActivate={() => setMode("composer")}
+        onActivate={activateComposer}
+        onDraftChange={() => setAnchor(null)}
         onBlur={() => setMode("history")}
+        onMenuChange={setComposerMenuOpen}
+        {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
         onSubmit={() => {
           setAnchor(null);
           void client.actions.send(registry, threadId);
         }}
+        {...(thread?.latestTurn?.state === "running"
+          ? { onCancel: cancelTurn, cancelPending: interaction.pending === "stop" }
+          : {})}
       />
+      {agents.length > 0 ? (
+        <AgentSwarmPanel
+          agents={agents}
+          height={agentPanelHeight}
+          cursor={resolvedAgentCursor}
+          active={mode === "agents"}
+          expanded={agentsExpanded}
+          onSelect={setAgentCursor}
+          onToggle={() => setAgentsExpanded((current) => !current)}
+          onOpen={(agentId) => {
+            setSelectedAgentId(agentId);
+            setAgentOutputStart(0);
+          }}
+        />
+      ) : null}
+      {selectedAgent ? (
+        <AgentOutputOverlay
+          agent={selectedAgent}
+          activities={thread?.activities ?? []}
+          width={width}
+          height={height}
+          start={agentOutputStart}
+          onScroll={setAgentOutputStart}
+          onClose={() => {
+            setSelectedAgentId(null);
+            setAgentOutputStart(0);
+          }}
+        />
+      ) : null}
     </Stack>
   );
 }

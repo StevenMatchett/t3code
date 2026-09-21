@@ -51,7 +51,7 @@ describeWithNativeFfi("ShellCommandText", () => {
     );
   });
 
-  it("places user text at the right edge and agent text at the left edge", async () => {
+  it("renders user text in a full-width highlighted row instead of right-aligning it", async () => {
     const driver = await createTuiTestDriver(
       <UiProvider capabilities={richTerminalCapabilities}>
         <ConversationText
@@ -61,7 +61,7 @@ describeWithNativeFfi("ShellCommandText", () => {
             text: "from user",
             tone: "text",
             strong: false,
-            align: "right",
+            highlight: true,
           }}
         />
         <ConversationText
@@ -73,7 +73,13 @@ describeWithNativeFfi("ShellCommandText", () => {
     drivers.add(driver);
 
     const [user, agent] = driver.captureRawFrame().split("\n");
-    expect(user).toBe("           from user");
+    expect(user).toBe(" from user          ");
     expect(agent).toBe("from agent          ");
+    const userSpans = driver.captureSpans().lines[0]!.spans;
+    expect(
+      userSpans.some(
+        (span) => span.bg.toInts().join() === parseColor(defaultTheme.selection).toInts().join(),
+      ),
+    ).toBe(true);
   });
 });

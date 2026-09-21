@@ -120,7 +120,9 @@ export async function startRendererRuntime(
   };
 
   try {
-    renderer = await (options.createRenderer ?? createCliRenderer)();
+    renderer = await (
+      options.createRenderer ?? (() => createCliRenderer({ exitOnCtrlC: false }))
+    )();
     root = createRoot(renderer);
     const destroyed = Promise.withResolvers<void>();
     (renderer as DestroyEventRenderer).once(CliRenderEvents.DESTROY, destroyed.resolve);

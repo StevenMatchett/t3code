@@ -3,7 +3,7 @@ import type { ProjectId, ThreadId } from "@t3tools/contracts";
 export const SHELL_ROUTES = ["projects", "threads", "conversation"] as const;
 export type ShellRoute = (typeof SHELL_ROUTES)[number];
 export type ShellFocusTarget = "project-list" | "thread-list" | "conversation";
-export type ShellModal = "help" | "new-thread";
+export type ShellModal = "help" | "new-project" | "new-thread";
 
 export interface ShellState {
   readonly route: ShellRoute;
@@ -22,8 +22,10 @@ export type ShellCommand =
   | { readonly type: "activate" }
   | { readonly type: "back" }
   | { readonly type: "toggle-help" }
+  | { readonly type: "new-project" }
   | { readonly type: "new-thread" }
   | { readonly type: "close-modal" }
+  | { readonly type: "open-project"; readonly projectId: ProjectId }
   | { readonly type: "open-thread"; readonly projectId: ProjectId; readonly threadId: ThreadId }
   | { readonly type: "reconcile" };
 
@@ -70,6 +72,8 @@ export function shellCommandFromKey(key: ShellKey): ShellCommand | undefined {
       return { type: "toggle-help" };
     case "n":
       return { type: "new-thread" };
+    case "p":
+      return { type: "new-project" };
     default:
       return undefined;
   }
@@ -102,8 +106,22 @@ export function dispatchShellCommand(
   const state = reconcile(previous, rows);
   if (command.type === "reconcile") return state;
   if (command.type === "close-modal") return { ...state, modal: null };
+  if (command.type === "new-project") return { ...state, modal: "new-project" };
   if (command.type === "new-thread")
     return state.projectId ? { ...state, modal: "new-thread" } : state;
+  if (command.type === "open-project")
+    return rows.projects.some((project) => project.id === command.projectId)
+      ? reconcile(
+          {
+            ...state,
+            route: "threads",
+            projectId: command.projectId,
+            threadId: null,
+            modal: null,
+          },
+          rows,
+        )
+      : state;
   if (command.type === "open-thread")
     return rows.threads.some(
       (thread) => thread.id === command.threadId && thread.projectId === command.projectId,

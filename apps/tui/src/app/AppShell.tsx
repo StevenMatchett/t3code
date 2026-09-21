@@ -4,6 +4,8 @@ import type {
   EnvironmentId,
   OrchestrationProjectShell,
   OrchestrationThreadShell,
+  ProjectId,
+  ThreadId,
 } from "@t3tools/contracts";
 import { threadActivityPhase, type ThreadActivityPhase } from "../features/chat/threadActivity.ts";
 import { ThreadActivityIndicator } from "../ui/ThreadActivityIndicator.tsx";
@@ -13,6 +15,7 @@ import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { useThemeColor } from "../ui/context.tsx";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { inlineTerminalText } from "../ui/textLayout.ts";
+import { HotkeyBar, type HotkeyHint, type HotkeyState } from "../ui/HotkeyBar.tsx";
 import {
   createInitialShellState,
   dispatchShellCommand,
@@ -34,14 +37,26 @@ export interface AppShellViewProps {
   readonly error: boolean;
   readonly width: number;
   readonly height: number;
-  readonly hints?: string;
+  readonly hotkeys?: HotkeyState;
   readonly notice?: {
     readonly text: string;
     readonly failed: boolean;
   } | null;
   readonly children?: ReactNode;
+  readonly onOpenProject?: (projectId: ProjectId) => void;
+  readonly onOpenThread?: (projectId: ProjectId, threadId: ThreadId) => void;
+  readonly onNewProject?: () => void;
   readonly onNewThread?: () => void;
   readonly modalContent?: ReactNode;
+  readonly managementOverlay?: {
+    readonly title: string;
+    readonly context: string;
+    readonly hints: readonly HotkeyHint[];
+    readonly content: ReactNode;
+  } | null;
+  readonly onOpenArchived?: () => void;
+  readonly onManageThread?: () => void;
+  readonly onOpenPalette?: () => void;
 }
 
 export function useAppShellState(
@@ -73,6 +88,7 @@ function List({
   empty,
   active,
   visible,
+  onActivate,
 }: {
   readonly items: ReadonlyArray<{
     readonly id: string;
@@ -84,6 +100,7 @@ function List({
   readonly empty: string;
   readonly active: boolean;
   readonly visible: boolean;
+  readonly onActivate?: (id: string) => void;
 }) {
   const selected = Math.max(
     0,
@@ -99,11 +116,19 @@ function List({
       {items.length === 0 ? (
         <Text tone="muted">{empty}</Text>
       ) : (
-        items
-          .slice(start, start + visibleCount)
-          .map((item) => (
+        items.slice(start, start + visibleCount).map((item) => (
+          <Stack
+            key={item.id}
+            id={`navigation-${item.id}`}
+            width="100%"
+            height={1}
+            flexShrink={0}
+            onMouseDown={(event) => {
+              if (event.button !== 0) return;
+              onActivate?.(item.id);
+            }}
+          >
             <SelectionRow
-              key={item.id}
               selected={item.id === selectedId}
               active={active}
               label={item.text}
@@ -113,7 +138,8 @@ function List({
                 ) : undefined
               }
             />
-          ))
+          </Stack>
+        ))
       )}
       <Stack flexGrow={1} />
       {items.length > count ? (
@@ -133,16 +159,20 @@ function Help() {
       <Text tone="accent">NAVIGATION</Text>
       <Text>Up/Down or Tab Select Enter / Right Open</Text>
       <Text>Esc / Left Back R Reconnect</Text>
+      <Text>Ctrl+K Search conversation output, projects, threads, and commands</Text>
       <Text tone="accent">CONVERSATION</Text>
       <Text>Enter / i Write prompt Esc Return to history</Text>
       <Text>Enter Send Ctrl+J New line</Text>
       <Text>Click model/reasoning or Tab then Enter</Text>
       <Text>/ Search skills Enter Choose Esc Dismiss</Text>
-      <Text>Up/Down / PgUp/PgDn Scroll End Follow latest</Text>
+      <Text>Mouse wheel / Up/Down / PgUp/PgDn Scroll End Follow latest</Text>
       <Text>A Requests T Tool detail Ctrl+X Stop turn</Text>
       <Text>Ctrl+T Open thread shell Ctrl+\ Release shell focus</Text>
       <Text>N New thread (from navigation or history)</Text>
-      <Text tone="muted">Ctrl+C quits the TUI, not the shared server.</Text>
+      <Text>P New project</Text>
+      <Text>M Manage thread Shift+A Archived threads (navigation)</Text>
+      <Text>D View saved thread changes (navigation or history)</Text>
+      <Text tone="muted">Ctrl+C asks before closing the TUI; the shared server keeps running.</Text>
       <Text tone="muted">
         Provider switching in existing threads and Git actions remain pending.
       </Text>
@@ -162,11 +192,18 @@ export function AppShellView({
   error,
   width,
   height,
-  hints,
+  hotkeys,
   notice,
   children,
+  onOpenProject,
+  onOpenThread,
+  onNewProject,
   onNewThread,
   modalContent,
+  managementOverlay,
+  onOpenArchived,
+  onManageThread,
+  onOpenPalette,
 }: AppShellViewProps) {
   const layout = calculateShellLayout(width, height);
   const background = useThemeColor("panel");
@@ -175,6 +212,25 @@ export function AppShellView({
   const selectedThread = projectThreads.find((item) => item.id === state.threadId);
   const browsingProjects = state.route === "projects";
   const conversation = state.route === "conversation";
+  const navigationHints: readonly HotkeyHint[] = browsingProjects
+    ? [
+        { key: "↑↓", label: "Select" },
+        { key: "Enter", label: "Open" },
+        { key: "P", label: "New project" },
+        { key: "⇧A", label: "Archived" },
+        { key: "Ctrl+K", label: "Search" },
+        { key: "?", label: "Help" },
+      ]
+    : [
+        { key: "↑↓", label: "Select" },
+        { key: "Enter", label: "Open" },
+        { key: "N", label: "New thread" },
+        { key: "M", label: "Manage" },
+        { key: "D", label: "Diff" },
+        { key: "⇧A", label: "Archived" },
+        { key: "Ctrl+K", label: "Search" },
+        { key: "Esc", label: "Projects" },
+      ];
   const title = browsingProjects
     ? `Projects (${projects.length})`
     : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
@@ -229,6 +285,15 @@ export function AppShellView({
         empty={empty}
         active={!conversation}
         visible={state.modal === null}
+        onActivate={(id) => {
+          if (browsingProjects) {
+            const selected = projects.find((item) => item.id === id);
+            if (selected) onOpenProject?.(selected.id);
+            return;
+          }
+          const selected = projectThreads.find((item) => item.id === id);
+          if (selected) onOpenThread?.(selected.projectId, selected.id);
+        }}
       />
       <Text height={1} tone="muted" wrapMode="none" truncate>
         {browsingProjects
@@ -282,6 +347,42 @@ export function AppShellView({
         <Text tone="muted" flexGrow={1} wrapMode="none" truncate>
           {inlineTerminalText(label)}
         </Text>
+        {onNewProject ? (
+          <Stack
+            id="new-project-action"
+            height={1}
+            width={17}
+            flexShrink={0}
+            onMouseDown={(event) => {
+              if (event.button !== 0 || state.modal !== null) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onNewProject();
+            }}
+          >
+            <Text tone="accent" strong height={1}>
+              [+ New project]
+            </Text>
+          </Stack>
+        ) : null}
+        {onOpenPalette && width >= 90 ? (
+          <Stack
+            id="open-command-palette"
+            height={1}
+            width={12}
+            flexShrink={0}
+            onMouseDown={(event) => {
+              if (event.button !== 0 || state.modal !== null || managementOverlay) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenPalette();
+            }}
+          >
+            <Text tone="accent" strong height={1}>
+              [ Search ]
+            </Text>
+          </Stack>
+        ) : null}
         {project && onNewThread ? (
           <Stack
             id="new-thread-action"
@@ -300,6 +401,42 @@ export function AppShellView({
             </Text>
           </Stack>
         ) : null}
+        {selectedThread && onManageThread ? (
+          <Stack
+            id="manage-thread-action"
+            height={1}
+            width={11}
+            flexShrink={0}
+            onMouseDown={(event) => {
+              if (event.button !== 0 || state.modal !== null || managementOverlay) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onManageThread();
+            }}
+          >
+            <Text tone="accent" strong height={1}>
+              [ Manage ]
+            </Text>
+          </Stack>
+        ) : null}
+        {onOpenArchived ? (
+          <Stack
+            id="archived-threads-action"
+            height={1}
+            width={12}
+            flexShrink={0}
+            onMouseDown={(event) => {
+              if (event.button !== 0 || state.modal !== null || managementOverlay) return;
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenArchived();
+            }}
+          >
+            <Text tone="accent" strong height={1}>
+              [ Archived ]
+            </Text>
+          </Stack>
+        ) : null}
         <Text
           tone={error ? "danger" : status === "Connected" ? "success" : "warning"}
           flexShrink={0}
@@ -308,7 +445,7 @@ export function AppShellView({
       <Stack height={1} flexShrink={0} />
       <Stack height={layout.bodyHeight} flexShrink={0} flexDirection="row" gap={1}>
         <Stack
-          visible={state.modal === null}
+          visible={state.modal === null && !managementOverlay}
           width="100%"
           height="100%"
           flexDirection="row"
@@ -348,30 +485,87 @@ export function AppShellView({
             left={0}
             width="100%"
             height="100%"
-            title={state.modal === "new-thread" ? "New thread" : "Help"}
+            title={
+              state.modal === "new-thread"
+                ? "New thread"
+                : state.modal === "new-project"
+                  ? "New project"
+                  : "Help"
+            }
             borderTone="borderFocused"
             flexDirection="column"
           >
-            {state.modal === "new-thread" ? modalContent : <Help />}
+            {state.modal === "new-thread" || state.modal === "new-project" ? (
+              modalContent
+            ) : (
+              <Help />
+            )}
+          </Panel>
+        ) : null}
+        {managementOverlay ? (
+          <Panel
+            id="thread-management-overlay"
+            position="absolute"
+            top={0}
+            left={0}
+            width="100%"
+            height="100%"
+            title={managementOverlay.title}
+            borderTone="borderFocused"
+            flexDirection="column"
+          >
+            {managementOverlay.content}
           </Panel>
         ) : null}
       </Stack>
-      <Text
-        height={1}
-        flexShrink={0}
-        tone={notice?.failed ? "danger" : notice ? "success" : "muted"}
-        wrapMode="none"
-        truncate
-      >
-        {notice?.text ??
-          (state.modal === "new-thread"
-            ? "Tab Select field  Enter Activate  Esc Close"
-            : state.modal
-              ? "Enter / Esc  Close help"
-              : conversation
-                ? (hints ?? "Enter  Compose   A  Requests   Esc  Threads   ?  Help")
-                : "Up/Down Select  Enter Open  N New thread  Esc Back  ? Help")}
-      </Text>
+      {notice ? (
+        <Stack height={2} flexShrink={0}>
+          <Text
+            height={1}
+            flexShrink={0}
+            tone={notice.failed ? "danger" : "success"}
+            wrapMode="none"
+            truncate
+          >
+            {notice.text}
+          </Text>
+        </Stack>
+      ) : (
+        <HotkeyBar
+          width={Math.max(1, width - 2)}
+          context={
+            managementOverlay?.context ??
+            (state.modal === "new-thread"
+              ? "New thread"
+              : state.modal === "new-project"
+                ? "New project"
+                : state.modal
+                  ? "Help"
+                  : conversation
+                    ? (hotkeys?.context ?? "Conversation")
+                    : browsingProjects
+                      ? "Projects"
+                      : "Threads")
+          }
+          hints={
+            managementOverlay?.hints ??
+            (state.modal === "new-thread" || state.modal === "new-project"
+              ? [
+                  { key: "Tab", label: "Next field" },
+                  { key: "Enter", label: "Activate" },
+                  { key: "Esc", label: "Close" },
+                ]
+              : state.modal
+                ? [{ key: "Esc", label: "Close" }]
+                : conversation
+                  ? (hotkeys?.hints ?? [
+                      { key: "Enter", label: "Write" },
+                      { key: "Esc", label: "Threads" },
+                    ])
+                  : navigationHints)
+          }
+        />
+      )}
     </Stack>
   );
 }

@@ -1,6 +1,7 @@
 import type { TimelineRow } from "../features/chat/timeline.ts";
 import type { ThemeToken } from "./theme.ts";
 import { inlineTerminalText, wrapTerminalLines } from "./textLayout.ts";
+import { markdownLines, type MarkdownSpan } from "./markdownLines.ts";
 
 export interface ConversationLine {
   readonly id: string;
@@ -9,7 +10,8 @@ export interface ConversationLine {
   readonly tone: ThemeToken;
   readonly strong: boolean;
   readonly shell?: boolean;
-  readonly align?: "left" | "right";
+  readonly highlight?: boolean;
+  readonly spans?: readonly MarkdownSpan[];
 }
 
 export function conversationLines(
@@ -17,17 +19,26 @@ export function conversationLines(
   width: number,
   expanded: boolean,
 ): readonly ConversationLine[] {
-  return rows.flatMap((row) => {
+  return rows.flatMap<ConversationLine>((row) => {
+    if (row.source === "message" && row.kind === "assistant") {
+      return [
+        ...markdownLines(row.text, width),
+        { text: "", spans: [], tone: "text" as const, strong: false },
+      ].map((line, index) => ({ ...line, id: row.id, line: index }));
+    }
     const error =
       row.kind === "error" ||
       (row.source === "activity" && (row.status === "failed" || row.status === "declined"));
     const tone: ThemeToken = error
       ? "danger"
-      : row.kind === "user" || row.source === "checkpoint"
+      : row.source === "checkpoint"
         ? "accent"
-        : "muted";
+        : row.kind === "user"
+          ? "text"
+          : "muted";
     let texts: string[];
     let shellLines = 0;
+    let highlightedLines = 0;
     if (row.source === "checkpoint") {
       const additions = row.files.reduce((sum, file) => sum + file.additions, 0);
       const deletions = row.files.reduce((sum, file) => sum + file.deletions, 0);
@@ -62,16 +73,21 @@ export function conversationLines(
           : []),
       ];
     } else {
-      texts = [...wrapTerminalLines(row.text, Math.max(1, width)), ""];
+      const wrapped = wrapTerminalLines(
+        row.text,
+        Math.max(1, width - (row.kind === "user" ? 2 : 0)),
+      );
+      highlightedLines = row.kind === "user" ? wrapped.length : 0;
+      texts = [...wrapped, ""];
     }
     return texts.map((text, line) => ({
       id: row.id,
       line,
       text,
       tone: line === 0 ? tone : error ? "danger" : "text",
-      strong: line === 0,
+      strong: line === 0 && row.kind !== "user",
       ...(line < shellLines ? { shell: true } : {}),
-      ...(row.kind === "user" ? { align: "right" as const } : {}),
+      ...(line < highlightedLines ? { highlight: true } : {}),
     }));
   });
 }

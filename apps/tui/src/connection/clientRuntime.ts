@@ -30,6 +30,8 @@ import { createEnvironmentCatalogAtoms } from "@t3tools/client-runtime/state/con
 import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
 import { createEnvironmentSessionAtoms } from "@t3tools/client-runtime/state/session";
 import { createTerminalEnvironmentAtoms } from "@t3tools/client-runtime/state/terminal";
+import { createOrchestrationEnvironmentAtoms } from "@t3tools/client-runtime/state/orchestration";
+import { createReviewEnvironmentAtoms } from "@t3tools/client-runtime/state/review";
 import { mergeEnvironmentThread } from "@t3tools/client-runtime/state/threads";
 import { scopeThread, scopeThreadShell } from "@t3tools/client-runtime/state/models";
 import type { ProviderCatalog } from "../features/chat/providerChoices.ts";
@@ -50,11 +52,19 @@ import {
   WS_METHODS,
   type ServerSettings,
   type EnvironmentId,
+  type FilesystemBrowseResult,
+  type OrchestrationThreadSearchMatch,
+  type OrchestrationThreadShell,
   type ThreadId,
 } from "@t3tools/contracts";
 import { makeNewThreadActions, type NewThreadActions } from "../features/chat/newThread.ts";
+import { makeNewProjectActions, type NewProjectActions } from "../features/projects/newProject.ts";
 import { createEnvironmentRpcCommand } from "@t3tools/client-runtime/state/runtime";
 import { makeThreadInteractions, type ThreadInteractions } from "../features/chat/interactions.ts";
+import {
+  makeThreadManagementActions,
+  type ThreadManagementActions,
+} from "../features/threads/management.ts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -67,6 +77,11 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import type { ReattachedAuthenticatedTuiEnvironment } from "./authenticatedEnvironment.ts";
 
 export interface TuiClient {
+  readonly diffs: Pick<
+    ReturnType<typeof createOrchestrationEnvironmentAtoms>,
+    "fullThreadDiff" | "turnDiff"
+  >;
+  readonly review: Pick<ReturnType<typeof createReviewEnvironmentAtoms>, "diffPreview">;
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly httpOrigin: string;
@@ -77,6 +92,18 @@ export interface TuiClient {
   readonly loadOlder: (threadId: ThreadId) => boolean;
   readonly actions: ThreadInteractions;
   readonly newThreads: NewThreadActions;
+  readonly newProjects: NewProjectActions;
+  readonly threadManagement: ThreadManagementActions;
+  readonly archivedThreads: Atom.Atom<{
+    readonly status: "loading" | "live" | "error";
+    readonly threads: readonly OrchestrationThreadShell[];
+  }>;
+  readonly refreshArchivedThreads: (registry: AtomRegistry.AtomRegistry) => void;
+  readonly threadSearch: (query: string) => Atom.Atom<{
+    readonly matches: readonly OrchestrationThreadSearchMatch[];
+    readonly loading: boolean;
+    readonly failed: boolean;
+  }>;
   readonly settings: Atom.Atom<ServerSettings | null>;
   readonly providers: Atom.Atom<ProviderCatalog>;
   readonly terminals?: ReturnType<typeof createTerminalEnvironmentAtoms>;
@@ -249,6 +276,40 @@ export function createTuiClient(
   }).pipe(Atom.keepAlive);
   const threads = createEnvironmentThreadStateAtoms(runtime);
   const terminals = createTerminalEnvironmentAtoms(runtime);
+  const orchestration = createOrchestrationEnvironmentAtoms(runtime);
+  const archivedSnapshot = orchestration.archivedShellSnapshot({ environmentId, input: {} });
+  const archivedThreads = Atom.make((get) => {
+    const result = get(archivedSnapshot);
+    return {
+      status: AsyncResult.isFailure(result)
+        ? ("error" as const)
+        : AsyncResult.isSuccess(result)
+          ? ("live" as const)
+          : ("loading" as const),
+      threads: Option.getOrNull(AsyncResult.value(result))?.threads ?? [],
+    };
+  }).pipe(Atom.keepAlive);
+  const emptyThreadSearch = Atom.make({
+    matches: [] as readonly OrchestrationThreadSearchMatch[],
+    loading: false,
+    failed: false,
+  });
+  const threadSearch = Atom.family((query: string) => {
+    const normalized = query.trim().slice(0, 200);
+    if (normalized.length < 2) return emptyThreadSearch;
+    const resultAtom = orchestration.threadSearch({
+      environmentId,
+      input: { query: normalized, limit: 50 },
+    });
+    return Atom.make((get) => {
+      const result = get(resultAtom);
+      return {
+        matches: Option.getOrNull(AsyncResult.value(result))?.matches ?? [],
+        loading: result.waiting,
+        failed: AsyncResult.isFailure(result),
+      };
+    });
+  });
   const shellStatus = Atom.make((get) => get(shell.stateValueAtom(environmentId)).status);
   const threadMetadata = Atom.family((threadId: ThreadId) =>
     Atom.make(
@@ -299,6 +360,23 @@ export function createTuiClient(
     label: "tui.recover-worktree",
     tag: WS_METHODS.vcsListRefs,
   });
+  const browseFilesystem = createEnvironmentRpcCommand(runtime, {
+    label: "tui.browse-filesystem",
+    tag: WS_METHODS.filesystemBrowse,
+  });
+  const startProjectClone = createEnvironmentRpcCommand(runtime, {
+    label: "tui.start-project-clone",
+    tag: WS_METHODS.projectCloneStart,
+  });
+  const cloneRepository = createEnvironmentRpcCommand(runtime, {
+    label: "tui.clone-repository",
+    tag: WS_METHODS.sourceControlCloneRepository,
+  });
+  const projectCloneTracking = Atom.make(
+    (get) =>
+      get(server.configValueAtom(environmentId))?.environment.capabilities.projectCloneTracking ===
+      true,
+  );
   const newThreads = makeNewThreadActions({
     shell: shell.stateValueAtom(environmentId),
     connection,
@@ -348,6 +426,36 @@ export function createTuiClient(
     dispatch: async (registry, input) =>
       AsyncResult.isSuccess(await command.run(registry, { environmentId, input })),
   });
+  const refreshArchivedThreads = (registry: AtomRegistry.AtomRegistry) => {
+    registry.refresh(archivedSnapshot);
+  };
+  const threadManagement = makeThreadManagementActions({
+    dispatch: async (registry, input) =>
+      AsyncResult.isSuccess(await command.run(registry, { environmentId, input })),
+    refreshArchived: refreshArchivedThreads,
+  });
+  const newProjects = makeNewProjectActions({
+    shell: shell.stateValueAtom(environmentId),
+    connection,
+    projectCloneTracking,
+    dispatch: async (registry, input) =>
+      AsyncResult.isSuccess(await command.run(registry, { environmentId, input })),
+    browse: async (registry, partialPath) => {
+      const result = await browseFilesystem.run(registry, {
+        environmentId,
+        input: { partialPath },
+      });
+      if (!AsyncResult.isSuccess(result)) throw new Error("Could not browse that folder.");
+      return result.value as FilesystemBrowseResult;
+    },
+    startClone: async (registry, input) =>
+      AsyncResult.isSuccess(await startProjectClone.run(registry, { environmentId, input })),
+    cloneRepository: async (registry, input) => {
+      const result = await cloneRepository.run(registry, { environmentId, input });
+      if (!AsyncResult.isSuccess(result)) throw new Error("Could not clone that repository.");
+      return result.value;
+    },
+  });
   return {
     environmentId,
     label: descriptor.label,
@@ -356,6 +464,13 @@ export function createTuiClient(
     connection,
     actions,
     newThreads,
+    newProjects,
+    threadManagement,
+    archivedThreads,
+    refreshArchivedThreads,
+    threadSearch,
+    diffs: orchestration,
+    review: createReviewEnvironmentAtoms(runtime),
     settings: server.settingsValueAtom(environmentId),
     providers,
     terminals,
