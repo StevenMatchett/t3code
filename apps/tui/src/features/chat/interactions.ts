@@ -340,7 +340,6 @@ export function makeThreadInteractions(options: {
               attemptDraft: null,
               shellResult: null,
               error: null,
-              shellResult: null,
               notice: "Prompt accepted.",
               draft: current.draft === current.attemptDraft ? "" : current.draft,
               pastes: current.draft === current.attemptDraft ? [] : current.pastes,
