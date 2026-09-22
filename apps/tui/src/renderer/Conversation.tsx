@@ -300,7 +300,7 @@ export function Conversation({
   // Include the border and controls in the cap; retain one input row on tiny terminals.
   const maxEditorHeight = Math.max(
     1,
-    Math.floor(terminalHeight / 5) - attachmentHeight - suggestedReplyHeight - 3,
+    Math.floor(terminalHeight * 0.3) - attachmentHeight - suggestedReplyHeight - 3,
   );
   const editorLines = useMemo(
     () => wrapTerminalWords(interaction.draft, Math.max(1, width - 4)).length,

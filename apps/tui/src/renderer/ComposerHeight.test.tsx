@@ -33,7 +33,7 @@ async function setup() {
 }
 
 describe("composer content height", () => {
-  it("grows with typing and newlines, caps at a fifth of the window, and shrinks when cleared", async () => {
+  it("grows with typing and newlines, caps at 30% of the window, and shrinks when cleared", async () => {
     const { driver, composer, editor, draft } = await setup();
     expect(composer().height).toBe(4);
     await driver.input.typeText("word ".repeat(30));
@@ -43,7 +43,7 @@ describe("composer content height", () => {
     expect(editor().height).toBe(4);
     expect(composer().height).toBe(7);
     await draft(Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n"));
-    expect(composer().height).toBe(12);
+    expect(composer().height).toBe(18);
     expect(editor().scrollY).toBeGreaterThan(0);
     await driver.input.typeText(" end");
     expect(driver.captureFrame()).toContain("line 29 end");
@@ -62,8 +62,8 @@ describe("composer content height", () => {
     expect(editor().height).toBe(editor().editorView.getTotalVirtualLineCount());
     await draft("line\n".repeat(30));
     await driver.resize(44, 30);
-    expect(composer().height).toBe(6);
+    expect(composer().height).toBe(9);
     await driver.resize(96, 60);
-    expect(composer().height).toBe(12);
+    expect(composer().height).toBe(18);
   });
 });
