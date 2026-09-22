@@ -1,6 +1,6 @@
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
 import { decodePasteBytes } from "@opentui/core";
-import { useKeyboard, usePaste } from "@opentui/react";
+import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useMemo, useState, useContext, useEffect, useRef } from "react";
@@ -20,7 +20,7 @@ import { ConversationText } from "../ui/ShellCommandText.tsx";
 import { textMatches } from "../ui/textSearch.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
-import { inlineTerminalText } from "../ui/textLayout.ts";
+import { inlineTerminalText, wrapTerminalWords } from "../ui/textLayout.ts";
 import { ThreadTerminal } from "./ThreadTerminal.tsx";
 import type { HotkeyHint, HotkeyState } from "../ui/HotkeyBar.tsx";
 
@@ -55,6 +55,7 @@ export function Conversation({
   readonly onHintsChange?: (state: HotkeyState) => void;
   readonly onTerminalFocusChange?: (focused: boolean) => void;
 }) {
+  const { height: terminalHeight } = useTerminalDimensions();
   const state = useAtomValue(client.thread(threadId));
   const shell = useAtomValue(client.shell);
   const connection = useAtomValue(client.connection);
@@ -294,14 +295,18 @@ export function Conversation({
   useEffect(() => {
     onHintsChange?.({ context: hotkeyContext, hints });
   }, [hints, hotkeyContext, onHintsChange]);
-  const editorHeight =
-    mode === "composer"
-      ? Math.max(2, Math.min(4, Math.floor(height / 4)))
-      : interaction.draft
-        ? 2
-        : 1;
   const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
   const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;
+  // Include the border and controls in the cap; retain one input row on tiny terminals.
+  const maxEditorHeight = Math.max(
+    1,
+    Math.floor(terminalHeight / 5) - attachmentHeight - suggestedReplyHeight - 3,
+  );
+  const editorLines = useMemo(
+    () => wrapTerminalWords(interaction.draft, Math.max(1, width - 4)).length,
+    [interaction.draft, width],
+  );
+  const editorHeight = Math.max(1, Math.min(editorLines, maxEditorHeight));
   const agentPanelHeight =
     agents.length > 0 ? (agentsExpanded ? Math.min(6, agents.length + 3) : 3) : 0;
   const gap = height >= 12 ? 1 : 0;
