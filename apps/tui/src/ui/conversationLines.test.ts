@@ -184,4 +184,31 @@ describe("conversationLines", () => {
     expect(lines.slice(0, 2).every((line) => line.highlight)).toBe(true);
     expect(lines[2]?.highlight).toBeUndefined();
   });
+
+  it("word-wraps multiline user messages inside the highlighted padding", () => {
+    const lines = conversationLines(
+      [
+        {
+          ...base,
+          id: "user",
+          source: "message",
+          sourceId: MessageId.make("user"),
+          kind: "user",
+          text: "hello beautiful world\nsecond line",
+          streaming: false,
+        },
+      ],
+      12,
+      false,
+    );
+    expect(lines.map((line) => line.text)).toEqual([
+      "hello",
+      "beautiful",
+      "world",
+      "second",
+      "line",
+      "",
+    ]);
+    expect(lines.slice(0, -1).every((line) => line.highlight)).toBe(true);
+  });
 });

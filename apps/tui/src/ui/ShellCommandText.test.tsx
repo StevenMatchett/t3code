@@ -5,6 +5,7 @@ import { richTerminalCapabilities } from "./capabilities.ts";
 import { UiProvider } from "./context.tsx";
 import { ConversationText } from "./ShellCommandText.tsx";
 import { defaultTheme } from "./theme.ts";
+import { markdownLines } from "./markdownLines.ts";
 
 const drivers = new Set<TuiTestDriver>();
 afterEach(async () => {
@@ -20,6 +21,26 @@ const describeWithNativeFfi = runtime.process?.getBuiltinModule?.("node:ffi")
   : describe.skip;
 
 describeWithNativeFfi("ShellCommandText", () => {
+  it("renders every wrapped styled line without clipping or overlapping the next row", async () => {
+    const lines = markdownLines("hello **beautiful world**\n\nnext line", 12);
+    const driver = await createTuiTestDriver(
+      <UiProvider capabilities={richTerminalCapabilities}>
+        {lines.map((line, index) => (
+          <ConversationText key={line.text} line={{ ...line, id: "wrapped", line: index }} />
+        ))}
+      </UiProvider>,
+      { width: 12, height: 5 },
+    );
+    drivers.add(driver);
+    expect(
+      driver
+        .captureRawFrame()
+        .split("\n")
+        .slice(0, 5)
+        .map((line) => line.trimEnd()),
+    ).toEqual(["hello", "beautiful", "world", "", "next line"]);
+  });
+
   it("renders shell token colors without changing the command text", async () => {
     const driver = await createTuiTestDriver(
       <UiProvider capabilities={richTerminalCapabilities}>

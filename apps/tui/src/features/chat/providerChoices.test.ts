@@ -145,4 +145,21 @@ describe("provider choices", () => {
       "/review:changes ",
     );
   });
+  it("puts unscoped workspace skills first and prefers them over global duplicates", () => {
+    const f = makeClientFixture();
+    const skill = { ...f.provider.skills[0]!, scope: undefined };
+    const provider = {
+      ...f.provider,
+      skills: [
+        { ...skill, name: "shared", path: "/home/user/.codex/skills/shared/SKILL.md" },
+        { ...skill, name: "global", path: "/home/user/.codex/skills/global/SKILL.md" },
+        { ...skill, name: "sibling", path: "/repo-other/.agents/skills/sibling/SKILL.md" },
+        { ...skill, name: "shared", path: "/repo/.agents/skills/shared/SKILL.md" },
+        { ...skill, name: "local", path: "/repo/.claude/skills/local/SKILL.md" },
+      ],
+    };
+    const result = selectableSkills(provider, "/repo/");
+    expect(result.map((item) => item.name)).toEqual(["shared", "local", "global", "sibling"]);
+    expect(result[0]!.path).toBe("/repo/.agents/skills/shared/SKILL.md");
+  });
 });

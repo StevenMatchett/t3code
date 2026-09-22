@@ -1,7 +1,25 @@
 import { describe, expect, it } from "@effect/vitest";
-import { inlineTerminalText, wrapTerminalLines } from "./textLayout.ts";
+import { inlineTerminalText, wrapTerminalLines, wrapTerminalWords } from "./textLayout.ts";
 
 describe("conversation text layout", () => {
+  it("wraps prose at word boundaries and preserves explicit newlines", () => {
+    expect(wrapTerminalWords("hello world again\n\n  next line", 10)).toEqual([
+      "hello",
+      "world",
+      "again",
+      "",
+      "  next",
+      "line",
+    ]);
+    expect(wrapTerminalWords("hello world", 5)).toEqual(["hello", "world"]);
+    expect(wrapTerminalWords("hello   world", 7)).toEqual(["hello", "world"]);
+  });
+  it("falls back to grapheme-safe wrapping for long words and narrow viewports", () => {
+    expect(wrapTerminalWords("  abcdef", 4)).toEqual(["  ab", "cdef"]);
+    expect(wrapTerminalWords("界界 hello", 5)).toEqual(["界界", "hello"]);
+    expect(wrapTerminalWords("e\u0301xx", 1)).toEqual(["e\u0301", "x", "x"]);
+    expect(wrapTerminalWords("界a", 1)).toEqual(["?", "a"]);
+  });
   it("wraps ASCII while preserving blank lines and indentation", () => {
     expect(wrapTerminalLines("  abcdef\n\nlast", 4)).toEqual(["  ab", "cdef", "", "last"]);
   });

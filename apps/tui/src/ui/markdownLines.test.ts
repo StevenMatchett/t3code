@@ -3,6 +3,32 @@ import stringWidth from "string-width";
 import { markdownLines } from "./markdownLines.ts";
 
 describe("Markdown conversation layout", () => {
+  it("wraps whole words without losing inline styles or explicit blank lines", () => {
+    const lines = markdownLines("hello **beautiful world**\n\nnext line", 12);
+    expect(lines.map((line) => line.text)).toEqual([
+      "hello",
+      "beautiful",
+      "world",
+      "",
+      "next line",
+    ]);
+    expect(lines[1]?.spans).toEqual([{ text: "beautiful", bold: true }]);
+    expect(lines[2]?.spans).toEqual([{ text: "world", bold: true }]);
+  });
+  it("keeps words together even when emphasis changes inside a word", () => {
+    const lines = markdownLines("some **high**light here", 10);
+    expect(lines.map((line) => line.text)).toEqual(["some", "highlight", "here"]);
+    expect(lines[1]?.spans).toEqual([{ text: "high", bold: true }, { text: "light" }]);
+  });
+  it("preserves all whitespace in wrapped fenced code", () => {
+    const lines = markdownLines("```\n  hello   world\n```", 8);
+    expect(
+      lines
+        .slice(1)
+        .map((line) => line.text)
+        .join(""),
+    ).toBe("  hello   world");
+  });
   it("formats headings, inline emphasis, lists, quotes, and readable link destinations", () => {
     const lines = markdownLines(
       "# Summary\n**Done** and *ready* with `code`\n- Item\n> Quote\n[Docs](https://example.com)",

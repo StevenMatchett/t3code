@@ -1,6 +1,6 @@
 import type { TimelineRow } from "../features/chat/timeline.ts";
 import type { ThemeToken } from "./theme.ts";
-import { inlineTerminalText, wrapTerminalLines } from "./textLayout.ts";
+import { inlineTerminalText, wrapTerminalLines, wrapTerminalWords } from "./textLayout.ts";
 import { markdownLines, type MarkdownSpan } from "./markdownLines.ts";
 
 export interface ConversationLine {
@@ -32,7 +32,7 @@ export function conversationLines(
       const id = `tools:${first.id}`;
       const open = expandedGroups.get(id) ?? expanded;
       result.push(
-        ...wrapTerminalLines(
+        ...wrapTerminalWords(
           `${open ? "v" : ">"} ${tools.length} tool calls · click to ${open ? "collapse" : "expand"} · T details`,
           width,
         ).map((text, line): ConversationLine => ({
@@ -125,7 +125,7 @@ function renderRows(
           : []),
       ];
     } else {
-      const wrapped = wrapTerminalLines(
+      const wrapped = wrapTerminalWords(
         row.text,
         Math.max(1, width - (row.kind === "user" ? 2 : 0)),
       );

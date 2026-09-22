@@ -39,6 +39,55 @@ async function clickLabel(driver: TuiTestDriver, label: string) {
 }
 
 describe("composer dropdowns and slash skills", () => {
+  it("shows repository skills before global skills in the workspace menu", async () => {
+    const { driver, fixture } = await setup(true);
+    const skill = fixture.provider.skills[0]!;
+    await act(async () =>
+      driver.registry.update(fixture.providers, (catalog) => ({
+        ...catalog,
+        providers: [
+          {
+            ...fixture.provider,
+            workspaceSnapshots: [
+              {
+                cwd: "/workspace/alpha",
+                checkedAt: fixture.provider.checkedAt,
+                slashCommands: [],
+                skills: [
+                  {
+                    ...skill,
+                    name: "global-first",
+                    displayName: "Global first",
+                    scope: "user",
+                    path: "/home/user/.codex/skills/global/SKILL.md",
+                  },
+                  {
+                    ...skill,
+                    name: "repo-second",
+                    displayName: "Repo second",
+                    scope: "repo",
+                    path: "/workspace/alpha/.agents/skills/repo/SKILL.md",
+                  },
+                  {
+                    ...skill,
+                    name: "unscoped-local",
+                    displayName: "Unscoped local",
+                    scope: undefined,
+                    path: "/workspace/alpha/.agents/skills/local/SKILL.md",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      })),
+    );
+    await driver.input.typeText("/");
+    const frame = driver.captureFrame();
+    expect(frame.indexOf("Repo second")).toBeGreaterThanOrEqual(0);
+    expect(frame.indexOf("Repo second")).toBeLessThan(frame.indexOf("Unscoped local"));
+    expect(frame.indexOf("Unscoped local")).toBeLessThan(frame.indexOf("Global first"));
+  });
   it("selects the model and reasoning from visible clickable dropdowns without losing the prompt", async () => {
     const { driver, fixture, id } = await setup(true);
     await driver.input.typeText("analyze this change");

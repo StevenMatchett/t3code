@@ -20,12 +20,17 @@ export interface ProviderCatalog {
 }
 
 export function selectableSkills(provider: ServerProvider, cwd: string | null) {
+  const root = cwd?.replaceAll("\\", "/").replace(/\/+$/, "");
   const rank = (skill: ServerProviderSkill) => {
     const source = resolveProviderSkillSourceKind(skill);
-    return source === "repo" || source === "project" ? 0 : 1;
+    const path = skill.path.replaceAll("\\", "/");
+    const inWorkspace = root !== undefined && path.startsWith(`${root}/`);
+    return source === "repo" || source === "project" || inWorkspace ? 0 : 1;
   };
-  return getProviderSkillsForSlashMenu(resolveProviderSkillsForCwd(provider, cwd), true).toSorted(
-    (left, right) => rank(left) - rank(right),
+  // Rank before name deduplication so a global entry cannot hide a repo skill.
+  return getProviderSkillsForSlashMenu(
+    resolveProviderSkillsForCwd(provider, cwd).toSorted((left, right) => rank(left) - rank(right)),
+    true,
   );
 }
 
