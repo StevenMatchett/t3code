@@ -21,6 +21,7 @@ import { ArchivedThreadsPanel, ThreadActionsForm } from "./ThreadManagement.tsx"
 import type { OrchestrationThreadShell } from "@t3tools/contracts";
 import type { HotkeyState } from "../ui/HotkeyBar.tsx";
 import { CommandPalette, type CommandPaletteItem } from "./CommandPalette.tsx";
+import { CheckpointRestore } from "./CheckpointRestore.tsx";
 import { ThreadDiff } from "./ThreadDiff.tsx";
 import { QueuedMessages } from "./QueuedMessages.tsx";
 import { PullRequestPanel } from "./PullRequestPanel.tsx";
@@ -33,6 +34,7 @@ type PaletteEntry = CommandPaletteItem & {
     | { readonly type: "help" }
     | { readonly type: "toggle-sidebar-view" }
     | { readonly type: "diff" }
+    | { readonly type: "restore" }
     | { readonly type: "pull-request" }
     | { readonly type: "manage"; readonly thread: OrchestrationThreadShell }
     | { readonly type: "project"; readonly projectId: OrchestrationThreadShell["projectId"] }
@@ -76,6 +78,7 @@ export function AppShell({
   const { width, height } = useTerminalDimensions();
   const layout = calculateShellLayout(width, height);
   const [hotkeys, setHotkeys] = useState<HotkeyState>({ context: "Conversation", hints: [] });
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [terminalFocused, setTerminalFocused] = useState(false);
   const [paletteSearchQuery, setPaletteSearchQuery] = useState("");
   const threadSearch = useAtomValue(client.threadSearch(paletteSearchQuery));
@@ -122,6 +125,7 @@ export function AppShell({
     | { readonly type: "palette" }
     | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
     | { readonly type: "diff" }
+    | { readonly type: "restore" }
     | { readonly type: "archived" }
     | {
         readonly type: "manage";
@@ -208,6 +212,14 @@ export function AppShell({
       });
     if (selectedThread)
       commands.push({
+        id: "command:restore",
+        label: "Edit from checkpoint",
+        detail: "Command · E from thread history",
+        keywords: "restore rewind revert undo",
+        target: { type: "restore" },
+      });
+    if (selectedThread)
+      commands.push({
         id: "command:diff",
         label: "View thread changes",
         detail: "Command",
@@ -267,6 +279,9 @@ export function AppShell({
         break;
       case "pull-request":
         openPullRequest();
+        break;
+      case "restore":
+        setThreadOverlay({ type: "restore" });
         break;
       case "diff":
         setThreadOverlay({ type: "diff" });
@@ -416,126 +431,145 @@ export function AppShell({
         hotkeys={hotkeys}
         notice={copyNotice}
         managementOverlay={
-          threadOverlay?.type === "pull-request"
+          threadOverlay?.type === "restore" && state.threadId
             ? {
-                title: "Pull request",
-                context: "Pull request",
-                hints: [
-                  { key: "C", label: "Copy URL" },
-                  { key: "R", label: "Retry" },
-                  { key: "Esc", label: "Close" },
-                ],
+                title: "Checkpoint restore",
+                context: "Restore",
+                hints: [],
                 content: (
-                  <PullRequestPanel
+                  <CheckpointRestore
+                    key={state.threadId}
                     client={client}
-                    cwd={threadOverlay.cwd}
-                    branch={threadOverlay.branch}
+                    threadId={state.threadId}
                     active={active && state.modal === null}
-                    onClose={() => setThreadOverlay(null)}
+                    height={layout.contentHeight}
+                    onClose={(restored) => {
+                      setThreadOverlay(null);
+                      if (restored) setComposerFocusRequest((value) => value + 1);
+                    }}
                   />
                 ),
               }
-            : threadOverlay?.type === "diff" && state.threadId
+            : threadOverlay?.type === "pull-request"
               ? {
-                  title: "Thread changes",
-                  context: "Diff",
+                  title: "Pull request",
+                  context: "Pull request",
                   hints: [
-                    { key: "S/W", label: "Saved/working" },
-                    { key: "[/]", label: "Change scope/turn" },
-                    { key: "Tab", label: "Files/diff" },
-                    { key: "R", label: "Refresh" },
+                    { key: "C", label: "Copy URL" },
+                    { key: "R", label: "Retry" },
                     { key: "Esc", label: "Close" },
                   ],
                   content: (
-                    <ThreadDiff
+                    <PullRequestPanel
                       client={client}
-                      threadId={state.threadId}
-                      active={active}
-                      width={Math.max(1, width - 6)}
-                      height={layout.contentHeight}
+                      cwd={threadOverlay.cwd}
+                      branch={threadOverlay.branch}
+                      active={active && state.modal === null}
                       onClose={() => setThreadOverlay(null)}
                     />
                   ),
                 }
-              : threadOverlay?.type === "palette"
+              : threadOverlay?.type === "diff" && state.threadId
                 ? {
-                    title: "Search and commands",
-                    context: "Command palette",
+                    title: "Thread changes",
+                    context: "Diff",
                     hints: [
-                      { key: "Type", label: "Filter" },
-                      { key: "↑↓", label: "Select" },
-                      { key: "Enter", label: "Open" },
+                      { key: "S/W", label: "Saved/working" },
+                      { key: "[/]", label: "Change scope/turn" },
+                      { key: "Tab", label: "Files/diff" },
+                      { key: "R", label: "Refresh" },
                       { key: "Esc", label: "Close" },
                     ],
                     content: (
-                      <CommandPalette
-                        items={paletteEntries}
-                        height={layout.contentHeight}
+                      <ThreadDiff
+                        client={client}
+                        threadId={state.threadId}
                         active={active}
-                        searching={threadSearch.loading}
-                        searchFailed={threadSearch.failed}
-                        searchedQuery={paletteSearchQuery}
-                        searchDebounceMs={searchDebounceMs}
-                        onSearchQueryChange={setPaletteSearchQuery}
-                        onChoose={choosePaletteEntry}
-                        onClose={closePalette}
+                        width={Math.max(1, width - 6)}
+                        height={layout.contentHeight}
+                        onClose={() => setThreadOverlay(null)}
                       />
                     ),
                   }
-                : threadOverlay?.type === "archived"
+                : threadOverlay?.type === "palette"
                   ? {
-                      title: "Archived threads",
-                      context: "Archived",
+                      title: "Search and commands",
+                      context: "Command palette",
                       hints: [
+                        { key: "Type", label: "Filter" },
                         { key: "↑↓", label: "Select" },
-                        { key: "Enter", label: "Manage" },
-                        { key: "R", label: "Refresh" },
+                        { key: "Enter", label: "Open" },
                         { key: "Esc", label: "Close" },
                       ],
                       content: (
-                        <ArchivedThreadsPanel
-                          client={client}
+                        <CommandPalette
+                          items={paletteEntries}
+                          height={layout.contentHeight}
                           active={active}
-                          onClose={() => setThreadOverlay(null)}
-                          onManage={(thread) =>
-                            setThreadOverlay({ type: "manage", thread, returnToArchived: true })
-                          }
+                          searching={threadSearch.loading}
+                          searchFailed={threadSearch.failed}
+                          searchedQuery={paletteSearchQuery}
+                          searchDebounceMs={searchDebounceMs}
+                          onSearchQueryChange={setPaletteSearchQuery}
+                          onChoose={choosePaletteEntry}
+                          onClose={closePalette}
                         />
                       ),
                     }
-                  : threadOverlay?.type === "manage"
+                  : threadOverlay?.type === "archived"
                     ? {
-                        title: threadOverlay.thread.archivedAt
-                          ? "Manage archived thread"
-                          : "Manage thread",
-                        context: "Manage thread",
+                        title: "Archived threads",
+                        context: "Archived",
                         hints: [
-                          { key: "Tab/↑↓", label: "Select" },
-                          { key: "Enter", label: "Activate" },
+                          { key: "↑↓", label: "Select" },
+                          { key: "Enter", label: "Manage" },
+                          { key: "R", label: "Refresh" },
                           { key: "Esc", label: "Close" },
                         ],
                         content: (
-                          <ThreadActionsForm
+                          <ArchivedThreadsPanel
                             client={client}
-                            thread={threadOverlay.thread}
                             active={active}
-                            onClose={() =>
-                              setThreadOverlay(
-                                threadOverlay.returnToArchived ? { type: "archived" } : null,
-                              )
+                            onClose={() => setThreadOverlay(null)}
+                            onManage={(thread) =>
+                              setThreadOverlay({ type: "manage", thread, returnToArchived: true })
                             }
-                            onRemoved={() => {
-                              if (threadOverlay.returnToArchived) {
-                                setThreadOverlay({ type: "archived" });
-                              } else {
-                                setThreadOverlay(null);
-                                if (state.route === "conversation") dispatch({ type: "back" });
-                              }
-                            }}
                           />
                         ),
                       }
-                    : null
+                    : threadOverlay?.type === "manage"
+                      ? {
+                          title: threadOverlay.thread.archivedAt
+                            ? "Manage archived thread"
+                            : "Manage thread",
+                          context: "Manage thread",
+                          hints: [
+                            { key: "Tab/↑↓", label: "Select" },
+                            { key: "Enter", label: "Activate" },
+                            { key: "Esc", label: "Close" },
+                          ],
+                          content: (
+                            <ThreadActionsForm
+                              client={client}
+                              thread={threadOverlay.thread}
+                              active={active}
+                              onClose={() =>
+                                setThreadOverlay(
+                                  threadOverlay.returnToArchived ? { type: "archived" } : null,
+                                )
+                              }
+                              onRemoved={() => {
+                                if (threadOverlay.returnToArchived) {
+                                  setThreadOverlay({ type: "archived" });
+                                } else {
+                                  setThreadOverlay(null);
+                                  if (state.route === "conversation") dispatch({ type: "back" });
+                                }
+                              }}
+                            />
+                          ),
+                        }
+                      : null
         }
         onOpenArchived={() => setThreadOverlay({ type: "archived" })}
         onOpenPalette={openPalette}
@@ -588,6 +622,8 @@ export function AppShell({
             onBack={() => dispatch({ type: "back" })}
             onHelp={() => dispatch({ type: "toggle-help" })}
             onNewThread={() => dispatch({ type: "new-thread" })}
+            composerFocusRequest={composerFocusRequest}
+            onRestore={() => setThreadOverlay({ type: "restore" })}
             onDiff={() => setThreadOverlay({ type: "diff" })}
             onOpenPullRequest={openPullRequest}
             onTerminalFocusChange={handleTerminalFocusChange}

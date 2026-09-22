@@ -12,6 +12,7 @@ import {
   type ProviderApprovalDecision,
   type ThreadId,
   type UploadChatImageAttachment,
+  type ChatAttachment,
 } from "@t3tools/contracts";
 import {
   derivePendingRequests,
@@ -19,6 +20,8 @@ import {
   type PendingUserInput,
 } from "@t3tools/client-runtime/pending-requests";
 import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+import { recallableComposerPrompt } from "./restoredPrompt.ts";
+import { checkpointRestoreTargets, waitForCheckpointRestore } from "./checkpointRestore.ts";
 import { completeSkillDraft, type SkillCompletion } from "./skillCompletion.ts";
 import type { EnvironmentShellState } from "@t3tools/client-runtime/state/shell";
 import {
@@ -40,6 +43,8 @@ export type TuiThreadCommand = Extract<
   ClientOrchestrationCommand,
   {
     readonly type:
+      | "thread.checkpoint.revert"
+      | "thread.conversation.revert"
       | "thread.meta.update"
       | "thread.turn.start"
       | "thread.turn.interrupt"
@@ -50,7 +55,7 @@ export type TuiThreadCommand = Extract<
 type PromptCommand = Extract<TuiThreadCommand, { readonly type: "thread.turn.start" }>;
 interface QueuedPrompt {
   readonly command: PromptCommand;
-  readonly attachments: readonly UploadChatImageAttachment[];
+  readonly attachments: readonly (UploadChatImageAttachment | ChatAttachment)[];
   readonly afterTool: string | null;
   readonly afterTurn: string;
   readonly status: "queued" | "sending" | "held";
@@ -90,9 +95,9 @@ export interface ThreadInteractionState {
   readonly queue: readonly QueuedPrompt[];
   readonly draft: string;
   readonly pastes: readonly PastedText[];
-  readonly pending: "send" | "stop" | "reply" | "model" | null;
+  readonly pending: "send" | "stop" | "reply" | "model" | "rewind" | null;
   readonly attachmentPending: boolean;
-  readonly attachments: readonly UploadChatImageAttachment[];
+  readonly attachments: readonly (UploadChatImageAttachment | ChatAttachment)[];
   readonly modelPending: ModelSelection | null;
   readonly skill: {
     readonly instanceId: ProviderInstanceId;
@@ -177,6 +182,10 @@ export function makeThreadInteractions(options: {
     registry: AtomRegistry.AtomRegistry,
     command: TuiThreadCommand,
   ) => Promise<boolean>;
+  readonly prepareRestoredAttachments?: (
+    registry: AtomRegistry.AtomRegistry,
+    attachments: readonly ChatAttachment[],
+  ) => Promise<readonly (UploadChatImageAttachment | ChatAttachment)[]>;
   readonly loadImageAttachment?: typeof loadImageAttachmentFromDisk;
 }) {
   const expandPastes = (draft: string, pastes: readonly PastedText[]) => {
@@ -417,6 +426,118 @@ export function makeThreadInteractions(options: {
     state,
     queuedThreads,
     flushQueue,
+    restoreCheckpoint: async (
+      registry: AtomRegistry.AtomRegistry,
+      threadId: ThreadId,
+      messageId: MessageId,
+      restoreFiles: boolean,
+    ) => {
+      const current = registry.get(state(threadId));
+      if (current.pending || current.attachmentPending)
+        return error(registry, threadId, "Wait for the pending operation before rewinding.");
+      const thread = currentThread(registry, threadId);
+      if (!thread) return false;
+      const catalog = options.providers ? registry.get(options.providers) : null;
+      const provider =
+        catalog?.status === "live"
+          ? catalog.providers.find(
+              (p) =>
+                p.instanceId ===
+                (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
+            )
+          : undefined;
+      if (!provider || provider.supportsConversationRollback === false)
+        return error(
+          registry,
+          threadId,
+          "This provider does not support reverting conversation history.",
+        );
+      if (
+        thread.latestTurn?.state === "running" ||
+        thread.session?.status === "running" ||
+        thread.session?.status === "starting"
+      )
+        return error(
+          registry,
+          threadId,
+          "Interrupt the current turn before reverting checkpoints.",
+        );
+      if (current.queue.length || current.attempt)
+        return error(
+          registry,
+          threadId,
+          "Resolve queued or unconfirmed messages before rewinding.",
+        );
+      const target = checkpointRestoreTargets(thread).find((t) => t.message.id === messageId);
+      if (!target)
+        return error(registry, threadId, "The message to rewind is no longer available.");
+      const attachments = target.message.attachments ?? [];
+      if (attachments.some((a) => a.type !== "image" && a.type !== "file"))
+        return error(registry, threadId, "This message has an attachment that cannot be restored.");
+      if (
+        current.attachments.length + attachments.length > PROVIDER_SEND_TURN_MAX_ATTACHMENTS ||
+        attachments.some((a) => current.attachments.some((existing) => existing.id === a.id))
+      )
+        return error(
+          registry,
+          threadId,
+          "Make room for this message's attachments in the composer before rewinding.",
+        );
+      update(registry, threadId, { pending: "rewind", error: null, notice: null });
+      try {
+        if (attachments.length && !options.prepareRestoredAttachments)
+          throw new Error("Attachment restoration is unavailable.");
+        const restoredAttachments = attachments.length
+          ? await options.prepareRestoredAttachments!(registry, attachments)
+          : [];
+        const latest = currentThread(registry, threadId);
+        if (
+          !latest ||
+          latest.latestTurn?.state === "running" ||
+          latest.session?.status === "starting" ||
+          latest.session?.status === "running" ||
+          !checkpointRestoreTargets(latest).some(
+            (entry) => entry.message.id === messageId && entry.turnCount === target.turnCount,
+          )
+        )
+          throw new Error(
+            "The thread changed while preparing the rewind. Review it and try again.",
+          );
+        await waitForCheckpointRestore(
+          registry,
+          options.thread(threadId),
+          messageId,
+          target.turnCount,
+          () =>
+            options.dispatch(registry, {
+              type: restoreFiles ? "thread.checkpoint.revert" : "thread.conversation.revert",
+              ...metadata(),
+              threadId,
+              turnCount: target.turnCount,
+            }),
+        );
+        const draft = registry.get(state(threadId));
+        update(registry, threadId, {
+          draft: [draft.draft, recallableComposerPrompt(target.message.text)]
+            .filter(Boolean)
+            .join("\n\n"),
+          attachments: [...draft.attachments, ...restoredAttachments],
+          skill: null,
+          attempt: null,
+          attemptDraft: null,
+          notice: "Chat rewound. Edit the restored prompt before sending.",
+        });
+        return true;
+      } catch (cause) {
+        return error(
+          registry,
+          threadId,
+          cause instanceof Error ? cause.message : "Failed to rewind thread.",
+        );
+      } finally {
+        update(registry, threadId, { pending: null });
+      }
+    },
     editQueued: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => {
       const current = registry.get(state(threadId));
       const next = current.queue[0];

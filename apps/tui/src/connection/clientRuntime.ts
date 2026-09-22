@@ -51,6 +51,8 @@ import {
   ORCHESTRATION_WS_METHODS,
   WS_METHODS,
   type ServerSettings,
+  type UploadChatImageAttachment,
+  type ChatAttachment,
   type EnvironmentId,
   type FilesystemBrowseResult,
   type OrchestrationThreadSearchMatch,
@@ -431,7 +433,73 @@ export function createTuiClient(
       throw new Error("Worktree recovery exceeded the bounded ref search.");
     },
   });
+  const createAssetUrl = createEnvironmentRpcCommand(runtime, {
+    label: "tui.restore-attachment-url",
+    tag: WS_METHODS.assetsCreateUrl,
+  });
+  const createUploadUrl = createEnvironmentRpcCommand(runtime, {
+    label: "tui.restore-attachment-upload",
+    tag: WS_METHODS.attachmentsCreateUploadUrl,
+  });
   const actions = makeThreadInteractions({
+    prepareRestoredAttachments: async (registry, attachments) => {
+      const restored: (UploadChatImageAttachment | ChatAttachment)[] = [];
+      for (const attachment of attachments) {
+        if (attachment.type !== "image" && attachment.type !== "file")
+          throw new Error("Unsupported attachment.");
+        const result = await createAssetUrl.run(registry, {
+          environmentId,
+          input: {
+            resource: {
+              _tag: "attachment",
+              attachmentId: attachment.id,
+              fileName: attachment.name,
+              mimeType: attachment.mimeType,
+            },
+          },
+        });
+        if (!AsyncResult.isSuccess(result))
+          throw new Error(`Could not restore attachment: ${attachment.name}`);
+        const response = await fetch(new URL(result.value.relativeUrl, httpBaseUrl), {
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (!response.ok) throw new Error(`Could not restore attachment: ${attachment.name}`);
+        const bytes = await response.arrayBuffer();
+        if (bytes.byteLength !== attachment.sizeBytes)
+          throw new Error(`Attachment size changed: ${attachment.name}`);
+        if (attachment.type === "image") {
+          restored.push({
+            type: "image",
+            id: `tui-${crypto.randomUUID()}`,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            sizeBytes: bytes.byteLength,
+            dataUrl: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
+          });
+        } else {
+          const upload = await createUploadUrl.run(registry, {
+            environmentId,
+            input: {
+              type: "file",
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: bytes.byteLength,
+            },
+          });
+          if (!AsyncResult.isSuccess(upload))
+            throw new Error(`Could not prepare attachment: ${attachment.name}`);
+          const uploaded = await fetch(new URL(upload.value.relativeUrl, httpBaseUrl), {
+            method: "PUT",
+            headers: { "Content-Type": attachment.mimeType },
+            body: bytes,
+            signal: AbortSignal.timeout(30_000),
+          });
+          if (!uploaded.ok) throw new Error(`Could not upload attachment: ${attachment.name}`);
+          restored.push({ ...attachment, id: upload.value.attachmentId });
+        }
+      }
+      return restored;
+    },
     connection,
     thread,
     providers,

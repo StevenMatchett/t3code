@@ -437,7 +437,7 @@ export function ComposerControls({
                   client.actions.removeAttachment(registry, threadId, attachment.id!);
                 }}
               >
-                {`${attachmentIndex ? " " : ""}[Image #${attachmentIndex + 1}]`}
+                {`${attachmentIndex ? " " : ""}[${attachment.type === "image" ? "Image" : "File"} #${attachmentIndex + 1}]`}
               </Text>
             ))}
             <Text height={1} flexGrow={1} tone="muted" wrapMode="none" truncate>

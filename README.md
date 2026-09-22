@@ -186,6 +186,13 @@ The composer stays visible, with its border indicating when it owns keyboard inp
 activity is collapsed by default; press `t` from history to expand it. Errors and pending requests
 remain visible.
 
+To edit an earlier prompt, press `e` from conversation history or choose **Edit from checkpoint**
+in the command palette. Select the prompt, then choose **Revert and keep changes** to preserve
+workspace files or **Revert files too** to restore them. The selected prompt and attachments
+return to the composer below any unsent draft. This removes that prompt and later conversation
+from active history; stop any running turn and resolve queued messages first. Provider support
+for rewind is required.
+
 To start a conversation, select a project and click **New thread**, or press `n` from navigation
 or conversation history. Choose a title, provider/model, and **Current checkout** or **New worktree**.
 Permissions initially follow the project's/environment's settings. Creating the thread does not

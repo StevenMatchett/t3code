@@ -34,6 +34,8 @@ export function Conversation({
   onHelp,
   onNewThread,
   onDiff,
+  onRestore,
+  composerFocusRequest = 0,
   onOpenPullRequest,
   onHintsChange,
   onTerminalFocusChange,
@@ -46,6 +48,8 @@ export function Conversation({
   readonly onBack: () => void;
   readonly onHelp: () => void;
   readonly onNewThread?: () => void;
+  readonly composerFocusRequest?: number;
+  readonly onRestore?: () => void;
   readonly onDiff?: () => void;
   readonly onOpenPullRequest?: () => void;
   readonly onHintsChange?: (state: HotkeyState) => void;
@@ -61,6 +65,12 @@ export function Conversation({
   const [mode, setMode] = useState<"history" | "composer" | "requests" | "questions" | "agents">(
     "history",
   );
+  const previousComposerFocusRequest = useRef(composerFocusRequest);
+  useEffect(() => {
+    if (previousComposerFocusRequest.current === composerFocusRequest) return;
+    previousComposerFocusRequest.current = composerFocusRequest;
+    setMode("composer");
+  }, [composerFocusRequest]);
   const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
@@ -223,6 +233,7 @@ export function Conversation({
       ...(agents.length ? [{ key: "Tab", label: "Agents" }] : []),
       { key: "T", label: "Details" },
       { key: "D", label: "Diff" },
+      { key: "E", label: "Edit from checkpoint" },
       { key: "O", label: "Open PR" },
       { key: "N", label: "New thread" },
       { key: "Ctrl+K", label: "Search" },
@@ -453,6 +464,9 @@ export function Conversation({
       case "t":
         setShowDetails((value) => !value);
         setExpandedToolGroups(new Map());
+        break;
+      case "e":
+        onRestore?.();
         break;
       case "d":
         onDiff?.();
