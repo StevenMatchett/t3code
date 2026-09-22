@@ -39,6 +39,46 @@ async function clickLabel(driver: TuiTestDriver, label: string) {
 }
 
 describe("composer dropdowns and slash skills", () => {
+  it("selects plan and permissions with the mouse while preserving the draft", async () => {
+    const { driver, fixture, id } = await setup(true);
+    await driver.input.typeText("review the design");
+    await clickControl(driver, "composer-mode");
+    await clickLabel(driver, "Plan");
+    await clickControl(driver, "composer-permissions");
+    await clickLabel(driver, "Supervised");
+    expect(driver.registry.get(fixture.client.actions.state(id))).toMatchObject({
+      draft: "review the design",
+      interactionMode: "plan",
+      runtimeMode: "approval-required",
+    });
+    expect(fixture.commands).toHaveLength(0);
+    expect(driver.captureFrame()).toContain("Plan v");
+    expect(driver.captureFrame()).toContain("Supervised v");
+    await driver.input.pressKey("RETURN");
+    expect(fixture.commands.at(-1)).toMatchObject({
+      type: "thread.turn.start",
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+      message: { text: "review the design" },
+    });
+  });
+  it("offers keyboard access to mode and permission selectors", async () => {
+    const { driver, fixture, id } = await setup(true);
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Mode — next message");
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+    expect(driver.registry.get(fixture.client.actions.state(id)).interactionMode).toBe("plan");
+    for (let i = 0; i < 3; i++) await driver.input.pressKey("TAB");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Permissions — next message");
+    await driver.input.pressKey("RETURN");
+    expect(driver.registry.get(fixture.client.actions.state(id)).runtimeMode).toBe(
+      "approval-required",
+    );
+  });
   it("shows repository skills before global skills in the workspace menu", async () => {
     const { driver, fixture } = await setup(true);
     const skill = fixture.provider.skills[0]!;

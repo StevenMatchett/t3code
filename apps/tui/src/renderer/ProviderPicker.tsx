@@ -6,6 +6,7 @@ import { getProviderOptionDescriptors, getProviderOptionCurrentLabel } from "@t3
 import * as Option from "effect/Option";
 import { useContext, useEffect, useRef, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
+import { permissionChoices, planModeProblem } from "../features/chat/composerModes.ts";
 import { selectableSkills, selectionForModel } from "../features/chat/providerChoices.ts";
 import { completeSkillDraft, skillCompletionAt } from "../features/chat/skillCompletion.ts";
 import {
@@ -180,7 +181,29 @@ export function ComposerControls({
     client.actions.setDraft(registry, threadId, reply);
     onSubmit();
   };
-  const cancelIndex = suggestedReplies.length + descriptors.length + 2;
+  const planProblem = planModeProblem(provider);
+  const runtimeMode = interaction.runtimeMode ?? thread?.runtimeMode;
+  const interactionMode =
+    interaction.interactionMode ?? (planProblem ? "default" : thread?.interactionMode);
+  const buttons = [
+    {
+      id: "models",
+      label: `Model: ${model?.shortName ?? model?.name ?? thread?.modelSelection.model ?? "Loading"} v`,
+    },
+    ...descriptors.map((item) => ({
+      id: `option:${item.id}`,
+      label: `${item.label}: ${getProviderOptionCurrentLabel(item) ?? "Default"} v`,
+    })),
+    {
+      id: "mode",
+      label: `${interactionMode === "plan" ? "Plan" : "Chat"} v`,
+    },
+    {
+      id: "permissions",
+      label: `${permissionChoices.find((choice) => choice.id === runtimeMode)?.label ?? "Permissions"} v`,
+    },
+  ];
+  const cancelIndex = suggestedReplies.length + buttons.length + 1;
   const focusCount = cancelIndex + (onCancel ? 1 : 0);
   const needle = (menu === "skills" ? (completion?.query ?? "") : query).toLocaleLowerCase();
   const skills = provider
@@ -205,24 +228,41 @@ export function ComposerControls({
           : descriptor.options.map((item) => ({ label: item.label, value: item.id }))),
       ].filter((item) => item.label.toLocaleLowerCase().includes(needle))
     : [];
+  const modeChoices = (
+    menu === "permissions"
+      ? permissionChoices
+      : [
+          { id: "default", label: "Chat", detail: "Work on the task normally." },
+          {
+            id: "plan",
+            label: `Plan${planProblem ? " (unavailable)" : ""}`,
+            detail: planProblem ?? "Plan the work before making changes.",
+          },
+        ]
+  ).filter((item) => item.label.toLocaleLowerCase().includes(needle));
   const rows =
-    menu === "skills"
-      ? skills.map((skill) => ({
-          id: skill.path,
-          label: `/${skill.name}  ${formatProviderSkillDisplayName(skill)}`,
-          detail: skill.shortDescription ?? skill.description ?? skill.path,
+    menu === "permissions" || menu === "mode"
+      ? modeChoices.map((item) => ({
+          ...item,
+          label: `${item.id === (menu === "permissions" ? runtimeMode : interactionMode) ? "* " : ""}${item.label}`,
         }))
-      : menu === "models"
-        ? models.map((item) => ({
-            id: item.slug,
-            label: `${item.slug === thread?.modelSelection.model ? "* " : ""}${item.name}  [${item.slug}]`,
-            detail: item.slug,
+      : menu === "skills"
+        ? skills.map((skill) => ({
+            id: skill.path,
+            label: `/${skill.name}  ${formatProviderSkillDisplayName(skill)}`,
+            detail: skill.shortDescription ?? skill.description ?? skill.path,
           }))
-        : choices.map((item, index) => ({
-            id: String(index),
-            label: item.label,
-            detail: descriptor?.description ?? "",
-          }));
+        : menu === "models"
+          ? models.map((item) => ({
+              id: item.slug,
+              label: `${item.slug === thread?.modelSelection.model ? "* " : ""}${item.name}  [${item.slug}]`,
+              detail: item.slug,
+            }))
+          : choices.map((item, index) => ({
+              id: String(index),
+              label: item.label,
+              detail: descriptor?.description ?? "",
+            }));
   const index = Math.max(0, Math.min(cursor, rows.length - 1));
   const busy =
     refreshing ||
@@ -247,6 +287,20 @@ export function ComposerControls({
       );
       close();
       editor.current?.replace(replacement.text, replacement.cursor);
+      return;
+    }
+    if (menu === "permissions") {
+      const choice = permissionChoices.find((item) => item.id === rows[selected]!.id);
+      if (choice && client.actions.setRuntimeMode(registry, threadId, choice.id)) close();
+      return;
+    }
+    if (menu === "mode") {
+      const mode = rows[selected]!.id;
+      if (
+        (mode === "default" || mode === "plan") &&
+        client.actions.setInteractionMode(registry, threadId, mode)
+      )
+        close();
       return;
     }
     let selection: ModelSelection;
@@ -365,10 +419,8 @@ export function ComposerControls({
           if (!cancelPending) onCancel();
         } else {
           const controlIndex = focus - suggestedReplies.length;
-          open(
-            controlIndex === 1 ? "models" : `option:${descriptors[controlIndex - 2]!.id}`,
-            focus,
-          );
+          const button = buttons[controlIndex - 1];
+          if (button) open(button.id, focus);
         }
       }
     } else return;
@@ -381,16 +433,6 @@ export function ComposerControls({
   const menuHeight = Math.max(4, Math.min(10, availableHeight - height));
   const count = Math.max(1, menuHeight - (menu === "skills" ? 3 : 4));
   const start = Math.max(0, Math.min(index - Math.floor(count / 2), rows.length - count));
-  const buttons = [
-    {
-      id: "models",
-      label: `Model: ${model?.shortName ?? model?.name ?? thread?.modelSelection.model ?? "Loading"} v`,
-    },
-    ...descriptors.map((item) => ({
-      id: `option:${item.id}`,
-      label: `${item.label}: ${getProviderOptionCurrentLabel(item) ?? "Default"} v`,
-    })),
-  ];
   return (
     <Stack
       id="conversation-composer"
@@ -532,19 +574,6 @@ export function ComposerControls({
               </Text>
             </Stack>
           ))}
-          {descriptors.length === 0 ? (
-            <Text
-              tone="muted"
-              height={1}
-              wrapMode="none"
-              truncate
-              flexGrow={1}
-              flexBasis={0}
-              minWidth={0}
-            >
-              Reasoning: provider default
-            </Text>
-          ) : null}
           {onCancel ? (
             <Stack
               id="conversation-cancel-turn"
@@ -587,7 +616,11 @@ export function ComposerControls({
               ? "Skills"
               : menu === "models"
                 ? "Models"
-                : (descriptor?.label ?? "Options")
+                : menu === "permissions"
+                  ? "Permissions — next message"
+                  : menu === "mode"
+                    ? "Mode — next message"
+                    : (descriptor?.label ?? "Options")
           }
           flexDirection="column"
         >

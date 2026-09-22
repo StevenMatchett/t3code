@@ -1,6 +1,8 @@
 import {
   ClientOrchestrationCommand,
   ProjectId,
+  RuntimeMode,
+  ProviderInteractionMode,
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -14,6 +16,8 @@ const PromptCommand = ClientOrchestrationCommand.pipe(Schema.toTaggedUnion("type
 ];
 export const SavedInteraction = Schema.Struct({
   draft: Schema.String,
+  runtimeMode: Schema.optionalKey(Schema.NullOr(RuntimeMode)),
+  interactionMode: Schema.optionalKey(Schema.NullOr(ProviderInteractionMode)),
   pastes: Schema.Array(
     Schema.Struct({ id: Schema.String, marker: Schema.String, text: Schema.String }),
   ),

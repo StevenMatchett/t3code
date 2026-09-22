@@ -3,6 +3,8 @@ import {
   MessageId,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  type RuntimeMode,
+  type ProviderInteractionMode,
   type ApprovalRequestId,
   type ClientOrchestrationCommand,
   type OrchestrationThread,
@@ -20,6 +22,7 @@ import {
   type PendingUserInput,
 } from "@t3tools/client-runtime/pending-requests";
 import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+import { planModeProblem } from "./composerModes.ts";
 import { recallableComposerPrompt } from "./restoredPrompt.ts";
 import { checkpointRestoreTargets, waitForCheckpointRestore } from "./checkpointRestore.ts";
 import { completeSkillDraft, type SkillCompletion } from "./skillCompletion.ts";
@@ -47,6 +50,8 @@ export type TuiThreadCommand = Extract<
       | "thread.checkpoint.revert"
       | "thread.conversation.revert"
       | "thread.meta.update"
+      | "thread.runtime-mode.set"
+      | "thread.interaction-mode.set"
       | "thread.turn.start"
       | "thread.turn.interrupt"
       | "thread.approval.respond"
@@ -95,6 +100,8 @@ interface PastedText {
 export interface ThreadInteractionState {
   readonly queue: readonly QueuedPrompt[];
   readonly draft: string;
+  readonly runtimeMode: RuntimeMode | null;
+  readonly interactionMode: ProviderInteractionMode | null;
   readonly pastes: readonly PastedText[];
   readonly pending: "send" | "stop" | "reply" | "model" | "rewind" | null;
   readonly attachmentPending: boolean;
@@ -115,6 +122,8 @@ export interface ThreadInteractionState {
 const initial: ThreadInteractionState = {
   queue: [],
   draft: "",
+  runtimeMode: null,
+  interactionMode: null,
   pastes: [],
   pending: null,
   attachmentPending: false,
@@ -344,6 +353,8 @@ export function makeThreadInteractions(options: {
           : {}),
       });
   };
+  const planProblem = (registry: AtomRegistry.AtomRegistry, thread: OrchestrationThread) =>
+    planModeProblem(providerContext(registry, thread).provider);
   const run = async (
     registry: AtomRegistry.AtomRegistry,
     command: TuiThreadCommand,
@@ -351,6 +362,44 @@ export function makeThreadInteractions(options: {
   ) => {
     update(registry, command.threadId, { pending, error: null, notice: null });
     try {
+      if (command.type === "thread.turn.start") {
+        const thread = currentThread(registry, command.threadId);
+        if (!thread) return false;
+        if (command.interactionMode === "plan") {
+          const problem = planProblem(registry, thread);
+          if (problem) return error(registry, command.threadId, problem);
+        }
+        // The server starts turns with the persisted thread settings. Apply the
+        // frozen prompt settings first, including for queued messages and retries.
+        if (
+          thread.runtimeMode !== command.runtimeMode &&
+          !(await options.dispatch(registry, {
+            type: "thread.runtime-mode.set",
+            ...metadata(),
+            threadId: command.threadId,
+            runtimeMode: command.runtimeMode,
+          }))
+        )
+          return error(
+            registry,
+            command.threadId,
+            "Permissions were not confirmed. Your message is kept; retry before sending.",
+          );
+        if (
+          thread.interactionMode !== command.interactionMode &&
+          !(await options.dispatch(registry, {
+            type: "thread.interaction-mode.set",
+            ...metadata(),
+            threadId: command.threadId,
+            interactionMode: command.interactionMode,
+          }))
+        )
+          return error(
+            registry,
+            command.threadId,
+            "Mode was not confirmed. Your message is kept; retry before sending.",
+          );
+      }
       if (await options.dispatch(registry, command)) return true;
       return error(
         registry,
@@ -448,6 +497,37 @@ export function makeThreadInteractions(options: {
   return {
     state,
     queuedThreads,
+    setRuntimeMode: (
+      registry: AtomRegistry.AtomRegistry,
+      threadId: ThreadId,
+      runtimeMode: RuntimeMode,
+    ) => {
+      if (registry.get(state(threadId)).pending || !currentThread(registry, threadId)) return false;
+      update(registry, threadId, {
+        runtimeMode,
+        error: null,
+        notice: "Permissions apply to the next message.",
+      });
+      return true;
+    },
+    setInteractionMode: (
+      registry: AtomRegistry.AtomRegistry,
+      threadId: ThreadId,
+      interactionMode: ProviderInteractionMode,
+    ) => {
+      if (registry.get(state(threadId)).pending) return false;
+      const thread = currentThread(registry, threadId);
+      if (!thread) return false;
+      const problem = interactionMode === "plan" ? planProblem(registry, thread) : null;
+      if (problem) return error(registry, threadId, problem);
+      update(registry, threadId, {
+        interactionMode,
+        error: null,
+        notice: "Mode applies to the next message.",
+      });
+      return true;
+    },
+
     flushQueue,
     restoreCheckpoint: async (
       registry: AtomRegistry.AtomRegistry,
@@ -574,6 +654,8 @@ export function makeThreadInteractions(options: {
       update(registry, threadId, {
         queue: current.queue.slice(1),
         draft: next.command.message.text,
+        runtimeMode: next.command.runtimeMode,
+        interactionMode: next.command.interactionMode,
         pastes: [],
         attachments: next.attachments,
         skill: null,
@@ -790,6 +872,18 @@ export function makeThreadInteractions(options: {
           current.attachments.map((attachment) => attachment.id).join("\0")
           ? current.attempt
           : null;
+      if (
+        retry &&
+        (retry.runtimeMode !== (current.runtimeMode ?? thread.runtimeMode) ||
+          retry.interactionMode !==
+            (current.interactionMode ??
+              (planProblem(registry, thread) ? "default" : thread.interactionMode)))
+      )
+        return error(
+          registry,
+          threadId,
+          "The unconfirmed message keeps its original mode and permissions. Restore those selections to retry, or edit the message to send a new prompt.",
+        );
       const requests = derivePendingRequests(thread.activities);
       const shouldQueue =
         !retry && (thread.latestTurn?.state === "running" || current.queue.length > 0);
@@ -812,9 +906,15 @@ export function makeThreadInteractions(options: {
           attachments: [...current.attachments],
         },
         modelSelection: thread.modelSelection,
-        runtimeMode: thread.runtimeMode,
-        interactionMode: thread.interactionMode,
+        runtimeMode: current.runtimeMode ?? thread.runtimeMode,
+        interactionMode:
+          current.interactionMode ??
+          (planProblem(registry, thread) ? "default" : thread.interactionMode),
       };
+      if (command.interactionMode === "plan") {
+        const problem = planProblem(registry, thread);
+        if (problem) return error(registry, threadId, problem);
+      }
       if (shouldQueue) {
         update(registry, threadId, {
           queue: [

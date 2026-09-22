@@ -66,6 +66,8 @@ describe("TUI session persistence", () => {
       threadId: first.id,
       modal: "help",
     });
+    first.actions.setRuntimeMode(first.registry, first.id, "approval-required");
+    first.actions.setInteractionMode(first.registry, first.id, "plan");
     first.actions.setDraft(first.registry, first.id, "Unsent ");
     first.actions.addPaste(first.registry, first.id, "long paste ".repeat(50));
     await first.actions.attachImages(first.registry, first.id, ["image.png"]);
@@ -80,6 +82,8 @@ describe("TUI session persistence", () => {
     });
     expect(second.registry.get(second.actions.state(second.id))).toMatchObject({
       draft: first.registry.get(first.actions.state(first.id)).draft,
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
       pastes: [{ text: "long paste ".repeat(50) }],
       attachments: [{ dataUrl: "data:image/png;base64,AA==" }],
       pending: null,

@@ -190,6 +190,23 @@ export function makeClientFixture(
             data: Option.map(value.data, (item) => ({ ...item, modelSelection: selection })),
           }));
       }
+      if (
+        accepted &&
+        (command.type === "thread.runtime-mode.set" ||
+          command.type === "thread.interaction-mode.set")
+      ) {
+        const atom = states[details.findIndex((item) => item.id === command.threadId)];
+        if (atom)
+          registry.update(atom, (value) => ({
+            ...value,
+            data: Option.map(value.data, (item) => ({
+              ...item,
+              ...(command.type === "thread.runtime-mode.set"
+                ? { runtimeMode: command.runtimeMode }
+                : { interactionMode: command.interactionMode }),
+            })),
+          }));
+      }
       return accepted;
     },
     ...(loadImageAttachment ? { loadImageAttachment } : {}),
