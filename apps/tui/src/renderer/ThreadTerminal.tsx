@@ -66,10 +66,13 @@ export function ThreadTerminal({
   const serverIds = summaries
     .filter((terminal) => terminal.threadId === threadId)
     .map((terminal) => terminal.terminalId);
-  const [firstTerminalId] = useState(() =>
-    discardedIds(client, threadId).has(DEFAULT_TERMINAL_ID)
-      ? nextTerminalId(client, threadId, new Set(serverIds))
-      : DEFAULT_TERMINAL_ID,
+  const [savedView] = useState(() => client.session?.terminal(threadId));
+  const [firstTerminalId] = useState(
+    () =>
+      savedView?.terminalId ??
+      (discardedIds(client, threadId).has(DEFAULT_TERMINAL_ID)
+        ? nextTerminalId(client, threadId, new Set(serverIds))
+        : DEFAULT_TERMINAL_ID),
   );
   const [localIds, setLocalIds] = useState<readonly string[]>([firstTerminalId]);
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -81,7 +84,10 @@ export function ThreadTerminal({
     [client, hiddenIds, localIds, serverIds, threadId],
   );
   const [terminalId, setTerminalId] = useState(firstTerminalId);
-  const [focused, setFocused] = useState(true);
+  const [focused, setFocused] = useState(savedView?.focused ?? true);
+  useEffect(() => {
+    client.session?.saveTerminal(threadId, { terminalId, focused });
+  }, [client, threadId, terminalId, focused]);
   const [error, setError] = useState<string | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const handledExit = useRef<string | null>(null);

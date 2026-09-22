@@ -186,6 +186,12 @@ The composer stays visible, with its border indicating when it owns keyboard inp
 activity is collapsed by default; press `t` from history to expand it. Errors and pending requests
 remain visible.
 
+The TUI remembers the selected project and thread, sidebar view, conversation scroll position,
+composer focus, tool detail visibility, and terminal tab. Reopening it reconnects to the same
+environment and restores that view, including after the TUI process is killed. State is stored
+separately for each environment and server origin under `~/.t3-tui/ui-state.sqlite` (or your
+`--state-dir`). Confirmation dialogs close on restart.
+
 To edit an earlier prompt, press `e` from conversation history or choose **Edit from checkpoint**
 in the command palette. Select the prompt, then choose **Revert and keep changes** to preserve
 workspace files or **Revert files too** to restore them. The selected prompt and attachments
@@ -220,15 +226,20 @@ fixed-size text grid.
 
 In an open conversation, Enter or `i` focuses the composer. Enter sends; Shift+Enter inserts a
 newline. Terminals that cannot distinguish Shift+Enter from Enter can use Ctrl+J as a fallback.
+In an empty composer, Up recalls previous prompts from this thread, including canceled turns.
+Up/Down walks through recalled prompts; Down past the newest returns to an empty composer.
+Recall is text-only and never sends automatically. Editing a recalled prompt makes it a normal
+draft. For multiline or wrapped prompts, arrows move the cursor until the first or last visual
+line. A draft with text or attachments is left untouched.
+
 Escape returns to history without discarding the draft. Text pasted into the composer is never
-submitted automatically. Drafts survive thread navigation within the TUI session but are not saved
-across process exits. Prompts use the thread's existing model, options, and runtime mode. During
+submitted automatically. Drafts, pasted text, and attachments are saved locally as you edit and restored after a restart. Prompts use the thread's existing model, options, and runtime mode. During
 an active turn, Enter queues your message for the next completed tool call or the end of the turn.
 The queue above the composer shows what is waiting and when it is sending. Messages leave one at
 a time, even if you navigate to another thread. Pending approvals and questions hold delivery.
 Ctrl+Y sends the first queued message now; Ctrl+U returns it to an empty composer for editing.
 Cancel or Ctrl+X stops the active turn and pauses the queue. Failed sends also pause it; Ctrl+Y
-retries without duplicating the command. Queued messages are kept only for this TUI session.
+retries without duplicating the command. Queued messages survive restarts and reopen paused; use Ctrl+Y to resume sending.
 
 While browsing a thread, press `O` to open its branch's pull request in your browser, or choose
 “Open pull request in browser” from `Ctrl+K`. The lookup uses the thread's repository/worktree

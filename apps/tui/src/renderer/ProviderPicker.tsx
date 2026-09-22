@@ -8,6 +8,11 @@ import { useContext, useEffect, useRef, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { selectableSkills, selectionForModel } from "../features/chat/providerChoices.ts";
 import { completeSkillDraft, skillCompletionAt } from "../features/chat/skillCompletion.ts";
+import {
+  buildComposerPromptHistoryEntries,
+  stepComposerPromptHistory,
+  type ComposerPromptHistoryPosition,
+} from "../features/chat/promptHistory.ts";
 import { trailingPastedImagePaths } from "../features/chat/imageAttachments.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
@@ -71,7 +76,10 @@ export function ComposerControls({
   const background = useThemeColor("panel");
   const foreground = useThemeColor("text");
   const selectedBackground = useThemeColor("selection");
+  const [savedComposer] = useState(() => client.session?.composer(threadId));
   const editor = useRef<PromptEditorControl | null>(null);
+  const historyPosition = useRef<ComposerPromptHistoryPosition | null>(null);
+  const recalling = useRef(false);
   const mounted = useRef(true);
   const refreshGeneration = useRef(0);
   const menuGeneration = useRef(0);
@@ -123,6 +131,7 @@ export function ComposerControls({
       });
   };
   const updateSnapshot = (next: PromptSnapshot) => {
+    client.session?.saveComposer(threadId, { cursor: next.cursor });
     const trigger = skillCompletionAt(next.text, next.cursor);
     if (trigger && previousTrigger.current !== trigger.start) refresh(false);
     previousTrigger.current = trigger?.start ?? null;
@@ -130,8 +139,11 @@ export function ComposerControls({
     if (next.text !== snapshot.text || next.cursor !== snapshot.cursor) setCursor(0);
   };
   const updateDraft = (value: string) => {
-    onDraftChange?.();
+    const isRecall = recalling.current || historyPosition.current?.recalled === value;
+    if (!isRecall) historyPosition.current = null;
+    if (value !== registry.get(client.actions.state(threadId)).draft) onDraftChange?.();
     client.actions.setDraft(registry, threadId, value);
+    if (isRecall) return;
     const dropped = trailingPastedImagePaths(value);
     if (!dropped || interaction.attachmentPending) return;
     void client.actions.attachImages(registry, threadId, dropped.paths).then((attached) => {
@@ -257,6 +269,30 @@ export function ComposerControls({
       if (mounted.current && ok && generation === menuGeneration.current) close();
     });
   };
+  const recallPrompt = (direction: "backward" | "forward") => {
+    if (interaction.pending || interaction.attachments.length || interaction.attachmentPending)
+      return false;
+    const control = editor.current;
+    if (!control?.isAtHistoryBoundary(direction)) return false;
+    const step = stepComposerPromptHistory({
+      direction,
+      entries: buildComposerPromptHistoryEntries(thread?.messages ?? []),
+      position: historyPosition.current,
+      currentPrompt: control.snapshot().text,
+    });
+    if (!step) return false;
+    recalling.current = true;
+    try {
+      control.replace(step.prompt, step.prompt.length);
+      historyPosition.current = step.position;
+      // A recalled slash command is a draft, not a request to open the skills menu.
+      const trigger = skillCompletionAt(step.prompt, step.prompt.length);
+      setDismissed(trigger ? JSON.stringify([trigger.start, trigger.end, trigger.query]) : null);
+    } finally {
+      recalling.current = false;
+    }
+    return true;
+  };
   useKeyboard((key) => {
     if (!active || !focused) return;
     if (key.ctrl && key.name === "backspace" && interaction.attachments.length > 0) {
@@ -267,6 +303,17 @@ export function ComposerControls({
       return;
     }
     if (key.ctrl || key.meta || key.option) return;
+    if (
+      !menu &&
+      focus === 0 &&
+      !key.shift &&
+      (key.name === "up" || key.name === "down") &&
+      recallPrompt(key.name === "up" ? "backward" : "forward")
+    ) {
+      key.preventDefault();
+      key.stopPropagation();
+      return;
+    }
     if (menu) {
       switch (key.name) {
         case "escape":
@@ -293,7 +340,8 @@ export function ComposerControls({
     } else if (
       suggestedReplies.length > 0 &&
       (key.name === "up" || key.name === "down" || key.name === "left" || key.name === "right") &&
-      ((focus === 0 && interaction.draft.length === 0) || focus <= suggestedReplies.length)
+      ((focus === 0 && interaction.draft.length === 0) ||
+        (focus > 0 && focus <= suggestedReplies.length))
     ) {
       const offset = key.name === "up" || key.name === "left" ? -1 : 1;
       setFocus((current) => {
@@ -366,6 +414,7 @@ export function ComposerControls({
       >
         <PromptEditor
           control={editor}
+          initialCursor={savedComposer?.cursor ?? interaction.draft.length}
           value={interaction.draft}
           onChange={updateDraft}
           onSnapshot={updateSnapshot}

@@ -62,8 +62,9 @@ export function Conversation({
   const queued = interaction.queue[0];
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
+  const [savedView] = useState(() => client.session?.conversation(threadId));
   const [mode, setMode] = useState<"history" | "composer" | "requests" | "questions" | "agents">(
-    "history",
+    savedView?.mode ?? "history",
   );
   const previousComposerFocusRequest = useRef(composerFocusRequest);
   useEffect(() => {
@@ -71,19 +72,44 @@ export function Conversation({
     previousComposerFocusRequest.current = composerFocusRequest;
     setMode("composer");
   }, [composerFocusRequest]);
-  const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(null);
-  const [terminalOpen, setTerminalOpen] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
+  const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(
+    savedView?.anchor ?? null,
+  );
+  const [terminalOpen, setTerminalOpen] = useState(savedView?.terminalOpen ?? false);
+  const [showDetails, setShowDetails] = useState(savedView?.showDetails ?? false);
   const [expandedToolGroups, setExpandedToolGroups] = useState<ReadonlyMap<string, boolean>>(
-    () => new Map(),
+    () => new Map(savedView?.expandedToolGroups),
   );
   const [agentCursor, setAgentCursor] = useState(-1);
-  const [agentsExpanded, setAgentsExpanded] = useState(true);
+  const [agentsExpanded, setAgentsExpanded] = useState(savedView?.agentsExpanded ?? true);
   const [agentReturnMode, setAgentReturnMode] = useState<"history" | "composer">("history");
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(
+    savedView?.selectedAgentId ?? null,
+  );
   const [agentOutputStart, setAgentOutputStart] = useState(0);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [search, setSearch] = useState<{ query: string; index: number } | null>(null);
+  useEffect(() => {
+    client.session?.saveConversation(threadId, {
+      mode,
+      anchor,
+      terminalOpen,
+      showDetails,
+      agentsExpanded,
+      selectedAgentId,
+      expandedToolGroups: [...expandedToolGroups],
+    });
+  }, [
+    client,
+    threadId,
+    mode,
+    anchor,
+    terminalOpen,
+    showDetails,
+    agentsExpanded,
+    selectedAgentId,
+    expandedToolGroups,
+  ]);
   const requests = useMemo(() => derivePendingRequests(thread?.activities ?? []), [thread]);
   const question = requests.userInputs.find(
     (request) =>
@@ -346,6 +372,15 @@ export function Conversation({
             ),
           );
   const page = Option.getOrNull(state.page);
+  useEffect(() => {
+    if (
+      anchor &&
+      !lines.some((line) => line.id === anchor.id) &&
+      page?.hasMore &&
+      !page.loadingOlder
+    )
+      client.loadOlder(threadId);
+  }, [client, threadId, anchor, lines, page]);
   const scrollTo = (next: number) => {
     const target = Math.max(0, Math.min(maxStart, next));
     const line = lines[target];

@@ -8,6 +8,7 @@ export interface PromptSnapshot {
 }
 
 export interface PromptEditorControl {
+  readonly isAtHistoryBoundary: (direction: "backward" | "forward") => boolean;
   readonly snapshot: () => PromptSnapshot;
   readonly replace: (text: string, cursor: number) => void;
 }
@@ -36,6 +37,7 @@ export function PromptEditor({
   height = 4,
   placeholder = "Write a prompt...",
   control,
+  initialCursor,
   onSnapshot,
   onActivate,
 }: {
@@ -46,11 +48,14 @@ export function PromptEditor({
   readonly height?: number;
   readonly placeholder?: string;
   readonly control?: Ref<PromptEditorControl>;
+  readonly initialCursor?: number;
   readonly onSnapshot?: (snapshot: PromptSnapshot) => void;
   readonly onActivate?: () => void;
 }) {
   const editor = useRef<TextareaRenderable | null>(null);
   const updating = useRef(false);
+  const initialPosition = useRef(initialCursor);
+  const initialized = useRef(false);
   const background = useThemeColor("panel");
   const foreground = useThemeColor("text");
   const muted = useThemeColor("muted");
@@ -72,10 +77,25 @@ export function PromptEditor({
     onChange(text);
     onSnapshot?.(snapshot());
   };
-  useImperativeHandle(control, () => ({ snapshot, replace }));
+  useImperativeHandle(control, () => ({
+    snapshot,
+    replace,
+    isAtHistoryBoundary: (direction) => {
+      const current = editor.current;
+      if (!current || current.hasSelection()) return false;
+      const row = current.scrollY + current.visualCursor.visualRow;
+      return direction === "backward"
+        ? row === 0
+        : row === current.editorView.getTotalVirtualLineCount() - 1;
+    },
+  }));
   useEffect(() => {
     const current = editor.current;
-    if (current && current.plainText !== value) {
+    if (!current) return;
+    if (!initialized.current) {
+      initialized.current = true;
+      moveToTextOffset(current, initialPosition.current ?? value.length);
+    } else if (current.plainText !== value) {
       current.setText(value);
       current.gotoBufferEnd();
     }

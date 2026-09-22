@@ -8,6 +8,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
+import { Atom } from "effect/unstable/reactivity";
 import { useMemo, useContext, useEffect, useState, useCallback } from "react";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { AppShellView, useAppShellState } from "../app/AppShell.tsx";
@@ -25,6 +26,8 @@ import { CheckpointRestore } from "./CheckpointRestore.tsx";
 import { ThreadDiff } from "./ThreadDiff.tsx";
 import { QueuedMessages } from "./QueuedMessages.tsx";
 import { PullRequestPanel } from "./PullRequestPanel.tsx";
+
+const NO_SESSION_ERROR = Atom.make<string | null>(null);
 
 type PaletteEntry = CommandPaletteItem & {
   readonly target:
@@ -74,6 +77,7 @@ export function AppShell({
   const renderer = useRenderer();
   const shell = useAtomValue(client.shell);
   const connection = useAtomValue(client.connection);
+  const sessionError = useAtomValue(client.session?.error ?? NO_SESSION_ERROR);
   const registry = useContext(RegistryContext);
   const { width, height } = useTerminalDimensions();
   const layout = calculateShellLayout(width, height);
@@ -120,7 +124,20 @@ export function AppShell({
     }),
     [snapshot],
   );
-  const [state, dispatch] = useAppShellState(rows, snapshot !== null, initialRoute, onStateChange);
+  const saveShell = useCallback(
+    (state: ShellState) => {
+      onStateChange?.(state);
+      if (snapshot !== null) client.session?.saveShell(state);
+    },
+    [client, onStateChange, snapshot],
+  );
+  const [state, dispatch] = useAppShellState(
+    rows,
+    snapshot !== null,
+    initialRoute,
+    saveShell,
+    client.session?.shell,
+  );
   const [threadOverlay, setThreadOverlay] = useState<
     | { readonly type: "palette" }
     | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
@@ -429,7 +446,7 @@ export function AppShell({
         width={width}
         height={height}
         hotkeys={hotkeys}
-        notice={copyNotice}
+        notice={sessionError ? { text: sessionError, failed: true } : copyNotice}
         managementOverlay={
           threadOverlay?.type === "restore" && state.threadId
             ? {

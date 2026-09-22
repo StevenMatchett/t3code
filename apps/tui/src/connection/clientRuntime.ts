@@ -77,9 +77,11 @@ import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity
 import * as Socket from "effect/unstable/socket/Socket";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 
+import type { TuiSessionState } from "../persistence/sessionState.ts";
 import type { ReattachedAuthenticatedTuiEnvironment } from "./authenticatedEnvironment.ts";
 
 export interface TuiClient {
+  readonly session?: TuiSessionState;
   readonly resolvePullRequest: (
     registry: AtomRegistry.AtomRegistry,
     target: { readonly cwd: string; readonly branch: string | null },
@@ -185,6 +187,7 @@ function platformLayer() {
 
 export function createTuiClient(
   environment: Pick<ReattachedAuthenticatedTuiEnvironment, "readiness" | "bearer">,
+  session?: TuiSessionState,
 ): TuiClient {
   const { descriptor, httpBaseUrl } = environment.readiness;
   const environmentId = descriptor.environmentId;
@@ -442,6 +445,7 @@ export function createTuiClient(
     tag: WS_METHODS.attachmentsCreateUploadUrl,
   });
   const actions = makeThreadInteractions({
+    ...(session ? { session } : {}),
     prepareRestoredAttachments: async (registry, attachments) => {
       const restored: (UploadChatImageAttachment | ChatAttachment)[] = [];
       for (const attachment of attachments) {
@@ -574,6 +578,7 @@ export function createTuiClient(
         );
       return result.value.pullRequest;
     },
+    ...(session ? { session } : {}),
     settings: server.settingsValueAtom(environmentId),
     providers,
     terminals,

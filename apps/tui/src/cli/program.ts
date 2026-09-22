@@ -18,6 +18,8 @@ import { detectTerminalCapabilities } from "../ui/capabilities.ts";
 import { startRendererRuntime } from "../renderer/runtime.tsx";
 import { runTuiLifecycle } from "./lifecycle.ts";
 import { buildTuiLaunchOptions, formatTuiCliError, type TuiCliOptions } from "./options.ts";
+import { openTuiSessionState } from "../persistence/sessionStore.ts";
+import type { TuiSessionState } from "../persistence/sessionState.ts";
 import { TuiShutdownController } from "./shutdown.ts";
 
 export interface RunTuiPrototypeOptions {
@@ -49,6 +51,7 @@ export async function runTuiPrototype(options: RunTuiPrototypeOptions): Promise<
       credential.fill(0);
     }
   }
+  let sessionState: TuiSessionState | undefined;
   const shutdown = new TuiShutdownController();
   shutdown.attachToProcess(process);
   try {
@@ -73,19 +76,27 @@ export async function runTuiPrototype(options: RunTuiPrototypeOptions): Promise<
     return await runTuiLifecycle({
       shutdown,
       start: (signal) => Effect.runPromise(supervisor.connect, { signal }),
-      render: async ({ onFatal, onInterrupt }, lease) =>
-        startRendererRuntime({
-          registry: AtomRegistry.make(),
+      render: async ({ onFatal, onInterrupt }, lease) => {
+        const registry = AtomRegistry.make();
+        sessionState = openTuiSessionState({
+          stateDirectory,
+          registry,
+          environmentId: lease.environment.readiness.descriptor.environmentId,
+          httpOrigin: lease.environment.readiness.httpBaseUrl,
+        });
+        return startRendererRuntime({
+          registry,
           children: createElement(
             UiProvider,
             { capabilities: detectTerminalCapabilities(NodeProcess.env) },
             createElement(PrototypeApp, {
               onInterrupt,
-              client: createTuiClient(lease.environment),
+              client: createTuiClient(lease.environment, sessionState),
             }),
           ),
           onError: onFatal,
-        }),
+        });
+      },
       waitForChildExit: (lease) =>
         lease.ownership === "foreground"
           ? Effect.runPromise(lease.environment.child.waitForExit())
@@ -102,6 +113,7 @@ export async function runTuiPrototype(options: RunTuiPrototypeOptions): Promise<
       reportError: (error) => NodeProcess.stderr.write(`${formatTuiCliError(error)}\n`),
     });
   } finally {
+    sessionState?.close();
     shutdown.disposeProcessListeners();
   }
 }

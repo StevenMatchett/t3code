@@ -37,6 +37,7 @@ import * as Encoding from "effect/Encoding";
 import * as Predicate from "effect/Predicate";
 import * as Option from "effect/Option";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import type { TuiSessionState } from "../../persistence/sessionState.ts";
 import { loadImageAttachment as loadImageAttachmentFromDisk } from "./imageAttachments.ts";
 
 export type TuiThreadCommand = Extract<
@@ -174,6 +175,7 @@ function failureId(
 }
 
 export function makeThreadInteractions(options: {
+  readonly session?: TuiSessionState;
   readonly thread: (threadId: ThreadId) => Atom.Atom<EnvironmentThreadState>;
   readonly connection: Atom.Atom<SupervisorConnectionState>;
   readonly providers?: Atom.Atom<ProviderCatalog>;
@@ -201,23 +203,44 @@ export function makeThreadInteractions(options: {
   };
   const retainedPastes = (draft: string, pastes: readonly PastedText[]) => {
     let from = 0;
-    return pastes.filter((paste) => {
+    const retained = pastes.filter((paste) => {
       const index = draft.indexOf(paste.marker, from);
       if (index < 0) return false;
       from = index + paste.marker.length;
       return true;
     });
+    return retained.length === pastes.length ? pastes : retained;
   };
-  const state = Atom.family((_threadId: ThreadId) =>
-    Atom.make<ThreadInteractionState>(initial).pipe(Atom.keepAlive),
-  );
-  const queuedThreads = Atom.make<readonly ThreadId[]>([]).pipe(Atom.keepAlive);
+  const state = Atom.family((threadId: ThreadId) => {
+    const saved = options.session?.interactions.get(threadId);
+    return Atom.make<ThreadInteractionState>(
+      saved
+        ? {
+            ...initial,
+            ...saved,
+            queue: saved.queue.map((entry) => ({ ...entry, status: "held" as const })),
+            notice: saved.queue.length
+              ? "Restored queued messages are paused. Ctrl+Y sends the next message."
+              : saved.attempt
+                ? "An earlier send was not confirmed. Check the thread before retrying."
+                : null,
+          }
+        : initial,
+    ).pipe(Atom.keepAlive);
+  });
+  const queuedThreads = Atom.make<readonly ThreadId[]>(
+    [...(options.session?.interactions ?? [])]
+      .filter(([, state]) => state.queue.length > 0)
+      .map(([id]) => id),
+  ).pipe(Atom.keepAlive);
   const update = (
     registry: AtomRegistry.AtomRegistry,
     threadId: ThreadId,
     patch: Partial<ThreadInteractionState>,
   ) => {
-    registry.update(state(threadId), (current) => ({ ...current, ...patch }));
+    const next = { ...registry.get(state(threadId)), ...patch };
+    options.session?.saveInteraction(threadId, next);
+    registry.set(state(threadId), next);
     if (patch.queue) {
       const ids = registry.get(queuedThreads);
       if (patch.queue.length > 0 && !ids.includes(threadId))

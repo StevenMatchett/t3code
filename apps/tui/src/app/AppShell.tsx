@@ -66,12 +66,12 @@ export function useAppShellState(
   loaded: boolean,
   initialRoute: ShellRoute = "projects",
   onStateChange?: (state: ShellState) => void,
+  initialState?: ShellState,
 ): readonly [ShellState, (command: ShellCommand) => void] {
   const [state, dispatch] = useReducer(
     (current: ShellState, input: { readonly command: ShellCommand; readonly rows: ShellRows }) =>
       dispatchShellCommand(current, input.command, input.rows),
-    initialRoute,
-    createInitialShellState,
+    initialState ?? createInitialShellState(initialRoute),
   );
   useEffect(() => {
     if (loaded) dispatch({ command: { type: "reconcile" }, rows });
@@ -178,6 +178,7 @@ function Help() {
       <Text tone="accent">CONVERSATION</Text>
       <Text>Enter / i Write prompt Esc Return to history</Text>
       <Text>Enter Send Shift+Enter New line</Text>
+      <Text>Up in an empty message recalls prompts; Down moves forward</Text>
       <Text>Click model/reasoning or Tab then Enter</Text>
       <Text>/ Find in thread · In message box: search skills</Text>
       <Text>Mouse wheel / Up/Down / PgUp/PgDn Scroll End Follow latest</Text>

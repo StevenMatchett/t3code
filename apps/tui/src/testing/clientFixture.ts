@@ -40,6 +40,7 @@ import {
   type ThreadManagementCommand,
 } from "../features/threads/management.ts";
 import type { ProviderCatalog } from "../features/chat/providerChoices.ts";
+import type { TuiSessionState } from "../persistence/sessionState.ts";
 import { makeThreadInteractions, type TuiThreadCommand } from "../features/chat/interactions.ts";
 
 const time = "2026-01-01T00:00:00.000Z";
@@ -48,6 +49,7 @@ const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "g
 export function makeClientFixture(
   dispatch: (command: TuiThreadCommand) => Promise<boolean> = async () => true,
   loadImageAttachment?: (path: string) => Promise<UploadChatImageAttachment>,
+  session?: TuiSessionState,
 ) {
   const projects: OrchestrationProjectShell[] = ["Alpha", "Beta"].map((title) => ({
     id: ProjectId.make(title.toLowerCase()),
@@ -171,6 +173,7 @@ export function makeClientFixture(
   };
   const providers = Atom.make<ProviderCatalog>({ providers: [provider], status: "live" });
   const actions = makeThreadInteractions({
+    ...(session ? { session } : {}),
     connection,
     thread,
     providers,
@@ -437,6 +440,7 @@ export function makeClientFixture(
     refreshArchived: () => {},
   });
   const client: TuiClient = {
+    ...(session ? { session } : {}),
     resolvePullRequest: async (_registry, target) => ({
       number: 42,
       title: "Fixture pull request",
