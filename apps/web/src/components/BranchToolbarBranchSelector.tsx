@@ -773,17 +773,6 @@ export function BranchToolbarBranchSelector({
         className={cn("flex min-w-0 items-center gap-1", className)}
         data-composer-context-control
       >
-        <ThreadPullRequestBadgeControl
-          variant="ghost"
-          badge={prBadge}
-          number={prNumber}
-          url={prUrl}
-          status={displayedPrStatus}
-          onOpenStack={() => useRightPanelStore.getState().open(threadRef, "pull-requests")}
-          onOpenPullRequest={(event) => {
-            if (prUrl) openPrLink(event, prUrl);
-          }}
-        />
         {/* Context menu lives on the wrapper: the disabled Button has
             pointer-events-none, so the trigger itself never sees right-clicks
             while refs are loading or a branch action is pending. */}
@@ -798,7 +787,7 @@ export function BranchToolbarBranchSelector({
             className="min-w-0 max-w-full font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80 active:scale-100"
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
           >
-            <GitBranchIcon className="size-3 shrink-0 opacity-70" />
+            <GitBranchIcon className="hidden size-3 shrink-0 opacity-70 group-data-[compact]/composer-context:block" />
             <span
               data-composer-label
               className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
@@ -813,6 +802,17 @@ export function BranchToolbarBranchSelector({
             <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
           </ComboboxTrigger>
         </span>
+        <ThreadPullRequestBadgeControl
+          variant="ghost"
+          badge={prBadge}
+          number={prNumber}
+          url={prUrl}
+          status={displayedPrStatus}
+          onOpenStack={() => useRightPanelStore.getState().open(threadRef, "pull-requests")}
+          onOpenPullRequest={(event) => {
+            if (prUrl) openPrLink(event, prUrl);
+          }}
+        />
       </div>
       <ComboboxPopup
         align="end"

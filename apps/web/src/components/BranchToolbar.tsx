@@ -30,7 +30,6 @@ import {
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
   resolveEffectiveEnvMode,
-  resolveLockedWorkspaceLabel,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
   shouldShowEnvironmentIndicator,
@@ -52,7 +51,6 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "./ui/menu";
-import { Separator } from "./ui/separator";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import { measureRestingComposerControls } from "./chat/restingComposerControlsMeasurement";
@@ -131,11 +129,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
       : activeWorktreePath
         ? FolderGitIcon
         : FolderIcon;
-  const workspaceLabel = envModeLocked
-    ? resolveLockedWorkspaceLabel(activeWorktreePath)
-    : effectiveEnvMode === "worktree"
-      ? resolveEnvModeLabel("worktree")
-      : resolveCurrentWorkspaceLabel(activeWorktreePath);
+  const workspaceLabel = `${activeWorktreePath || effectiveEnvMode === "worktree" ? "Worktree" : "Local"}:`;
   const isLocked = envLocked || envModeLocked;
   const icon = showEnvironmentIndicator ? (
     // Button's base styles apply `-mx-0.5` to descendant SVGs, which eats 4px
@@ -165,8 +159,9 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
           data-composer-label-motion
           className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
         >
-          {autoEnvironmentLabel ??
-            (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
+          {showEnvironmentIndicator
+            ? `${autoEnvironmentLabel ?? activeEnvironment?.label ?? "Run on"} · ${workspaceLabel}`
+            : workspaceLabel}
         </span>
       </span>
     </>
@@ -175,7 +170,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   if (isLocked) {
     return (
       <span
-        className="inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent px-[calc(--spacing(2)-1px)] font-normal text-muted-foreground/70 text-xs sm:h-6"
+        className="ml-auto inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent px-[calc(--spacing(2)-1px)] font-normal text-muted-foreground/70 text-xs sm:h-6"
         data-composer-context-control
       >
         {triggerContent}
@@ -187,7 +182,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
     <Menu>
       <MenuTrigger
         render={<Button variant="ghost" size="xs" />}
-        className="min-w-0 max-w-[48%] flex-initial justify-start font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80"
+        className="ml-auto min-w-0 max-w-[48%] flex-initial justify-start font-normal text-muted-foreground/70 text-xs! hover:text-foreground/80"
         data-composer-context-control
         data-composer-shortcut={[
           showEnvironmentPicker && !envLocked ? "composer.host" : "",
@@ -589,6 +584,36 @@ export const BranchToolbar = memo(function BranchToolbar({
         !contextStripVisible && "pointer-events-none invisible absolute inset-x-0 top-full",
       )}
     >
+      {showEnvironmentIndicator && availableEnvironments ? (
+        <div
+          className={cn(
+            "min-h-7 min-w-0 items-center sm:min-h-6",
+            showGitControls ? "hidden @3xl/composer-surface:flex" : "flex",
+          )}
+        >
+          <BranchToolbarEnvironmentSelector
+            autoEnvironmentLabel={autoEnvironmentLabel}
+            onAutoEnvironment={onAutoEnvironment}
+            envLocked={envLocked}
+            environmentId={environmentId}
+            availableEnvironments={availableEnvironments}
+            {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
+          />
+        </div>
+      ) : null}
+
+      {composerControlsHostRef ? (
+        // The host takes whatever the workspace and branch controls leave
+        // over, in both strip layouts, so a collapsed composer can show its
+        // model and mode controls wherever they fit.
+        <div
+          ref={composerControlsHostRef}
+          data-composer-context-control
+          data-chat-resting-composer-controls-host="true"
+          className="flex min-w-0 flex-1 items-center justify-start overflow-x-clip overflow-y-visible"
+        />
+      ) : null}
+
       {showGitControls ? (
         <div className="contents @3xl/composer-surface:hidden">
           <MobileRunContextSelector
@@ -609,62 +634,23 @@ export const BranchToolbar = memo(function BranchToolbar({
           />
         </div>
       ) : null}
-      {showGitControls || showEnvironmentIndicator ? (
-        <div
-          className={cn(
-            "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
-            showGitControls ? "hidden @3xl/composer-surface:flex" : "flex",
-            composerControlsHostRef ? "shrink" : "flex-1",
-          )}
-        >
-          {showEnvironmentIndicator && availableEnvironments && (
-            <>
-              <BranchToolbarEnvironmentSelector
-                autoEnvironmentLabel={autoEnvironmentLabel}
-                onAutoEnvironment={onAutoEnvironment}
-                envLocked={envLocked}
-                environmentId={environmentId}
-                availableEnvironments={availableEnvironments}
-                {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
-              />
-              {showGitControls ? (
-                <Separator
-                  orientation="vertical"
-                  className="mx-0.5 h-3.5!"
-                  data-composer-context-control
-                />
-              ) : null}
-            </>
-          )}
-          {showGitControls ? (
-            <BranchToolbarEnvModeSelector
-              envLocked={envModeLocked}
-              effectiveEnvMode={effectiveEnvMode}
-              activeWorktreePath={activeWorktreePath}
-              onEnvModeChange={onEnvModeChange}
-              previousWorktreeLabel={previousWorktreeLabel}
-              onUsePreviousWorktree={onUsePreviousWorktree}
-            />
-          ) : null}
+      {showGitControls ? (
+        <div className="ml-auto hidden min-w-0 items-center @3xl/composer-surface:flex">
+          <BranchToolbarEnvModeSelector
+            envLocked={envModeLocked}
+            effectiveEnvMode={effectiveEnvMode}
+            activeWorktreePath={activeWorktreePath}
+            onEnvModeChange={onEnvModeChange}
+            previousWorktreeLabel={previousWorktreeLabel}
+            onUsePreviousWorktree={onUsePreviousWorktree}
+          />
         </div>
-      ) : null}
-
-      {composerControlsHostRef ? (
-        // The host takes whatever the workspace and branch controls leave
-        // over, in both strip layouts, so a collapsed composer can show its
-        // model and mode controls wherever they fit.
-        <div
-          ref={composerControlsHostRef}
-          data-composer-context-control
-          data-chat-resting-composer-controls-host="true"
-          className="flex min-w-0 flex-1 items-center justify-start overflow-x-clip overflow-y-visible"
-        />
       ) : null}
 
       {showGitControls ? (
         <BranchToolbarBranchSelector
           ref={branchSelectorRef}
-          className="min-w-0 flex-initial justify-end @3xl/composer-surface:ml-auto"
+          className="min-w-0 flex-initial justify-end"
           environmentId={environmentId}
           threadId={threadId}
           {...(draftId ? { draftId } : {})}
