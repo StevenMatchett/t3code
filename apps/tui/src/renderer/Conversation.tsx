@@ -77,7 +77,6 @@ export function Conversation({
   const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(
     savedView?.anchor ?? null,
   );
-  const [requestedTerminalId, setRequestedTerminalId] = useState<string | undefined>(undefined);
   const [terminalOpen, setTerminalOpen] = useState(savedView?.terminalOpen ?? false);
   const [showDetails, setShowDetails] = useState(savedView?.showDetails ?? false);
   const [expandedToolGroups, setExpandedToolGroups] = useState<ReadonlyMap<string, boolean>>(
@@ -597,7 +596,6 @@ export function Conversation({
     return (
       <ThreadTerminal
         client={client}
-        initialTerminalId={requestedTerminalId}
         environmentId={client.environmentId}
         threadId={threadId}
         cwd={terminalCwd}
@@ -605,10 +603,7 @@ export function Conversation({
         active={active}
         {...(onTerminalFocusChange ? { onFocusChange: onTerminalFocusChange } : {})}
         {...(onHintsChange ? { onHintsChange } : {})}
-        onBack={() => {
-          setTerminalOpen(false);
-          setRequestedTerminalId(undefined);
-        }}
+        onBack={() => setTerminalOpen(false)}
       />
     );
   if (mode === "requests")
@@ -770,7 +765,9 @@ export function Conversation({
           {requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
             ? "A: respond to requests"
             : interaction.pending
-              ? "Sending command..."
+              ? shellCommandDraft
+                ? "Running shell command..."
+                : "Sending command..."
               : queued?.status === "queued"
                 ? "Sends after next tool call / turn end"
                 : (interaction.notice ?? "T: tool details")}
@@ -794,14 +791,7 @@ export function Conversation({
         {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
         onSubmit={() => {
           setAnchor(null);
-          const previousTerminal = registry.get(client.actions.state(threadId)).shellTerminalId;
-          void client.actions.send(registry, threadId).then((sent) => {
-            const terminalId = registry.get(client.actions.state(threadId)).shellTerminalId;
-            if (sent && terminalId && terminalId !== previousTerminal) {
-              setRequestedTerminalId(terminalId);
-              setTerminalOpen(true);
-            }
-          });
+          void client.actions.send(registry, threadId);
         }}
         {...(thread?.latestTurn?.state === "running" || queued
           ? { onCancel: cancelTurn, cancelPending: interaction.pending === "stop" }

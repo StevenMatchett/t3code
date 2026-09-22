@@ -1,4 +1,3 @@
-import { makeShellCommandRunner } from "../features/chat/shellCommands.ts";
 import {
   DEFAULT_SERVER_SETTINGS,
   type ServerSettings,
@@ -52,6 +51,16 @@ export function makeClientFixture(
   dispatch: (command: TuiThreadCommand) => Promise<boolean> = async () => true,
   loadImageAttachment?: (path: string) => Promise<UploadChatImageAttachment>,
   session?: TuiSessionState,
+  executeShell: (input: {
+    readonly cwd: string;
+    readonly command: string;
+  }) => Promise<import("@t3tools/contracts").TerminalExecuteResult> = async () => ({
+    stdout: "command output\n",
+    stderr: "",
+    exitCode: 0,
+    timedOut: false,
+    truncated: false,
+  }),
 ) {
   const projects: OrchestrationProjectShell[] = ["Alpha", "Beta"].map((title) => ({
     id: ProjectId.make(title.toLowerCase()),
@@ -174,9 +183,12 @@ export function makeClientFixture(
     ],
   };
   const providers = Atom.make<ProviderCatalog>({ providers: [provider], status: "live" });
+  const shellCommands: { readonly cwd: string; readonly command: string }[] = [];
   const actions = makeThreadInteractions({
-    executeShell: (registry, input) =>
-      makeShellCommandRunner(terminals, EnvironmentId.make("renderer-fixture"))(registry, input),
+    executeShell: async (_registry, input) => {
+      shellCommands.push(input);
+      return executeShell(input);
+    },
     ...(session ? { session } : {}),
     connection,
     thread,
@@ -535,6 +547,7 @@ export function makeClientFixture(
     creationCommands,
     worktreeRequests,
     terminalWrites,
+    shellCommands,
     terminalOpenInputs,
     terminalAttachInputs,
     terminalBuffer,

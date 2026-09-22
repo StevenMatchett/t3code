@@ -1,4 +1,3 @@
-import { makeShellCommandRunner } from "../features/chat/shellCommands.ts";
 import {
   Connection,
   ConnectionBlockedError,
@@ -449,8 +448,19 @@ export function createTuiClient(
     label: "tui.restore-attachment-upload",
     tag: WS_METHODS.attachmentsCreateUploadUrl,
   });
+  const executeShell = createEnvironmentRpcCommand(runtime, {
+    label: "tui.shell.execute",
+    tag: WS_METHODS.terminalExecute,
+  });
   const actions = makeThreadInteractions({
-    executeShell: makeShellCommandRunner(terminals, environmentId),
+    executeShell: async (registry, input) => {
+      const result = await executeShell.run(registry, { environmentId, input });
+      if (!AsyncResult.isSuccess(result))
+        throw new Error(
+          "Shell execution was not confirmed. Check the environment before retrying.",
+        );
+      return result.value;
+    },
     ...(session ? { session } : {}),
     prepareRestoredAttachments: async (registry, attachments) => {
       const restored: (UploadChatImageAttachment | ChatAttachment)[] = [];

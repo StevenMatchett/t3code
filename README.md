@@ -195,9 +195,10 @@ overwrite each other's drafts, queues, or view. On startup, the TUI restores the
 opened session that is no longer running, or starts fresh if every session is in use.
 Confirmation dialogs close on restart.
 
-Start a message with `!` to run a shell command, for example `!git status`. Enter runs it directly
-in a fresh terminal in the thread's worktree or project directory and opens the output. Shell
-commands bypass the agent and run immediately, even while an agent turn is active.
+Start a message with `!` to run a shell command, for example `!git status`. The command runs in
+the thread's worktree or project directory. Its command, output, and exit status appear together
+in the conversation and are sent to the agent. If the agent is busy, that result is queued.
+Commands run without interactive input, with a two-minute limit and bounded output.
 
 To edit an earlier prompt, press `e` from conversation history or choose **Edit from checkpoint**
 in the command palette. Select the prompt, then choose **Revert and keep changes** to preserve

@@ -1,8 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "@effect/vitest";
-import { TurnId } from "@t3tools/contracts";
-import * as Cause from "effect/Cause";
+import { afterEach, describe, expect, it } from "@effect/vitest";
+import { TurnId, type TerminalExecuteResult } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
 import { act } from "react";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
@@ -11,10 +9,16 @@ import { AppShell } from "./AppShell.tsx";
 const drivers: TuiTestDriver[] = [];
 afterEach(async () => {
   await Promise.all(drivers.splice(0).map((driver) => driver.close()));
-  vi.restoreAllMocks();
 });
-async function setup() {
-  const fixture = makeClientFixture();
+const result: TerminalExecuteResult = {
+  stdout: "hello\n",
+  stderr: "warning\n",
+  exitCode: 7,
+  timedOut: false,
+  truncated: false,
+};
+async function setup(executeShell = async () => result, dispatch = async () => true) {
+  const fixture = makeClientFixture(dispatch, undefined, undefined, executeShell);
   const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
     width: 100,
     height: 35,
@@ -29,9 +33,9 @@ async function setup() {
   return { fixture, driver, id, state };
 }
 
-describe("shell commands from the composer", () => {
-  it("runs ! commands in the worktree shell and opens its output without an agent turn", async () => {
-    const { fixture, driver, id, state } = await setup();
+describe("shell commands in the conversation", () => {
+  it("sends the command, stdout, stderr and exit status to the LLM without opening a terminal", async () => {
+    const { fixture, driver, state } = await setup();
     await act(async () =>
       driver.registry.update(fixture.states[0]!, (value) => ({
         ...value,
@@ -40,25 +44,44 @@ describe("shell commands from the composer", () => {
     );
     await driver.input.typeText("! /bin/echo hello");
     expect(driver.captureFrame()).toContain("Shell command");
-    expect(driver.captureFrame()).toContain("Run shell");
-    expect(driver.captureFrame()).not.toContain("No matches");
     await driver.input.pressKey("RETURN");
-    expect(fixture.commands).toEqual([]);
-    expect(fixture.terminalWrites).toEqual(["/bin/echo hello\r"]);
-    expect(fixture.terminalOpenInputs).toEqual([
-      expect.objectContaining({
-        threadId: id,
-        cwd: "/worktrees/task",
-        worktreePath: "/worktrees/task",
-      }),
-    ]);
-    expect(fixture.terminalAttachInputs).toContainEqual(
-      expect.objectContaining({ terminalId: fixture.terminalOpenInputs[0]!.terminalId }),
-    );
+    expect(fixture.shellCommands).toEqual([{ cwd: "/worktrees/task", command: "/bin/echo hello" }]);
+    const command = fixture.commands[0]!;
+    expect(command.type).toBe("thread.turn.start");
+    if (command.type !== "thread.turn.start") throw new Error("Expected a user turn");
+    expect(command.message.text).toContain("/bin/echo hello");
+    expect(command.message.text).toContain("stdout:\nhello");
+    expect(command.message.text).toContain("stderr:\nwarning");
+    expect(command.message.text).toContain("Exit code: 7");
+    expect(fixture.terminalAttachInputs).toEqual([]);
+    expect(fixture.terminalWrites).toEqual([]);
     expect(state().draft).toBe("");
+    await act(async () =>
+      driver.registry.update(fixture.states[0]!, (value) => ({
+        ...value,
+        data: Option.map(value.data, (thread) => ({
+          ...thread,
+          messages: [
+            ...thread.messages,
+            {
+              id: command.message.messageId,
+              role: "user" as const,
+              text: command.message.text,
+              turnId: null,
+              streaming: false,
+              createdAt: command.createdAt,
+              updatedAt: command.createdAt,
+            },
+          ],
+        })),
+      })),
+    );
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Exit code: 7");
+    expect(driver.captureFrame()).toContain("hello");
   });
 
-  it("expands pasted commands and runs immediately while the agent is busy", async () => {
+  it("queues the completed output when the agent is busy", async () => {
     const { fixture, driver, id, state } = await setup();
     const actions = fixture.client.actions;
     await act(async () => {
@@ -76,77 +99,56 @@ describe("shell commands from the composer", () => {
           },
         })),
       }));
-      actions.setDraft(driver.registry, id, "!");
-      actions.addPaste(driver.registry, id, `echo ${"x".repeat(220)}\necho done`);
+      actions.addPaste(driver.registry, id, `!echo ${"x".repeat(220)}\necho done`);
       await actions.send(driver.registry, id);
     });
     expect(fixture.commands).toEqual([]);
-    expect(state().queue).toEqual([]);
-    expect(fixture.terminalWrites).toEqual([`echo ${"x".repeat(220)}\recho done\r`]);
-    expect(fixture.terminalOpenInputs[0]?.cwd).toBe("/workspace/alpha");
+    expect(fixture.shellCommands[0]?.command).toBe(`echo ${"x".repeat(220)}\necho done`);
+    expect(state().queue[0]?.command.message.text).toContain("Exit code: 7");
+    expect(state().queue[0]?.command.message.text).toContain("hello");
   });
 
-  it("keeps empty or failed shell commands out of the agent and preserves the draft", async () => {
-    const { fixture, driver, state } = await setup();
+  it("keeps empty and failed executions out of the LLM and preserves the draft", async () => {
+    const { fixture, driver, state } = await setup(async () => {
+      throw new Error("Could not execute");
+    });
     await driver.input.typeText("!");
     await driver.input.pressKey("RETURN");
     expect(state().error).toContain("after !");
-    expect(fixture.terminalOpenInputs).toEqual([]);
-    vi.spyOn(fixture.client.terminals!.open, "run").mockResolvedValue(
-      AsyncResult.failure(Cause.die(new Error("offline"))),
-    );
+    expect(fixture.shellCommands).toEqual([]);
     await driver.input.typeText("echo test");
     await driver.input.pressKey("RETURN");
     expect(state().draft).toBe("!echo test");
-    expect(state().error).toContain("Could not open a shell");
+    expect(state().error).toContain("Could not execute");
     expect(state().pending).toBeNull();
-    expect(fixture.terminalWrites).toEqual([]);
     expect(fixture.commands).toEqual([]);
   });
-  it("blocks repeated submission and preserves edits made during shell startup", async () => {
-    const { fixture, driver, id, state } = await setup();
-    const terminals = fixture.client.terminals!;
-    const openResult = await terminals.open.run(driver.registry, {
-      environmentId: fixture.client.environmentId,
-      input: { threadId: id, terminalId: "existing", cwd: "/workspace/alpha" },
-    });
-    const opening = Promise.withResolvers<typeof openResult>();
-    const open = vi.spyOn(fixture.client.terminals!.open, "run").mockReturnValue(opening.promise);
+
+  it("blocks duplicate executions and preserves edits made while running", async () => {
+    const pending = Promise.withResolvers<TerminalExecuteResult>();
+    const { fixture, driver, id, state } = await setup(() => pending.promise);
     const actions = fixture.client.actions;
     await act(async () => actions.setDraft(driver.registry, id, "!echo first"));
     const sending = actions.send(driver.registry, id);
     expect(await actions.send(driver.registry, id)).toBe(false);
-    expect(open).toHaveBeenCalledTimes(1);
+    expect(fixture.shellCommands).toHaveLength(1);
     await act(async () => {
       actions.setDraft(driver.registry, id, "new draft");
-      opening.resolve(openResult);
+      pending.resolve(result);
       await sending;
     });
     expect(state().draft).toBe("new draft");
-    expect(fixture.terminalWrites).toEqual(["echo first\r"]);
+    expect(fixture.commands).toHaveLength(1);
   });
 
-  it("preserves the draft when terminal delivery fails and never sends it to the agent", async () => {
-    const { fixture, driver, state } = await setup();
-    vi.spyOn(fixture.client.terminals!.write, "run").mockResolvedValue(
-      AsyncResult.failure(Cause.die(new Error("disconnected"))),
-    );
+  it("retries LLM delivery without reexecuting the command", async () => {
+    const { fixture, driver, state } = await setup(undefined, async () => false);
     await driver.input.typeText("!echo test");
     await driver.input.pressKey("RETURN");
     expect(state().draft).toBe("!echo test");
-    expect(state().error).toContain("not confirmed");
-    expect(fixture.commands).toEqual([]);
-  });
-  it("recognizes a whole shell command in a folded paste", async () => {
-    const { fixture, driver, id } = await setup();
-    const text = `!echo ${"x".repeat(220)}`;
-    await act(async () => fixture.client.actions.addPaste(driver.registry, id, text));
-    await driver.flush();
     await driver.input.pressKey("RETURN");
-    expect(fixture.commands).toEqual([]);
-    expect(fixture.terminalWrites).toEqual([`${text.slice(1)}\r`]);
-    expect(fixture.terminalAttachInputs).toContainEqual(
-      expect.objectContaining({ terminalId: fixture.terminalOpenInputs[0]!.terminalId }),
-    );
+    expect(fixture.shellCommands).toHaveLength(1);
+    expect(fixture.commands).toHaveLength(2);
+    expect(fixture.commands[0]).toEqual(fixture.commands[1]);
   });
 });
