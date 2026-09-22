@@ -303,7 +303,7 @@ export function Conversation({
     Math.floor(terminalHeight * 0.3) - attachmentHeight - suggestedReplyHeight - 3,
   );
   const editorLines = useMemo(
-    () => wrapTerminalWords(interaction.draft, Math.max(1, width - 4)).length,
+    () => wrapTerminalWords(interaction.draft, Math.max(1, width - 5)).length,
     [interaction.draft, width],
   );
   const editorHeight = Math.max(1, Math.min(editorLines, maxEditorHeight));

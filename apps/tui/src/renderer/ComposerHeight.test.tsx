@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "@effect/vitest";
-import type { TextareaRenderable } from "@opentui/core";
+import type { ScrollBarRenderable, TextareaRenderable } from "@opentui/core";
+import { MouseButtons } from "@opentui/core/testing";
 import { act } from "react";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
@@ -65,5 +66,25 @@ describe("composer content height", () => {
     expect(composer().height).toBe(9);
     await driver.resize(96, 60);
     expect(composer().height).toBe(18);
+  });
+  it("shows the overflow position and scrolls the draft from the scrollbar", async () => {
+    const { driver, editor, draft } = await setup();
+    const bar = () =>
+      driver.renderer.root.findDescendantById("prompt-scrollbar") as ScrollBarRenderable;
+    expect(bar().visible).toBe(false);
+    await draft(Array.from({ length: 60 }, (_, i) => `draft line ${i}`).join("\n"));
+    expect(bar().visible).toBe(true);
+    expect(bar().scrollSize).toBe(60);
+    expect(bar().viewportSize).toBe(editor().height);
+    expect(bar().scrollPosition).toBe(editor().scrollY);
+    expect(bar().scrollPosition).toBeGreaterThan(0);
+    await driver.mouse.click(bar().screenX, bar().screenY, MouseButtons.LEFT, { delayMs: 0 });
+    expect(editor().scrollY).toBe(0);
+    expect(driver.captureFrame()).toContain("draft line 0");
+    await driver.mouse.scroll(editor().screenX + 1, editor().screenY + 1, "down", { delayMs: 0 });
+    expect(editor().scrollY).toBeGreaterThan(0);
+    expect(bar().scrollPosition).toBe(editor().scrollY);
+    await draft("short");
+    expect(bar().visible).toBe(false);
   });
 });

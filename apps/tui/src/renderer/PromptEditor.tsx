@@ -1,5 +1,7 @@
 import type { TextareaRenderable } from "@opentui/core";
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import { Stack } from "../ui/primitives.tsx";
+import { PromptScrollbar } from "./PromptScrollbar.tsx";
 import { useThemeColor } from "../ui/context.tsx";
 
 export interface PromptSnapshot {
@@ -101,55 +103,59 @@ export function PromptEditor({
     }
   }, [value]);
   return (
-    <textarea
-      ref={editor}
-      id="prompt-editor"
-      initialValue={value}
-      height={height}
-      flexShrink={0}
-      width="100%"
-      focused={focused}
-      placeholder={placeholder}
-      {...(background ? { backgroundColor: background, focusedBackgroundColor: background } : {})}
-      {...(foreground ? { textColor: foreground, focusedTextColor: foreground } : {})}
-      {...(muted ? { placeholderColor: muted } : {})}
-      {...(accent ? { cursorColor: accent } : {})}
-      cursorStyle={{ style: "line", blinking: false }}
-      keyBindings={[
-        { name: "return", action: "submit" },
-        { name: "return", shift: true, action: "newline" },
-        { name: "j", ctrl: true, action: "newline" },
-        { name: "linefeed", action: "newline" },
-      ]}
-      onMouseDown={() => onActivate?.()}
-      onKeyDown={(key) => {
-        if (key.repeated && (key.name === "return" || key.name === "enter")) {
-          key.preventDefault();
-          key.stopPropagation();
-          return;
-        }
-        // Some terminal bindings send ESC+CR for Shift+Enter without a Shift
-        // modifier. Treat that legacy sequence as a newline (also Alt+Enter).
-        if (key.sequence === "\x1b\r") {
-          key.preventDefault();
-          key.stopPropagation();
-          editor.current?.newLine();
-        }
-      }}
-      onCursorChange={() => {
-        if (!updating.current && editor.current) onSnapshot?.(snapshot());
-      }}
-      onContentChange={() => {
-        if (!updating.current && editor.current) {
-          onChange(editor.current.plainText);
-          onSnapshot?.(snapshot());
-        }
-      }}
-      onSubmit={() => {
-        const text = editor.current?.plainText ?? value;
-        onChange(text);
-        onSubmit(text);
-      }}
-    />
+    <Stack flexDirection="row" height={height} width="100%" flexShrink={0}>
+      <textarea
+        ref={editor}
+        id="prompt-editor"
+        initialValue={value}
+        height={height}
+        flexShrink={0}
+        flexGrow={1}
+        minWidth={1}
+        focused={focused}
+        placeholder={placeholder}
+        {...(background ? { backgroundColor: background, focusedBackgroundColor: background } : {})}
+        {...(foreground ? { textColor: foreground, focusedTextColor: foreground } : {})}
+        {...(muted ? { placeholderColor: muted } : {})}
+        {...(accent ? { cursorColor: accent } : {})}
+        cursorStyle={{ style: "line", blinking: false }}
+        keyBindings={[
+          { name: "return", action: "submit" },
+          { name: "return", shift: true, action: "newline" },
+          { name: "j", ctrl: true, action: "newline" },
+          { name: "linefeed", action: "newline" },
+        ]}
+        onMouseDown={() => onActivate?.()}
+        onKeyDown={(key) => {
+          if (key.repeated && (key.name === "return" || key.name === "enter")) {
+            key.preventDefault();
+            key.stopPropagation();
+            return;
+          }
+          // Some terminal bindings send ESC+CR for Shift+Enter without a Shift
+          // modifier. Treat that legacy sequence as a newline (also Alt+Enter).
+          if (key.sequence === "\x1b\r") {
+            key.preventDefault();
+            key.stopPropagation();
+            editor.current?.newLine();
+          }
+        }}
+        onCursorChange={() => {
+          if (!updating.current && editor.current) onSnapshot?.(snapshot());
+        }}
+        onContentChange={() => {
+          if (!updating.current && editor.current) {
+            onChange(editor.current.plainText);
+            onSnapshot?.(snapshot());
+          }
+        }}
+        onSubmit={() => {
+          const text = editor.current?.plainText ?? value;
+          onChange(text);
+          onSubmit(text);
+        }}
+      />
+      <PromptScrollbar editor={editor} />
+    </Stack>
   );
 }
