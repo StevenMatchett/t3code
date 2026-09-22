@@ -1,5 +1,7 @@
 import type { MessageId, OrchestrationThread } from "@t3tools/contracts";
 import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import type { Atom, AtomRegistry } from "effect/unstable/reactivity";
 
@@ -41,7 +43,7 @@ export function waitForCheckpointRestore(
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
+      Effect.runFork(Fiber.interrupt(timeout));
       unsubscribe();
       if (error) reject(error);
       else resolve();
@@ -75,14 +77,18 @@ export function waitForCheckpointRestore(
         finish();
       }
     };
-    const timeout = setTimeout(
-      () =>
-        finish(
-          new Error(
-            "Timed out waiting for the thread to rewind. Check the thread before retrying.",
+    const timeout = Effect.runFork(
+      Effect.sleep("120 seconds").pipe(
+        Effect.andThen(
+          Effect.sync(() =>
+            finish(
+              new Error(
+                "Timed out waiting for the thread to rewind. Check the thread before retrying.",
+              ),
+            ),
           ),
         ),
-      120_000,
+      ),
     );
     unsubscribe = registry.subscribe(atom, inspect);
     Promise.resolve()

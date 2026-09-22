@@ -69,6 +69,10 @@ import {
   type ThreadManagementActions,
 } from "../features/threads/management.ts";
 import * as Effect from "effect/Effect";
+import * as Encoding from "effect/Encoding";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as HttpBody from "effect/unstable/http/HttpBody";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
@@ -464,17 +468,20 @@ export function createTuiClient(
         });
         if (!AsyncResult.isSuccess(result))
           throw new Error(`Could not restore attachment: ${attachment.name}`);
-        const response = await fetch(new URL(result.value.relativeUrl, httpBaseUrl), {
-          signal: AbortSignal.timeout(30_000),
-        });
-        if (!response.ok) throw new Error(`Could not restore attachment: ${attachment.name}`);
-        const bytes = await response.arrayBuffer();
+        const bytes = await Effect.runPromise(
+          HttpClient.get(new URL(result.value.relativeUrl, httpBaseUrl)).pipe(
+            Effect.flatMap(HttpClientResponse.filterStatusOk),
+            Effect.flatMap((response) => response.arrayBuffer),
+            Effect.provide(FetchHttpClient.layer),
+            Effect.timeout("30 seconds"),
+          ),
+        );
         if (bytes.byteLength !== attachment.sizeBytes)
           throw new Error(`Attachment size changed: ${attachment.name}`);
         if (attachment.type === "image") {
           restored.push({
             type: "image",
-            id: `tui-${crypto.randomUUID()}`,
+            id: `tui-${Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16)))}`,
             name: attachment.name,
             mimeType: attachment.mimeType,
             sizeBytes: bytes.byteLength,
@@ -492,13 +499,15 @@ export function createTuiClient(
           });
           if (!AsyncResult.isSuccess(upload))
             throw new Error(`Could not prepare attachment: ${attachment.name}`);
-          const uploaded = await fetch(new URL(upload.value.relativeUrl, httpBaseUrl), {
-            method: "PUT",
-            headers: { "Content-Type": attachment.mimeType },
-            body: bytes,
-            signal: AbortSignal.timeout(30_000),
-          });
-          if (!uploaded.ok) throw new Error(`Could not upload attachment: ${attachment.name}`);
+          await Effect.runPromise(
+            HttpClient.put(new URL(upload.value.relativeUrl, httpBaseUrl), {
+              body: HttpBody.uint8Array(new Uint8Array(bytes), attachment.mimeType),
+            }).pipe(
+              Effect.flatMap(HttpClientResponse.filterStatusOk),
+              Effect.provide(FetchHttpClient.layer),
+              Effect.timeout("30 seconds"),
+            ),
+          );
           restored.push({ ...attachment, id: upload.value.attachmentId });
         }
       }
