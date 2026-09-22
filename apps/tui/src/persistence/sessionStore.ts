@@ -85,7 +85,9 @@ function claimSession(
         ).run(id, environment, origin);
       }
     }
-    db.prepare("UPDATE ui_sessions SET last_used = ? WHERE id = ?").run(Date.now(), id);
+    db.prepare(
+      "UPDATE ui_sessions SET last_used = (SELECT COALESCE(MAX(last_used), 0) + 1 FROM ui_sessions) WHERE id = ?",
+    ).run(id);
     db.exec("COMMIT");
     return { id, ownership: ownership! };
   } catch (error) {
