@@ -190,7 +190,10 @@ The TUI remembers the selected project and thread, sidebar view, conversation sc
 composer focus, tool detail visibility, and terminal tab. Reopening it reconnects to the same
 environment and restores that view, including after the TUI process is killed. State is stored
 separately for each environment and server origin under `~/.t3-tui/ui-state.sqlite` (or your
-`--state-dir`). Confirmation dialogs close on restart.
+`--state-dir`). Each running TUI owns a separate saved session, so concurrent windows do not
+overwrite each other's drafts, queues, or view. On startup, the TUI restores the most recently
+opened session that is no longer running, or starts fresh if every session is in use.
+Confirmation dialogs close on restart.
 
 To edit an earlier prompt, press `e` from conversation history or choose **Edit from checkpoint**
 in the command palette. Select the prompt, then choose **Revert and keep changes** to preserve

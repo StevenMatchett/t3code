@@ -21,6 +21,81 @@ const decodeComposer = Schema.decodeUnknownSync(ComposerView);
 const decodeTerminal = Schema.decodeUnknownSync(TerminalView);
 const decodeThreadId = Schema.decodeUnknownSync(ThreadId);
 
+/** Separate lock databases let SQLite release ownership even after SIGKILL. */
+function claimSession(
+  db: NodeSqlite.DatabaseSync,
+  directory: string,
+  environment: string,
+  origin: string,
+) {
+  const lockDirectory = NodePath.join(directory, "session-locks");
+  NodeFS.mkdirSync(lockDirectory, { recursive: true, mode: 0o700 });
+  const lock = (id: number) => {
+    const path = NodePath.join(lockDirectory, `${id}.sqlite`);
+    NodeFS.closeSync(NodeFS.openSync(path, "a", 0o600));
+    const connection = new NodeSqlite.DatabaseSync(path);
+    try {
+      connection.exec("BEGIN EXCLUSIVE");
+      return connection;
+    } catch (error) {
+      connection.close();
+      if (error instanceof Error && "errcode" in error && error.errcode === 5) return undefined;
+      throw error;
+    }
+  };
+  let ownership: NodeSqlite.DatabaseSync | undefined;
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ui_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, environment TEXT NOT NULL, origin TEXT NOT NULL,
+        last_used INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ui_state_v2 (
+        session INTEGER NOT NULL, scope TEXT NOT NULL, field TEXT NOT NULL, value TEXT NOT NULL,
+        PRIMARY KEY (session, scope, field)
+      );
+    `);
+    const sessions = db
+      .prepare(
+        "SELECT id FROM ui_sessions WHERE environment = ? AND origin = ? ORDER BY last_used DESC, id DESC",
+      )
+      .all(environment, origin);
+    let id: number | undefined;
+    for (const candidate of sessions) {
+      if (typeof candidate.id !== "number") continue;
+      ownership = lock(candidate.id);
+      if (ownership) {
+        id = candidate.id;
+        break;
+      }
+    }
+    if (id === undefined) {
+      id = Number(
+        db
+          .prepare("INSERT INTO ui_sessions (environment, origin, last_used) VALUES (?, ?, 0)")
+          .run(environment, origin).lastInsertRowid,
+      );
+      ownership = lock(id);
+      if (!ownership) throw new Error("Could not claim the new TUI session");
+      // Import the pre-session format once, without duplicating its queued commands.
+      if (sessions.length === 0) {
+        db.prepare(
+          "INSERT INTO ui_state_v2 SELECT ?, scope, field, value FROM ui_state_v1 WHERE environment = ? AND origin = ?",
+        ).run(id, environment, origin);
+      }
+    }
+    db.prepare("UPDATE ui_sessions SET last_used = ? WHERE id = ?").run(Date.now(), id);
+    db.exec("COMMIT");
+    return { id, ownership: ownership! };
+  } catch (error) {
+    ownership?.close();
+    if (db.isTransaction) db.exec("ROLLBACK");
+    db.close();
+    throw error;
+  }
+}
+
 /** A separate local UI database; server conversations and credentials never enter it. */
 export function openTuiSessionState(options: {
   readonly stateDirectory: string;
@@ -39,6 +114,8 @@ export function openTuiSessionState(options: {
   );
   const environment = options.environmentId;
   const origin = new URL(options.httpOrigin).origin;
+  const session = claimSession(db, options.stateDirectory, environment, origin);
+  let closed = false;
   const error = Atom.make<string | null>(null).pipe(Atom.keepAlive);
   const report = () =>
     options.registry.set(
@@ -46,8 +123,8 @@ export function openTuiSessionState(options: {
       "Could not save or restore TUI state. Check the state directory and available disk space.",
     );
   const rows = db
-    .prepare("SELECT scope, field, value FROM ui_state_v1 WHERE environment = ? AND origin = ?")
-    .all(environment, origin);
+    .prepare("SELECT scope, field, value FROM ui_state_v2 WHERE session = ?")
+    .all(session.id);
   const saved = new Map<string, Record<string, unknown>>();
   for (const row of rows) {
     if (
@@ -75,18 +152,19 @@ export function openTuiSessionState(options: {
     }
   };
   const write = db.prepare(
-    "INSERT INTO ui_state_v1 (environment, origin, scope, field, value) VALUES (?, ?, ?, ?, ?) ON CONFLICT (environment, origin, scope, field) DO UPDATE SET value = excluded.value",
+    "INSERT INTO ui_state_v2 (session, scope, field, value) VALUES (?, ?, ?, ?) ON CONFLICT (session, scope, field) DO UPDATE SET value = excluded.value",
   );
   // Reference equality avoids reserializing large attachments on every draft keystroke.
   const previous = new Map<string, Record<string, unknown>>();
   const save = (scope: string, fields: Record<string, unknown>) => {
+    if (closed) return;
     const prior = previous.get(scope);
     const changed = Object.entries(fields).filter(([key, value]) => !prior || prior[key] !== value);
     if (!changed.length) return;
     try {
       db.exec("BEGIN IMMEDIATE");
       for (const [field, value] of changed)
-        write.run(environment, origin, scope, field, JSON.stringify(value));
+        write.run(session.id, scope, field, JSON.stringify(value));
       db.exec("COMMIT");
       previous.set(scope, fields);
       saved.set(scope, fields);
@@ -129,6 +207,14 @@ export function openTuiSessionState(options: {
     saveComposer: (id, view) => save(`composer:${id}`, view),
     terminal: (id) => read(`terminal:${id}`, decodeTerminal),
     saveTerminal: (id, view) => save(`terminal:${id}`, view),
-    close: () => db.close(),
+    close: () => {
+      if (closed) return;
+      closed = true;
+      try {
+        db.close();
+      } finally {
+        session.ownership.close();
+      }
+    },
   };
 }

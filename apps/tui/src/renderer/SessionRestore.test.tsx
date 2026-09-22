@@ -71,6 +71,7 @@ describe("restoring the TUI session", () => {
     await driver.input.typeText("Unsent after restart");
     const before = first.state();
     await driver.close();
+    first.session.close();
     const second = setup(path);
     const reopened = await second.render();
     expect(second.state()).toMatchObject(before!);
@@ -93,6 +94,7 @@ describe("restoring the TUI session", () => {
     await driver.input.pressKey("ARROW_LEFT");
     const id = first.state()!.threadId!;
     await driver.close();
+    first.session.close();
     const second = setup(path);
     const reopened = await second.render();
     await reopened.input.typeText("X");
@@ -108,6 +110,7 @@ describe("restoring the TUI session", () => {
       threadId: ThreadId.make("thread-2"),
       modal: null,
     });
+    first.session.close();
     const second = setup(path);
     const original = second.registry.get(second.fixture.shell);
     second.registry.set(second.fixture.shell, { ...original, snapshot: Option.none() });
@@ -128,6 +131,7 @@ describe("restoring the TUI session", () => {
       threadId: ThreadId.make("deleted-thread"),
       modal: null,
     });
+    first.session.close();
     const second = setup(path);
     await second.render();
     expect(second.state()).toMatchObject({ route: "threads", threadId: "thread-0" });
@@ -153,6 +157,7 @@ describe("restoring the TUI session", () => {
       expandedToolGroups: [],
     });
     first.session.saveTerminal(id, { terminalId: "term-2", focused: false });
+    first.session.close();
     const second = setup(path);
     await second.render();
     expect(second.fixture.terminalAttachInputs).toContainEqual(
@@ -175,6 +180,7 @@ describe("restoring the TUI session", () => {
     expect(saved.showDetails).toBe(true);
     const frame = driver.captureFrame();
     await driver.close();
+    first.session.close();
     const second = setup(path);
     const reopened = await second.render();
     expect(second.session.conversation(id)).toEqual(saved);

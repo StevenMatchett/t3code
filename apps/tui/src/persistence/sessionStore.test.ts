@@ -69,6 +69,7 @@ describe("TUI session persistence", () => {
     first.actions.setDraft(first.registry, first.id, "Unsent ");
     first.actions.addPaste(first.registry, first.id, "long paste ".repeat(50));
     await first.actions.attachImages(first.registry, first.id, ["image.png"]);
+    first.session.close();
     const second = open(path);
     expect(second.session.shell).toEqual({
       route: "conversation",
@@ -84,6 +85,7 @@ describe("TUI session persistence", () => {
       pending: null,
     });
     second.actions.setDraft(second.registry, second.id, "");
+    second.session.close();
     const third = open(path);
     expect(third.registry.get(third.actions.state(second.id)).draft).toBe("");
   });
@@ -96,6 +98,7 @@ describe("TUI session persistence", () => {
     expect(
       open(path, EnvironmentId.make("test-env"), "http://localhost:4000").session.interactions.size,
     ).toBe(0);
+    first.session.close();
     expect(open(path).session.interactions.get(first.id)?.draft).toBe("Private draft");
   });
 
@@ -120,6 +123,10 @@ describe("TUI session persistence", () => {
     first.actions.setDraft(first.registry, first.id, "Queued request");
     await first.actions.send(first.registry, first.id);
     const command = first.registry.get(first.actions.state(first.id)).queue[0]!.command;
+    const concurrent = open(path);
+    expect(concurrent.registry.get(concurrent.actions.queuedThreads)).toEqual([]);
+    expect(concurrent.registry.get(concurrent.actions.state(concurrent.id)).queue).toEqual([]);
+    first.session.close();
     const second = open(path);
     expect(second.registry.get(second.actions.queuedThreads)).toEqual([second.id]);
     expect(second.registry.get(second.actions.state(second.id)).queue[0]?.status).toBe("held");
@@ -149,6 +156,7 @@ describe("TUI session persistence", () => {
     first.actions.setDraft(first.registry, first.id, "Queued once");
     await first.actions.send(first.registry, first.id);
     const command = first.registry.get(first.actions.state(first.id)).queue[0]!.command;
+    first.session.close();
     const second = open(path);
     second.registry.update(second.fixture.states[0]!, (state) => ({
       ...state,
@@ -180,6 +188,7 @@ describe("TUI session persistence", () => {
     failedClient.client.actions.setDraft(first.registry, first.id, "Unconfirmed");
     expect(await failedClient.client.actions.send(first.registry, first.id)).toBe(false);
     const original = failedClient.commands[0];
+    first.session.close();
     const second = open(path);
     expect(second.registry.get(second.actions.state(second.id)).attempt).toEqual(original);
     await second.actions.send(second.registry, second.id);
@@ -191,11 +200,61 @@ describe("TUI session persistence", () => {
     const first = open(path);
     first.actions.setDraft(first.registry, first.id, "Draft");
     const db = new NodeSqlite.DatabaseSync(NodePath.join(path, "ui-state.sqlite"));
-    db.prepare("UPDATE ui_state_v1 SET value = ? WHERE field = 'draft'").run("{broken");
+    db.prepare("UPDATE ui_state_v2 SET value = ? WHERE field = 'draft'").run("{broken");
     db.close();
+    first.session.close();
     const second = open(path);
     expect(second.session.interactions.size).toBe(0);
     expect(second.registry.get(second.session.error)).toContain("Could not save or restore");
+  });
+
+  it("isolates live sessions and reclaims only an available session", () => {
+    const path = directory();
+    const first = open(path);
+    first.actions.setDraft(first.registry, first.id, "First draft");
+    first.session.saveComposer(first.id, { cursor: 3 });
+    const second = open(path);
+    expect(second.session.interactions.size).toBe(0);
+    expect(second.session.composer(second.id)).toBeUndefined();
+    second.actions.setDraft(second.registry, second.id, "Second draft");
+    second.session.saveComposer(second.id, { cursor: 7 });
+    first.actions.setDraft(first.registry, first.id, "First updated");
+    first.session.close();
+    const recoveredFirst = open(path);
+    expect(recoveredFirst.session.interactions.get(first.id)?.draft).toBe("First updated");
+    expect(recoveredFirst.session.composer(first.id)).toEqual({ cursor: 3 });
+    second.session.close();
+    const recoveredSecond = open(path);
+    expect(recoveredSecond.session.interactions.get(first.id)?.draft).toBe("Second draft");
+    expect(recoveredSecond.session.composer(first.id)).toEqual({ cursor: 7 });
+    // Late callbacks from a closed client must not overwrite its new owner.
+    first.actions.setDraft(first.registry, first.id, "Stale callback");
+    recoveredFirst.session.close();
+    expect(open(path).session.interactions.get(first.id)?.draft).toBe("First updated");
+  });
+
+  it("imports legacy state once without sharing it with a second live session", () => {
+    const path = directory();
+    const db = new NodeSqlite.DatabaseSync(NodePath.join(path, "ui-state.sqlite"));
+    db.exec(
+      "CREATE TABLE ui_state_v1 (environment TEXT, origin TEXT, scope TEXT, field TEXT, value TEXT, PRIMARY KEY (environment, origin, scope, field))",
+    );
+    const insert = db.prepare(
+      "INSERT INTO ui_state_v1 VALUES ('test-env', 'http://localhost:3773', 'shell', ?, ?)",
+    );
+    for (const [field, value] of Object.entries({
+      route: "conversation",
+      projectId: "alpha",
+      threadId: "thread-0",
+    })) {
+      insert.run(field, JSON.stringify(value));
+    }
+    db.close();
+    const first = open(path);
+    expect(first.session.shell?.threadId).toBe("thread-0");
+    expect(open(path).session.shell).toBeUndefined();
+    first.session.close();
+    expect(open(path).session.shell?.threadId).toBe("thread-0");
   });
 
   it("recovers committed state after SIGKILL without running close", async () => {
@@ -233,6 +292,9 @@ describe("TUI session persistence", () => {
         }),
       ]);
       expect(ready).toBe("saved");
+      const concurrent = open(path);
+      expect(concurrent.session.interactions.size).toBe(0);
+      concurrent.actions.setDraft(concurrent.registry, concurrent.id, "Still running");
       child.kill("SIGKILL");
       await exited;
       const recovered = open(path);
@@ -240,6 +302,8 @@ describe("TUI session persistence", () => {
       expect(recovered.session.interactions.get(ThreadId.make("thread-0"))?.draft).toBe(
         "Saved before kill",
       );
+      concurrent.session.close();
+      expect(open(path).session.interactions.get(concurrent.id)?.draft).toBe("Still running");
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL");
