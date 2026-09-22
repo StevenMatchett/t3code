@@ -195,21 +195,6 @@ describe("TUI session persistence", () => {
     expect(second.fixture.commands).toEqual([original]);
   });
 
-  it("restores completed shell output without running the command again on retry", async () => {
-    const path = directory();
-    const first = open(path);
-    const failed = makeClientFixture(async () => false, undefined, first.session);
-    failed.client.actions.setDraft(first.registry, first.id, "!echo once");
-    await failed.client.actions.send(first.registry, first.id);
-    expect(failed.shellCommands).toHaveLength(1);
-    const original = failed.commands[0];
-    first.session.close();
-    const second = open(path);
-    await second.actions.send(second.registry, second.id);
-    expect(second.fixture.shellCommands).toEqual([]);
-    expect(second.fixture.commands).toEqual([original]);
-  });
-
   it("skips malformed saved fields and reports the problem", () => {
     const path = directory();
     const first = open(path);

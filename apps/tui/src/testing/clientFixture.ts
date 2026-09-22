@@ -1,7 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   type ServerSettings,
-  type TerminalOpenInput,
   type ProjectCloneStartInput,
   type OrchestrationThreadSearchMatch,
   type VcsCreateWorktreeInput,
@@ -51,16 +50,6 @@ export function makeClientFixture(
   dispatch: (command: TuiThreadCommand) => Promise<boolean> = async () => true,
   loadImageAttachment?: (path: string) => Promise<UploadChatImageAttachment>,
   session?: TuiSessionState,
-  executeShell: (input: {
-    readonly cwd: string;
-    readonly command: string;
-  }) => Promise<import("@t3tools/contracts").TerminalExecuteResult> = async () => ({
-    stdout: "command output\n",
-    stderr: "",
-    exitCode: 0,
-    timedOut: false,
-    truncated: false,
-  }),
 ) {
   const projects: OrchestrationProjectShell[] = ["Alpha", "Beta"].map((title) => ({
     id: ProjectId.make(title.toLowerCase()),
@@ -183,12 +172,7 @@ export function makeClientFixture(
     ],
   };
   const providers = Atom.make<ProviderCatalog>({ providers: [provider], status: "live" });
-  const shellCommands: { readonly cwd: string; readonly command: string }[] = [];
   const actions = makeThreadInteractions({
-    executeShell: async (_registry, input) => {
-      shellCommands.push(input);
-      return executeShell(input);
-    },
     ...(session ? { session } : {}),
     connection,
     thread,
@@ -217,7 +201,6 @@ export function makeClientFixture(
   const creationCommands: CreateThreadCommand[] = [];
   const worktreeRequests: VcsCreateWorktreeInput[] = [];
   const terminalWrites: string[] = [];
-  const terminalOpenInputs: TerminalOpenInput[] = [];
   const terminalAttachInputs: Array<{
     readonly threadId: string;
     readonly terminalId: string;
@@ -238,12 +221,6 @@ export function makeClientFixture(
   );
   const terminalSuccess = { run: async () => AsyncResult.success(undefined) };
   const terminals = {
-    open: {
-      run: async (_registry: unknown, request: { input: TerminalOpenInput }) => {
-        terminalOpenInputs.push(request.input);
-        return AsyncResult.success(undefined);
-      },
-    },
     metadata: () => terminalMetadata,
     attach: (request: {
       readonly input: {
@@ -547,8 +524,6 @@ export function makeClientFixture(
     creationCommands,
     worktreeRequests,
     terminalWrites,
-    shellCommands,
-    terminalOpenInputs,
     terminalAttachInputs,
     terminalBuffer,
     terminalCloseInputs,

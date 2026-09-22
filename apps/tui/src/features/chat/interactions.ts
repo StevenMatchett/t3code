@@ -4,7 +4,6 @@ import {
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type ApprovalRequestId,
-  type TerminalExecuteResult,
   type ClientOrchestrationCommand,
   type OrchestrationThread,
   type ModelSelection,
@@ -21,7 +20,6 @@ import {
   type PendingUserInput,
 } from "@t3tools/client-runtime/pending-requests";
 import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
-import { shellCommandMessage, type ShellCommandInput } from "./shellCommands.ts";
 import { recallableComposerPrompt } from "./restoredPrompt.ts";
 import { checkpointRestoreTargets, waitForCheckpointRestore } from "./checkpointRestore.ts";
 import { completeSkillDraft, type SkillCompletion } from "./skillCompletion.ts";
@@ -112,7 +110,6 @@ export interface ThreadInteractionState {
   readonly notice: string | null;
   readonly attempt: PromptCommand | null;
   readonly attemptDraft: string | null;
-  readonly shellResult: { readonly draft: string; readonly text: string } | null;
   readonly replies: readonly ReplyReceipt[];
 }
 const initial: ThreadInteractionState = {
@@ -129,7 +126,6 @@ const initial: ThreadInteractionState = {
   attempt: null,
   attemptDraft: null,
   replies: [],
-  shellResult: null,
 };
 
 export function approvalOptions(request: PendingApproval) {
@@ -180,10 +176,6 @@ function failureId(
 
 export function makeThreadInteractions(options: {
   readonly session?: TuiSessionState;
-  readonly executeShell?: (
-    registry: AtomRegistry.AtomRegistry,
-    input: ShellCommandInput,
-  ) => Promise<TerminalExecuteResult>;
   readonly thread: (threadId: ThreadId) => Atom.Atom<EnvironmentThreadState>;
   readonly connection: Atom.Atom<SupervisorConnectionState>;
   readonly providers?: Atom.Atom<ProviderCatalog>;
@@ -338,7 +330,6 @@ export function makeThreadInteractions(options: {
           ? {
               attempt: null,
               attemptDraft: null,
-              shellResult: null,
               error: null,
               notice: "Prompt accepted.",
               draft: current.draft === current.attemptDraft ? "" : current.draft,
@@ -599,7 +590,6 @@ export function makeThreadInteractions(options: {
       const skill = current.skill;
       update(registry, threadId, {
         draft,
-        shellResult: draft === current.draft ? current.shellResult : null,
         pastes: retainedPastes(draft, current.pastes),
         skill: skill && draft.startsWith(skill.prefix) ? skill : null,
       });
@@ -767,56 +757,9 @@ export function makeThreadInteractions(options: {
     send: async (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => {
       if (registry.get(state(threadId)).pending) return false;
       observe(registry, threadId);
-      let current = registry.get(state(threadId));
-      let thread = currentThread(registry, threadId);
+      const current = registry.get(state(threadId));
+      const thread = currentThread(registry, threadId);
       if (!thread) return false;
-      let messageText = expandPastes(current.draft, current.pastes);
-      if (messageText.startsWith("!")) {
-        const command = messageText.slice(1).trimStart();
-        if (!command.trim()) return error(registry, threadId, "Enter a shell command after !.");
-        if (current.attachments.length || current.attachmentPending)
-          return error(registry, threadId, "Remove attachments before running a shell command.");
-        if (command.length > 32_768)
-          return error(registry, threadId, "The shell command exceeds the terminal input limit.");
-        const { cwd } = providerContext(registry, thread);
-        if (!options.executeShell || !cwd)
-          return error(registry, threadId, "A shell is not available for this thread.");
-        if (current.shellResult?.draft === current.draft) {
-          messageText = current.shellResult.text;
-        } else {
-          update(registry, threadId, {
-            pending: "send",
-            error: null,
-            notice: "Running shell command...",
-          });
-          try {
-            const result = await options.executeShell(registry, { cwd, command });
-            messageText = shellCommandMessage(command, result, cwd);
-            update(registry, threadId, {
-              shellResult: { draft: current.draft, text: messageText },
-            });
-          } catch (cause) {
-            return error(
-              registry,
-              threadId,
-              cause instanceof Error ? cause.message : "Could not run the shell command.",
-            );
-          } finally {
-            update(registry, threadId, { pending: null });
-          }
-        }
-        // Keep the submitted draft but refresh queues and model state after execution.
-        current = {
-          ...registry.get(state(threadId)),
-          draft: current.draft,
-          pastes: current.pastes,
-          attachments: current.attachments,
-          skill: null,
-        };
-        thread = currentThread(registry, threadId);
-        if (!thread) return false;
-      }
-
       if (current.modelPending)
         return error(registry, threadId, "Waiting for the server's model update before sending.");
       if (current.attachmentPending)
@@ -838,6 +781,7 @@ export function makeThreadInteractions(options: {
       }
       if (!current.draft.trim() && current.attachments.length === 0)
         return error(registry, threadId, "Write a prompt or attach an image first.");
+      const messageText = expandPastes(current.draft, current.pastes);
       if (messageText.length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS)
         return error(registry, threadId, "The prompt exceeds the server's input limit.");
       const retry =
@@ -884,12 +828,11 @@ export function makeThreadInteractions(options: {
               attempted: false,
             },
           ],
-          ...(registry.get(state(threadId)).draft === current.draft
-            ? { draft: "", pastes: [], skill: null }
-            : {}),
+          draft: "",
+          pastes: [],
           attachments: [],
+          skill: null,
           error: null,
-          shellResult: null,
           notice: "Queued — sends after the next tool call or when the turn ends.",
         });
         return true;
@@ -903,7 +846,6 @@ export function makeThreadInteractions(options: {
       update(registry, threadId, {
         attempt: null,
         attemptDraft: null,
-        shellResult: null,
         notice: "Prompt accepted.",
         draft: latest.draft === current.draft ? "" : latest.draft,
         pastes: latest.draft === current.draft ? [] : latest.pastes,

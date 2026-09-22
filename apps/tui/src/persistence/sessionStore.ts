@@ -198,20 +198,8 @@ export function openTuiSessionState(options: {
     interactions,
     saveShell: ({ route, sidebarView, projectId, threadId }) =>
       save("shell", { route, sidebarView: sidebarView ?? "projects", projectId, threadId }),
-    saveInteraction: (
-      id,
-      { draft, pastes, attachments, skill, queue, attempt, attemptDraft, shellResult = null },
-    ) => {
-      const state = {
-        draft,
-        pastes,
-        attachments,
-        skill,
-        queue,
-        attempt,
-        attemptDraft,
-        shellResult,
-      };
+    saveInteraction: (id, { draft, pastes, attachments, skill, queue, attempt, attemptDraft }) => {
+      const state = { draft, pastes, attachments, skill, queue, attempt, attemptDraft };
       interactions.set(id, state);
       save(`interaction:${id}`, state);
     },

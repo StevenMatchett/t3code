@@ -13,9 +13,6 @@ const PromptCommand = ClientOrchestrationCommand.pipe(Schema.toTaggedUnion("type
   "thread.turn.start"
 ];
 export const SavedInteraction = Schema.Struct({
-  shellResult: Schema.optionalKey(
-    Schema.NullOr(Schema.Struct({ draft: Schema.String, text: Schema.String })),
-  ),
   draft: Schema.String,
   pastes: Schema.Array(
     Schema.Struct({ id: Schema.String, marker: Schema.String, text: Schema.String }),

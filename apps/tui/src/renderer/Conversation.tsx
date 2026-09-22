@@ -60,7 +60,6 @@ export function Conversation({
   const shell = useAtomValue(client.shell);
   const connection = useAtomValue(client.connection);
   const interaction = useAtomValue(client.actions.state(threadId));
-  const shellCommandDraft = interaction.draft.startsWith("!");
   const queued = interaction.queue[0];
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
@@ -223,11 +222,7 @@ export function Conversation({
           : [
               {
                 key: "Enter",
-                label: shellCommandDraft
-                  ? "Run shell"
-                  : thread?.latestTurn?.state === "running" || queued
-                    ? "Queue"
-                    : "Send",
+                label: thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send",
               },
               ...terminalHint,
               { key: "Shift+Enter", label: "New line" },
@@ -276,7 +271,6 @@ export function Conversation({
     agents.length,
     client.terminals,
     composerMenuOpen,
-    shellCommandDraft,
     mode,
     queued,
     selectedAgent,
@@ -765,9 +759,7 @@ export function Conversation({
           {requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
             ? "A: respond to requests"
             : interaction.pending
-              ? shellCommandDraft
-                ? "Running shell command..."
-                : "Sending command..."
+              ? "Sending command..."
               : queued?.status === "queued"
                 ? "Sends after next tool call / turn end"
                 : (interaction.notice ?? "T: tool details")}

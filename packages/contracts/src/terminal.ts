@@ -379,21 +379,3 @@ export const TerminalError = Schema.Union([
   TerminalResizeError,
 ]);
 export type TerminalError = typeof TerminalError.Type;
-
-/** Run a non-interactive shell command and return bounded output. */
-export const TerminalExecuteInput = Schema.Struct({
-  cwd: TrimmedNonEmptyStringSchema,
-  command: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(32_768)),
-});
-export const TerminalExecuteResult = Schema.Struct({
-  stdout: Schema.String,
-  stderr: Schema.String,
-  exitCode: Schema.NullOr(Schema.Int),
-  timedOut: Schema.Boolean,
-  truncated: Schema.Boolean,
-});
-export type TerminalExecuteResult = typeof TerminalExecuteResult.Type;
-export class TerminalExecuteError extends Schema.TaggedError<TerminalExecuteError>()(
-  "TerminalExecuteError",
-  { message: Schema.String },
-) {}

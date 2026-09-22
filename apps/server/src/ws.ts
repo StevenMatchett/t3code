@@ -1,5 +1,3 @@
-import { executeShellCommand } from "./terminal/executeShellCommand.ts";
-import * as ProcessRunner from "./processRunner.ts";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -3301,14 +3299,6 @@ const makeWsRpcLayer = (
             WS_METHODS.reviewGetDiffFileContents,
             review.getDiffFileContents(input),
             { "rpc.aggregate": "review" },
-          ),
-        [WS_METHODS.terminalExecute]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.terminalExecute,
-            executeShellCommand(input).pipe(Effect.provide(ProcessRunner.layer)),
-            {
-              "rpc.aggregate": "terminal",
-            },
           ),
         [WS_METHODS.terminalOpen]: (input) =>
           observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
