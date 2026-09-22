@@ -1,4 +1,4 @@
-import stringWidth from "string-width";
+import { wrapTerminalSpans } from "./textLayout.ts";
 import { normalizeTerminalText } from "../features/chat/terminalText.ts";
 import type { ThemeToken } from "./theme.ts";
 
@@ -36,7 +36,6 @@ function inline(text: string): MarkdownSpan[] {
 export function markdownLines(source: string, width: number): MarkdownLine[] {
   const columns = Math.max(1, width);
   const result: MarkdownLine[] = [];
-  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
   let fence: string | null = null;
   for (const raw of normalizeTerminalText(source).split("\n")) {
     const marker = /^\s{0,3}(`{3,}|~{3,})(.*)$/u.exec(raw);
@@ -67,36 +66,14 @@ export function markdownLines(source: string, width: number): MarkdownLine[] {
         : raw.replace(/^(\s*)[-*+]\s+/u, "$1• ").replace(/^\s*>\s?/u, "│ ");
     const spans = fence ? [{ text, code: true }] : inline(text);
     const tone: ThemeToken = heading ? "accent" : quote ? "muted" : "text";
-    let current: MarkdownSpan[] = [];
-    let used = 0;
-    const flush = () => {
+    for (const current of wrapTerminalSpans(spans, columns, !fence)) {
       result.push({
         text: current.map((span) => span.text).join(""),
         spans: current,
         tone,
         strong: !!heading,
       });
-      current = [];
-      used = 0;
-    };
-    for (const span of spans) {
-      for (const { segment } of segmenter.segment(span.text)) {
-        const size = stringWidth(segment);
-        if (used + size > columns && used > 0) flush();
-        const value = size > columns ? "?" : segment;
-        const previous = current.at(-1);
-        if (
-          previous &&
-          previous.bold === span.bold &&
-          previous.italic === span.italic &&
-          previous.code === span.code
-        )
-          current[current.length - 1] = { ...previous, text: previous.text + value };
-        else current.push({ ...span, text: value });
-        used += Math.min(size, columns);
-      }
     }
-    flush();
   }
   return result;
 }

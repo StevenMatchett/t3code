@@ -49,7 +49,7 @@ async function scenario(action, expectedCode) {
       ) {
         acted = true;
         if (action.startsWith("SIG")) child.kill(action);
-        else if (action === "CTRL_C") child.write("\x03");
+        else if (["CTRL_C", "CONFIRM_EXIT", "CLICK_EXIT"].includes(action)) child.write("\x03");
         else if (action === "SHIFT_ENTER") {
           // Emulate Enter's legacy encoding unless the app requests all keys.
           const flags = Number(requests.at(-1)?.[1] ?? 0);
@@ -62,6 +62,14 @@ async function scenario(action, expectedCode) {
       if (action === "CTRL_C" && !followedUp && output.includes("__TUI_CTRL_C__")) {
         followedUp = true;
         child.write("q");
+      }
+      if (
+        ["CONFIRM_EXIT", "CLICK_EXIT"].includes(action) &&
+        !followedUp &&
+        output.includes("Close T3 TUI?")
+      ) {
+        followedUp = true;
+        child.write(action === "CLICK_EXIT" ? "\x1b[<0;50;14M\x1b[<0;50;14m" : "y");
       }
     });
     child.onExit((event) => {
@@ -107,6 +115,8 @@ async function scenario(action, expectedCode) {
 }
 
 for (const [action, code] of [
+  ["CONFIRM_EXIT", 130],
+  ["CLICK_EXIT", 130],
   ["SHIFT_ENTER", 0],
   ["q", 0],
   ["CTRL_C", 0],
