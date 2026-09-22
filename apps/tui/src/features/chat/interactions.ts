@@ -20,6 +20,7 @@ import {
   type PendingUserInput,
 } from "@t3tools/client-runtime/pending-requests";
 import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+import type { ShellCommandInput } from "./shellCommands.ts";
 import { recallableComposerPrompt } from "./restoredPrompt.ts";
 import { checkpointRestoreTargets, waitForCheckpointRestore } from "./checkpointRestore.ts";
 import { completeSkillDraft, type SkillCompletion } from "./skillCompletion.ts";
@@ -110,6 +111,7 @@ export interface ThreadInteractionState {
   readonly notice: string | null;
   readonly attempt: PromptCommand | null;
   readonly attemptDraft: string | null;
+  readonly shellTerminalId: string | null;
   readonly replies: readonly ReplyReceipt[];
 }
 const initial: ThreadInteractionState = {
@@ -126,6 +128,7 @@ const initial: ThreadInteractionState = {
   attempt: null,
   attemptDraft: null,
   replies: [],
+  shellTerminalId: null,
 };
 
 export function approvalOptions(request: PendingApproval) {
@@ -176,6 +179,10 @@ function failureId(
 
 export function makeThreadInteractions(options: {
   readonly session?: TuiSessionState;
+  readonly executeShell?: (
+    registry: AtomRegistry.AtomRegistry,
+    input: ShellCommandInput,
+  ) => Promise<string>;
   readonly thread: (threadId: ThreadId) => Atom.Atom<EnvironmentThreadState>;
   readonly connection: Atom.Atom<SupervisorConnectionState>;
   readonly providers?: Atom.Atom<ProviderCatalog>;
@@ -760,6 +767,43 @@ export function makeThreadInteractions(options: {
       const current = registry.get(state(threadId));
       const thread = currentThread(registry, threadId);
       if (!thread) return false;
+      const messageText = expandPastes(current.draft, current.pastes);
+      if (messageText.startsWith("!")) {
+        const command = messageText.slice(1).trimStart();
+        if (!command.trim()) return error(registry, threadId, "Enter a shell command after !.");
+        if (current.attachments.length || current.attachmentPending)
+          return error(registry, threadId, "Remove attachments before running a shell command.");
+        if (command.length + 1 > 65_536)
+          return error(registry, threadId, "The shell command exceeds the terminal input limit.");
+        const { cwd } = providerContext(registry, thread);
+        if (!options.executeShell || !cwd)
+          return error(registry, threadId, "A shell is not available for this thread.");
+        update(registry, threadId, { pending: "send", error: null, notice: null });
+        try {
+          const terminalId = await options.executeShell(registry, {
+            threadId,
+            cwd,
+            worktreePath: thread.worktreePath,
+            command,
+          });
+          const latest = registry.get(state(threadId));
+          update(registry, threadId, {
+            shellTerminalId: terminalId,
+            ...(latest.draft === current.draft
+              ? { draft: "", pastes: [], skill: null, attempt: null, attemptDraft: null }
+              : {}),
+          });
+          return true;
+        } catch (cause) {
+          return error(
+            registry,
+            threadId,
+            cause instanceof Error ? cause.message : "Could not run the shell command.",
+          );
+        } finally {
+          update(registry, threadId, { pending: null });
+        }
+      }
       if (current.modelPending)
         return error(registry, threadId, "Waiting for the server's model update before sending.");
       if (current.attachmentPending)
@@ -781,7 +825,6 @@ export function makeThreadInteractions(options: {
       }
       if (!current.draft.trim() && current.attachments.length === 0)
         return error(registry, threadId, "Write a prompt or attach an image first.");
-      const messageText = expandPastes(current.draft, current.pastes);
       if (messageText.length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS)
         return error(registry, threadId, "The prompt exceeds the server's input limit.");
       const retry =

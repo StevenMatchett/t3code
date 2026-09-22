@@ -60,6 +60,7 @@ export function Conversation({
   const shell = useAtomValue(client.shell);
   const connection = useAtomValue(client.connection);
   const interaction = useAtomValue(client.actions.state(threadId));
+  const shellCommandDraft = interaction.draft.startsWith("!");
   const queued = interaction.queue[0];
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
@@ -76,6 +77,7 @@ export function Conversation({
   const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(
     savedView?.anchor ?? null,
   );
+  const [requestedTerminalId, setRequestedTerminalId] = useState<string | undefined>(undefined);
   const [terminalOpen, setTerminalOpen] = useState(savedView?.terminalOpen ?? false);
   const [showDetails, setShowDetails] = useState(savedView?.showDetails ?? false);
   const [expandedToolGroups, setExpandedToolGroups] = useState<ReadonlyMap<string, boolean>>(
@@ -222,7 +224,11 @@ export function Conversation({
           : [
               {
                 key: "Enter",
-                label: thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send",
+                label: shellCommandDraft
+                  ? "Run shell"
+                  : thread?.latestTurn?.state === "running" || queued
+                    ? "Queue"
+                    : "Send",
               },
               ...terminalHint,
               { key: "Shift+Enter", label: "New line" },
@@ -271,6 +277,7 @@ export function Conversation({
     agents.length,
     client.terminals,
     composerMenuOpen,
+    shellCommandDraft,
     mode,
     queued,
     selectedAgent,
@@ -590,6 +597,7 @@ export function Conversation({
     return (
       <ThreadTerminal
         client={client}
+        initialTerminalId={requestedTerminalId}
         environmentId={client.environmentId}
         threadId={threadId}
         cwd={terminalCwd}
@@ -597,7 +605,10 @@ export function Conversation({
         active={active}
         {...(onTerminalFocusChange ? { onFocusChange: onTerminalFocusChange } : {})}
         {...(onHintsChange ? { onHintsChange } : {})}
-        onBack={() => setTerminalOpen(false)}
+        onBack={() => {
+          setTerminalOpen(false);
+          setRequestedTerminalId(undefined);
+        }}
       />
     );
   if (mode === "requests")
@@ -783,7 +794,14 @@ export function Conversation({
         {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
         onSubmit={() => {
           setAnchor(null);
-          void client.actions.send(registry, threadId);
+          const previousTerminal = registry.get(client.actions.state(threadId)).shellTerminalId;
+          void client.actions.send(registry, threadId).then((sent) => {
+            const terminalId = registry.get(client.actions.state(threadId)).shellTerminalId;
+            if (sent && terminalId && terminalId !== previousTerminal) {
+              setRequestedTerminalId(terminalId);
+              setTerminalOpen(true);
+            }
+          });
         }}
         {...(thread?.latestTurn?.state === "running" || queued
           ? { onCancel: cancelTurn, cancelPending: interaction.pending === "stop" }

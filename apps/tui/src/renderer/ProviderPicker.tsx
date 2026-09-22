@@ -7,7 +7,10 @@ import * as Option from "effect/Option";
 import { useContext, useEffect, useRef, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { selectableSkills, selectionForModel } from "../features/chat/providerChoices.ts";
-import { completeSkillDraft, skillCompletionAt } from "../features/chat/skillCompletion.ts";
+import {
+  completeSkillDraft,
+  skillCompletionAt as promptSkillCompletionAt,
+} from "../features/chat/skillCompletion.ts";
 import {
   buildComposerPromptHistoryEntries,
   stepComposerPromptHistory,
@@ -20,6 +23,10 @@ import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { useThemeColor } from "../ui/context.tsx";
 import { PromptEditor, type PromptEditorControl, type PromptSnapshot } from "./PromptEditor.tsx";
+
+function skillCompletionAt(text: string, cursor: number) {
+  return text.startsWith("!") ? null : promptSkillCompletionAt(text, cursor);
+}
 
 export function ComposerControls({
   client,
@@ -401,11 +408,13 @@ export function ComposerControls({
     >
       <Panel
         title={
-          focused
-            ? "Message"
-            : interaction.draft
-              ? "Draft / Enter to edit"
-              : "Message / Enter to write"
+          interaction.draft.startsWith("!")
+            ? "Shell command"
+            : focused
+              ? "Message"
+              : interaction.draft
+                ? "Draft / Enter to edit"
+                : "Message / Enter to write"
         }
         width="100%"
         height={height}

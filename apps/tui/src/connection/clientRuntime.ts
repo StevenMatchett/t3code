@@ -1,3 +1,4 @@
+import { makeShellCommandRunner } from "../features/chat/shellCommands.ts";
 import {
   Connection,
   ConnectionBlockedError,
@@ -449,6 +450,7 @@ export function createTuiClient(
     tag: WS_METHODS.attachmentsCreateUploadUrl,
   });
   const actions = makeThreadInteractions({
+    executeShell: makeShellCommandRunner(terminals, environmentId),
     ...(session ? { session } : {}),
     prepareRestoredAttachments: async (registry, attachments) => {
       const restored: (UploadChatImageAttachment | ChatAttachment)[] = [];

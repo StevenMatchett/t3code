@@ -195,6 +195,10 @@ overwrite each other's drafts, queues, or view. On startup, the TUI restores the
 opened session that is no longer running, or starts fresh if every session is in use.
 Confirmation dialogs close on restart.
 
+Start a message with `!` to run a shell command, for example `!git status`. Enter runs it directly
+in a fresh terminal in the thread's worktree or project directory and opens the output. Shell
+commands bypass the agent and run immediately, even while an agent turn is active.
+
 To edit an earlier prompt, press `e` from conversation history or choose **Edit from checkpoint**
 in the command palette. Select the prompt, then choose **Revert and keep changes** to preserve
 workspace files or **Revert files too** to restore them. The selected prompt and attachments

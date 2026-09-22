@@ -45,6 +45,7 @@ export function ThreadTerminal({
   worktreePath,
   active,
   onBack,
+  initialTerminalId,
   onHintsChange,
   onFocusChange,
 }: {
@@ -55,6 +56,7 @@ export function ThreadTerminal({
   readonly worktreePath: string | null;
   readonly active: boolean;
   readonly onBack: () => void;
+  readonly initialTerminalId?: string | undefined;
   readonly onHintsChange?: (state: HotkeyState) => void;
   readonly onFocusChange?: (focused: boolean) => void;
 }) {
@@ -69,6 +71,7 @@ export function ThreadTerminal({
   const [savedView] = useState(() => client.session?.terminal(threadId));
   const [firstTerminalId] = useState(
     () =>
+      initialTerminalId ??
       savedView?.terminalId ??
       (discardedIds(client, threadId).has(DEFAULT_TERMINAL_ID)
         ? nextTerminalId(client, threadId, new Set(serverIds))
@@ -84,7 +87,7 @@ export function ThreadTerminal({
     [client, hiddenIds, localIds, serverIds, threadId],
   );
   const [terminalId, setTerminalId] = useState(firstTerminalId);
-  const [focused, setFocused] = useState(savedView?.focused ?? true);
+  const [focused, setFocused] = useState(initialTerminalId ? true : (savedView?.focused ?? true));
   useEffect(() => {
     client.session?.saveTerminal(threadId, { terminalId, focused });
   }, [client, threadId, terminalId, focused]);

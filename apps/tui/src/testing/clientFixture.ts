@@ -1,6 +1,8 @@
+import { makeShellCommandRunner } from "../features/chat/shellCommands.ts";
 import {
   DEFAULT_SERVER_SETTINGS,
   type ServerSettings,
+  type TerminalOpenInput,
   type ProjectCloneStartInput,
   type OrchestrationThreadSearchMatch,
   type VcsCreateWorktreeInput,
@@ -173,6 +175,8 @@ export function makeClientFixture(
   };
   const providers = Atom.make<ProviderCatalog>({ providers: [provider], status: "live" });
   const actions = makeThreadInteractions({
+    executeShell: (registry, input) =>
+      makeShellCommandRunner(terminals, EnvironmentId.make("renderer-fixture"))(registry, input),
     ...(session ? { session } : {}),
     connection,
     thread,
@@ -201,6 +205,7 @@ export function makeClientFixture(
   const creationCommands: CreateThreadCommand[] = [];
   const worktreeRequests: VcsCreateWorktreeInput[] = [];
   const terminalWrites: string[] = [];
+  const terminalOpenInputs: TerminalOpenInput[] = [];
   const terminalAttachInputs: Array<{
     readonly threadId: string;
     readonly terminalId: string;
@@ -221,6 +226,12 @@ export function makeClientFixture(
   );
   const terminalSuccess = { run: async () => AsyncResult.success(undefined) };
   const terminals = {
+    open: {
+      run: async (_registry: unknown, request: { input: TerminalOpenInput }) => {
+        terminalOpenInputs.push(request.input);
+        return AsyncResult.success(undefined);
+      },
+    },
     metadata: () => terminalMetadata,
     attach: (request: {
       readonly input: {
@@ -524,6 +535,7 @@ export function makeClientFixture(
     creationCommands,
     worktreeRequests,
     terminalWrites,
+    terminalOpenInputs,
     terminalAttachInputs,
     terminalBuffer,
     terminalCloseInputs,
