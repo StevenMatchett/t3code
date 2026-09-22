@@ -4,7 +4,6 @@ import { memo, useMemo } from "react";
 import {
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
-  resolveLockedWorkspaceLabel,
   type EnvMode,
 } from "./BranchToolbar.logic";
 import { useComposerMenuProps } from "./chat/composerEventScope";
@@ -15,7 +14,6 @@ import {
   SelectItem,
   SelectPopup,
   SelectTrigger,
-  SelectValue,
 } from "./ui/select";
 
 const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
@@ -38,6 +36,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   onUsePreviousWorktree,
 }: BranchToolbarEnvModeSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const workspaceLabel = `${activeWorktreePath || effectiveEnvMode === "worktree" ? "Worktree" : "Local"}:`;
   const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
   const envModeItems = useMemo(
     () => [
@@ -69,7 +68,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
             data-composer-label-motion
             className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
           >
-            {resolveLockedWorkspaceLabel(activeWorktreePath)}
+            {workspaceLabel}
           </span>
         </span>
       </span>
@@ -112,7 +111,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
             data-composer-label-motion
             className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
           >
-            <SelectValue />
+            {workspaceLabel}
           </span>
         </span>
       </SelectTrigger>
