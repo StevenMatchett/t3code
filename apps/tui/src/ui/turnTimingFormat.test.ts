@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { formatTurnDuration, turnTimingLabel } from "./turnTiming.ts";
+import { formatTurnDuration, turnTimingLabel } from "./turnTimingFormat.ts";
 
 const requestedAt = "2026-09-23T14:00:00.000Z";
 const startedAt = "2026-09-23T14:00:05.000Z";

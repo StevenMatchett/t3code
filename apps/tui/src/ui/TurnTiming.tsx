@@ -1,7 +1,7 @@
 import type { OrchestrationLatestTurn } from "@t3tools/contracts";
 import { useActivityClock, useLocalDay } from "./ThreadActivityIndicator.tsx";
 import { Text } from "./primitives.tsx";
-import { turnTimingLabel } from "./turnTiming.ts";
+import { turnTimingLabel } from "./turnTimingFormat.ts";
 
 function RunningTiming({
   turn,
