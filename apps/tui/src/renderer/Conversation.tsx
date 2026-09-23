@@ -306,7 +306,7 @@ export function Conversation({
     () => wrapTerminalWords(interaction.draft, Math.max(1, width - 5)).length,
     [interaction.draft, width],
   );
-  const editorHeight = Math.max(1, Math.min(editorLines, maxEditorHeight));
+  const editorHeight = Math.min(Math.max(3, editorLines), maxEditorHeight);
   const agentPanelHeight =
     agents.length > 0 ? (agentsExpanded ? Math.min(6, agents.length + 3) : 3) : 0;
   const gap = height >= 12 ? 1 : 0;
