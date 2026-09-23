@@ -4,9 +4,16 @@ export const SHELL_ROUTES = ["projects", "threads", "conversation"] as const;
 export type ShellRoute = (typeof SHELL_ROUTES)[number];
 export type ShellFocusTarget = "project-list" | "thread-list" | "conversation";
 export type ShellModal = "help" | "new-project" | "new-thread";
+export const SIDEBAR_VIEWS = ["projects", "recent", "archived"] as const;
+export type SidebarView = (typeof SIDEBAR_VIEWS)[number];
+export function nextSidebarView(view: SidebarView = "projects", offset = 1): SidebarView {
+  return SIDEBAR_VIEWS[
+    (SIDEBAR_VIEWS.indexOf(view) + offset + SIDEBAR_VIEWS.length) % SIDEBAR_VIEWS.length
+  ]!;
+}
 
 export interface ShellState {
-  readonly sidebarView?: "projects" | "recent";
+  readonly sidebarView?: SidebarView;
   readonly route: ShellRoute;
   readonly projectId: ProjectId | null;
   readonly threadId: ThreadId | null;
@@ -15,11 +22,15 @@ export interface ShellState {
 
 export interface ShellRows {
   readonly projects: ReadonlyArray<{ readonly id: ProjectId }>;
-  readonly threads: ReadonlyArray<{ readonly id: ThreadId; readonly projectId: ProjectId }>;
+  readonly threads: ReadonlyArray<{
+    readonly id: ThreadId;
+    readonly projectId: ProjectId;
+    readonly archivedAt?: string | null;
+  }>;
 }
 
 export type ShellCommand =
-  | { readonly type: "set-sidebar-view"; readonly view: "projects" | "recent" }
+  | { readonly type: "set-sidebar-view"; readonly view: SidebarView }
   | { readonly type: "toggle-sidebar-view" }
   | { readonly type: "move"; readonly offset: number; readonly wrap: boolean }
   | { readonly type: "activate" }
@@ -83,7 +94,13 @@ export function shellCommandFromKey(key: ShellKey): ShellCommand | undefined {
 }
 
 function reconcile(state: ShellState, rows: ShellRows): ShellState {
-  if (state.sidebarView === "recent") {
+  rows = {
+    ...rows,
+    threads: rows.threads.filter(
+      (thread) => Boolean(thread.archivedAt) === (state.sidebarView === "archived"),
+    ),
+  };
+  if (state.sidebarView === "recent" || state.sidebarView === "archived") {
     const threads = rows.threads.filter((thread) =>
       rows.projects.some((project) => project.id === thread.projectId),
     );
@@ -121,12 +138,12 @@ export function dispatchShellCommand(
 ): ShellState {
   const state = reconcile(previous, rows);
   if (command.type === "set-sidebar-view") {
-    if (state.modal || state.route === "conversation") return state;
+    if (state.modal) return state;
     return reconcile(
       {
         ...state,
         sidebarView: command.view,
-        route: command.view === "recent" ? "threads" : "projects",
+        route: command.view === "projects" ? "projects" : "threads",
         ...((state.sidebarView ?? "projects") !== command.view
           ? { projectId: null, threadId: null }
           : {}),
@@ -138,12 +155,14 @@ export function dispatchShellCommand(
     return reconcile(
       {
         ...state,
-        sidebarView: state.sidebarView === "recent" ? "projects" : "recent",
+        sidebarView: nextSidebarView(state.sidebarView),
         ...(state.route !== "conversation" ? { projectId: null, threadId: null } : {}),
         route:
-          state.route === "conversation"
+          state.route === "conversation" &&
+          state.sidebarView !== "recent" &&
+          state.sidebarView !== "archived"
             ? "conversation"
-            : state.sidebarView === "recent"
+            : state.sidebarView === "archived"
               ? "projects"
               : "threads",
       },
@@ -174,6 +193,7 @@ export function dispatchShellCommand(
     )
       ? {
           ...state,
+          ...(state.sidebarView === "archived" ? { sidebarView: "recent" as const } : {}),
           route: "conversation",
           projectId: command.projectId,
           threadId: command.threadId,
@@ -187,7 +207,9 @@ export function dispatchShellCommand(
       : state;
   if (command.type === "back")
     return state.route === "projects" ||
-      (state.sidebarView === "recent" && state.route === "threads")
+      (state.sidebarView !== undefined &&
+        state.sidebarView !== "projects" &&
+        state.route === "threads")
       ? state
       : { ...state, route: state.route === "conversation" ? "threads" : "projects" };
   if (command.type === "activate") {
@@ -198,11 +220,19 @@ export function dispatchShellCommand(
     return state;
   }
   if (state.route === "conversation") return state;
+  rows = {
+    ...rows,
+    threads: rows.threads.filter(
+      (thread) => Boolean(thread.archivedAt) === (state.sidebarView === "archived"),
+    ),
+  };
   const items =
     state.route === "projects"
       ? rows.projects
       : rows.threads.filter(
-          (thread) => state.sidebarView === "recent" || thread.projectId === state.projectId,
+          (thread) =>
+            (state.sidebarView ?? "projects") !== "projects" ||
+            thread.projectId === state.projectId,
         );
   if (items.length === 0) return state;
   const current = items.findIndex(
@@ -218,7 +248,8 @@ export function dispatchShellCommand(
       : reconcile({ ...state, projectId, threadId: null }, rows);
   }
   const selected = rows.threads.filter(
-    (thread) => state.sidebarView === "recent" || thread.projectId === state.projectId,
+    (thread) =>
+      (state.sidebarView ?? "projects") !== "projects" || thread.projectId === state.projectId,
   )[next]!;
   return selected.id === state.threadId
     ? state

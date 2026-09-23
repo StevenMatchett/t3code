@@ -48,13 +48,17 @@ describe("shell coordination", () => {
         threadId: t1,
       });
       const last = dispatchShellCommand(recent, { type: "move", offset: 2, wrap: false }, rows);
-      const projects = dispatchShellCommand(
+      const next = dispatchShellCommand(
         last,
         method === "toggle"
           ? { type: "toggle-sidebar-view" }
           : { type: "set-sidebar-view", view: "projects" },
         rows,
       );
+      const projects =
+        method === "toggle"
+          ? dispatchShellCommand(next, { type: "toggle-sidebar-view" }, rows)
+          : next;
       expect(projects).toMatchObject({
         sidebarView: "projects",
         route: "projects",
@@ -64,17 +68,16 @@ describe("shell coordination", () => {
     },
   );
 
-  it("navigates recent threads across projects and preserves the open thread when toggling", () => {
+  it("navigates recent threads across projects and switches to archives when cycling", () => {
     const recent = dispatchShellCommand(initial(), { type: "toggle-sidebar-view" }, rows);
     expect(recent.route).toBe("threads");
     const selected = dispatchShellCommand(recent, { type: "move", offset: 2, wrap: false }, rows);
     expect(selected).toMatchObject({ threadId: t3, projectId: p2 });
     const open = dispatchShellCommand(selected, { type: "activate" }, rows);
     expect(dispatchShellCommand(open, { type: "toggle-sidebar-view" }, rows)).toMatchObject({
-      route: "conversation",
-      threadId: t3,
-      projectId: p2,
-      sidebarView: "projects",
+      route: "threads",
+      threadId: null,
+      sidebarView: "archived",
     });
     const removed = dispatchShellCommand(
       open,
@@ -87,6 +90,28 @@ describe("shell coordination", () => {
       projectId: p1,
       sidebarView: "recent",
     });
+  });
+  it("isolates archived threads and resets selection when cycling all three views", () => {
+    const all = {
+      ...rows,
+      threads: [
+        ...rows.threads,
+        { id: ThreadId.make("old"), projectId: p2, archivedAt: "2026-01-01" },
+      ],
+    };
+    const archive = dispatchShellCommand(
+      initial(),
+      { type: "set-sidebar-view", view: "archived" },
+      all,
+    );
+    expect(archive).toMatchObject({ route: "threads", threadId: "old", projectId: p2 });
+    expect(
+      dispatchShellCommand(archive, { type: "move", offset: 1, wrap: true }, all).threadId,
+    ).toBe("old");
+    const projects = dispatchShellCommand(archive, { type: "toggle-sidebar-view" }, all);
+    expect(projects).toMatchObject({ sidebarView: "projects", projectId: p1, threadId: t1 });
+    const restored = dispatchShellCommand(archive, { type: "reconcile" }, rows);
+    expect(restored.threadId).toBeNull();
   });
   it("selects real project and thread IDs with arrows and Enter and preserves them on back", () => {
     const selected = dispatchShellCommand(

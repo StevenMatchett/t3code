@@ -12,7 +12,12 @@ import { Atom } from "effect/unstable/reactivity";
 import { useMemo, useContext, useEffect, useState, useCallback } from "react";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { AppShellView, useAppShellState } from "../app/AppShell.tsx";
-import { shellCommandFromKey, type ShellRoute, type ShellState } from "../app/state.ts";
+import {
+  nextSidebarView,
+  shellCommandFromKey,
+  type ShellRoute,
+  type ShellState,
+} from "../app/state.ts";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { Conversation } from "./Conversation.tsx";
 import { NewThreadForm } from "./NewThreadForm.tsx";
@@ -113,16 +118,18 @@ export function AppShell({
     };
   }, [copyNotice]);
   const snapshot = Option.getOrNull(shell.snapshot);
+  const archived = useAtomValue(client.archivedThreads);
   const rows = useMemo(
     () => ({
       projects: [...(snapshot?.projects ?? [])].sort(
         (a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id),
       ),
-      threads: [...(snapshot?.threads ?? [])]
-        .filter((thread) => thread.archivedAt === null)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)),
+      threads: [
+        ...(snapshot?.threads ?? []).filter((thread) => thread.archivedAt === null),
+        ...archived.threads,
+      ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)),
     }),
-    [snapshot],
+    [snapshot, archived.threads],
   );
   const saveShell = useCallback(
     (state: ShellState) => {
@@ -152,6 +159,9 @@ export function AppShell({
     | null
   >(null);
   const selectedThread = rows.threads.find((thread) => thread.id === state.threadId) ?? null;
+  useEffect(() => {
+    if (state.sidebarView === "archived") client.refreshArchivedThreads(registry);
+  }, [state.sidebarView, client, registry]);
   const openPullRequest = () => {
     if (!selectedThread) return;
     const cwd =
@@ -181,10 +191,7 @@ export function AppShell({
     const commands: PaletteEntry[] = [
       {
         id: "command:sidebar-view",
-        label:
-          state.sidebarView === "recent"
-            ? "Show projects in sidebar"
-            : "Show recent threads in sidebar",
+        label: `Show ${nextSidebarView(state.sidebarView)} in sidebar`,
         detail: "Command · Ctrl+B",
         keywords: "toggle view navigation",
         target: { type: "toggle-sidebar-view" },
@@ -260,22 +267,24 @@ export function AppShell({
         keywords: "workspace repository",
         target: { type: "project", projectId: project.id },
       })),
-      ...rows.threads.map((thread): PaletteEntry => {
-        const project = rows.projects.find((item) => item.id === thread.projectId);
-        const contentMatch = contentMatchByThreadId.get(thread.id);
-        const contentLabel = contentMatch
-          ? `${contentMatch.source === "user" ? "You" : "Assistant"}: ${searchExcerpt(contentMatch.snippet, paletteSearchQuery)}`
-          : null;
-        return {
-          id: `thread:${thread.id}`,
-          label: thread.title,
-          detail: contentLabel
-            ? `${contentLabel} · ${project?.title ?? "Unknown project"}`
-            : `Thread · ${project?.title ?? "Unknown project"}`,
-          keywords: `${thread.modelSelection.model} conversation ${contentMatch?.snippet ?? ""}`,
-          target: { type: "thread", projectId: thread.projectId, threadId: thread.id },
-        };
-      }),
+      ...rows.threads
+        .filter((thread) => !thread.archivedAt)
+        .map((thread): PaletteEntry => {
+          const project = rows.projects.find((item) => item.id === thread.projectId);
+          const contentMatch = contentMatchByThreadId.get(thread.id);
+          const contentLabel = contentMatch
+            ? `${contentMatch.source === "user" ? "You" : "Assistant"}: ${searchExcerpt(contentMatch.snippet, paletteSearchQuery)}`
+            : null;
+          return {
+            id: `thread:${thread.id}`,
+            label: thread.title,
+            detail: contentLabel
+              ? `${contentLabel} · ${project?.title ?? "Unknown project"}`
+              : `Thread · ${project?.title ?? "Unknown project"}`,
+            keywords: `${thread.modelSelection.model} conversation ${contentMatch?.snippet ?? ""}`,
+            target: { type: "thread", projectId: thread.projectId, threadId: thread.id },
+          };
+        }),
     ];
   }, [
     paletteSearchQuery,
@@ -310,7 +319,7 @@ export function AppShell({
         dispatch({ type: "new-thread" });
         break;
       case "archived":
-        setThreadOverlay({ type: "archived" });
+        dispatch({ type: "set-sidebar-view", view: "archived" });
         break;
       case "help":
         dispatch({ type: "toggle-help" });
@@ -360,7 +369,20 @@ export function AppShell({
       if (key.name === "left" || key.name === "right") {
         key.preventDefault();
         key.stopPropagation();
-        dispatch({ type: "set-sidebar-view", view: key.name === "left" ? "projects" : "recent" });
+        dispatch({
+          type: "set-sidebar-view",
+          view: nextSidebarView(state.sidebarView, key.name === "left" ? -1 : 1),
+        });
+        return;
+      }
+      if (
+        state.sidebarView === "archived" &&
+        selectedThread &&
+        (key.name === "return" || key.name === "enter")
+      ) {
+        key.preventDefault();
+        key.stopPropagation();
+        setThreadOverlay({ type: "manage", thread: selectedThread, returnToArchived: false });
         return;
       }
       if (key.name.toLowerCase() === "d" && selectedThread) {
@@ -384,7 +406,7 @@ export function AppShell({
       if (key.name.toLowerCase() === "a" && key.shift) {
         key.preventDefault();
         key.stopPropagation();
-        setThreadOverlay({ type: "archived" });
+        dispatch({ type: "set-sidebar-view", view: "archived" });
         return;
       }
     }
@@ -400,7 +422,8 @@ export function AppShell({
     if (!state.modal && key.name === "r") {
       key.preventDefault();
       key.stopPropagation();
-      void client.retry(registry);
+      if (state.sidebarView === "archived") client.refreshArchivedThreads(registry);
+      else void client.retry(registry);
       return;
     }
     const command = shellCommandFromKey(key);
@@ -440,7 +463,10 @@ export function AppShell({
         label={client.label}
         status={status}
         projects={rows.projects}
-        threads={rows.threads}
+        threads={rows.threads.filter(
+          (thread) => Boolean(thread.archivedAt) === (state.sidebarView === "archived"),
+        )}
+        archivedStatus={archived.status}
         loaded={snapshot !== null}
         error={Option.isSome(shell.error) || connection.phase === "blocked"}
         width={width}
@@ -588,7 +614,7 @@ export function AppShell({
                         }
                       : null
         }
-        onOpenArchived={() => setThreadOverlay({ type: "archived" })}
+        onOpenArchived={() => dispatch({ type: "set-sidebar-view", view: "archived" })}
         onOpenPalette={openPalette}
         {...(selectedThread
           ? {
@@ -601,9 +627,12 @@ export function AppShell({
             }
           : {})}
         onOpenProject={(projectId) => dispatch({ type: "open-project", projectId })}
-        onOpenThread={(projectId, threadId) =>
-          dispatch({ type: "open-thread", projectId, threadId })
-        }
+        onOpenThread={(projectId, threadId) => {
+          const thread = rows.threads.find((item) => item.id === threadId);
+          if (thread?.archivedAt)
+            setThreadOverlay({ type: "manage", thread, returnToArchived: false });
+          else dispatch({ type: "open-thread", projectId, threadId });
+        }}
         onNewProject={() => dispatch({ type: "new-project" })}
         onNewThread={() => dispatch({ type: "new-thread" })}
         modalContent={

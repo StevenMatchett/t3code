@@ -34,6 +34,7 @@ export interface AppShellViewProps {
   readonly status: string;
   readonly projects: readonly OrchestrationProjectShell[];
   readonly threads: readonly OrchestrationThreadShell[];
+  readonly archivedStatus?: "loading" | "live" | "error";
   readonly loaded: boolean;
   readonly error: boolean;
   readonly width: number;
@@ -173,7 +174,7 @@ function Help() {
       <Text>Up/Down or Tab Select Enter Open</Text>
       <Text>Left Projects Right Recent threads (sidebar)</Text>
       <Text>Esc Back R Reconnect</Text>
-      <Text>Ctrl+B Toggle project / recent-thread sidebar</Text>
+      <Text>Ctrl+B Cycle Projects / Recent / Archived sidebar</Text>
       <Text>Ctrl+K Search conversation output, projects, threads, and commands</Text>
       <Text tone="accent">CONVERSATION</Text>
       <Text>Enter / i Write prompt Esc Return to history</Text>
@@ -206,6 +207,7 @@ export function AppShellView({
   status,
   projects,
   threads,
+  archivedStatus,
   loaded,
   error,
   width,
@@ -227,7 +229,8 @@ export function AppShellView({
   const layout = calculateShellLayout(width, height);
   const background = useThemeColor("panel");
   const project = projects.find((item) => item.id === state.projectId);
-  const recent = state.sidebarView === "recent";
+  const archived = state.sidebarView === "archived";
+  const recent = state.sidebarView === "recent" || archived;
   const projectThreads = threads.filter((item) => item.projectId === state.projectId);
   const selectedThread = projectThreads.find((item) => item.id === state.threadId);
   const browsingProjects = !recent && state.route === "projects";
@@ -244,21 +247,29 @@ export function AppShellView({
         { key: "Ctrl+K", label: "Search" },
         { key: "?", label: "Help" },
       ]
-    : [
-        { key: "↑↓", label: "Select" },
-        { key: "Enter", label: "Open" },
-        { key: "←/→", label: "View" },
-        { key: "Ctrl+B", label: "Toggle view" },
-        { key: "N", label: "New thread" },
-        { key: "M", label: "Manage" },
-        { key: "D", label: "Diff" },
-        { key: "O", label: "Open PR" },
-        { key: "⇧A", label: "Archived" },
-        { key: "Ctrl+K", label: "Search" },
-        { key: "Esc", label: "Projects" },
-      ];
+    : archived
+      ? [
+          { key: "↑↓", label: "Select" },
+          { key: "Enter", label: "Manage / restore" },
+          { key: "←/→", label: "View" },
+          { key: "Ctrl+B", label: "Cycle view" },
+          { key: "R", label: "Refresh" },
+        ]
+      : [
+          { key: "↑↓", label: "Select" },
+          { key: "Enter", label: "Open" },
+          { key: "←/→", label: "View" },
+          { key: "Ctrl+B", label: "Toggle view" },
+          { key: "N", label: "New thread" },
+          { key: "M", label: "Manage" },
+          { key: "D", label: "Diff" },
+          { key: "O", label: "Open PR" },
+          { key: "⇧A", label: "Archived" },
+          { key: "Ctrl+K", label: "Search" },
+          { key: "Esc", label: "Projects" },
+        ];
   const title = recent
-    ? `Recent threads (${threads.length})`
+    ? `${archived ? "Archived" : "Recent"} threads (${threads.length})`
     : browsingProjects
       ? `Projects (${projects.length})`
       : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
@@ -299,15 +310,21 @@ export function AppShellView({
             }
           : {}),
       }));
-  const empty = error
-    ? "Connection unavailable. R retries."
-    : !loaded
-      ? "Loading your workspace..."
-      : browsingProjects
-        ? "No projects in this environment."
-        : recent
-          ? "No active threads in this environment."
-          : "No active threads in this project.";
+  const empty = archived
+    ? archivedStatus === "loading"
+      ? "Loading archived threads..."
+      : archivedStatus === "error"
+        ? "Could not load archives. R retries."
+        : "No archived threads."
+    : error
+      ? "Connection unavailable. R retries."
+      : !loaded
+        ? "Loading your workspace..."
+        : browsingProjects
+          ? "No projects in this environment."
+          : recent
+            ? "No active threads in this environment."
+            : "No active threads in this project.";
   const navigation = (
     <Stack flexDirection="column" height="100%" gap={1}>
       <Text
@@ -323,7 +340,11 @@ export function AppShellView({
           onToggleSidebarView?.();
         }}
       >
-        {recent ? "← Projects [Recent] →" : "← [Projects] Recent →"}
+        {archived
+          ? "Projects Recent [Archived]"
+          : recent
+            ? "Projects [Recent] Archived"
+            : "[Projects] Recent Archived"}
       </Text>
       <List
         items={items}
@@ -347,9 +368,11 @@ export function AppShellView({
           ? "Enter to browse threads"
           : conversation
             ? "Esc to browse threads"
-            : recent
-              ? "Ctrl+B to projects"
-              : "Esc to projects"}
+            : archived
+              ? "Enter to manage / restore"
+              : recent
+                ? "Ctrl+B to archived"
+                : "Esc to projects"}
       </Text>
     </Stack>
   );

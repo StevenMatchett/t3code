@@ -547,5 +547,6 @@ export function makeClientFixture(
     projectCloneRequests,
     managementCommands,
     archivedRows,
+    archivedThreads,
   };
 }

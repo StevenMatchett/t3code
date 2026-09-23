@@ -56,6 +56,19 @@ function open(
 }
 
 describe("TUI session persistence", () => {
+  it("remembers the archived sidebar view", () => {
+    const path = directory();
+    const first = open(path);
+    first.session.saveShell({
+      route: "threads",
+      sidebarView: "archived",
+      projectId: null,
+      threadId: null,
+      modal: null,
+    });
+    first.session.close();
+    expect(open(path).session.shell?.sidebarView).toBe("archived");
+  });
   it("restores navigation, folded pastes and attachments in a fresh client", async () => {
     const path = directory();
     const first = open(path);

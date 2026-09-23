@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import { CliRenderEvents, type Selection } from "@opentui/core";
 import { MouseButtons } from "@opentui/core/testing";
 import { EMPTY_TERMINAL_BUFFER_STATE } from "@t3tools/client-runtime/state/terminal";
-import { CheckpointRef, TurnId, type OrchestrationThreadActivity } from "@t3tools/contracts";
+import {
+  CheckpointRef,
+  ThreadId,
+  TurnId,
+  type OrchestrationThreadActivity,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { act } from "react";
@@ -55,6 +60,30 @@ const describeWithNativeFfi = runtime.process?.getBuiltinModule?.("node:ffi")
   : describe.skip;
 
 describeWithNativeFfi("connected AppShell", () => {
+  it("shows archived sidebar rows with project context and opens management by mouse", async () => {
+    const { driver, fixture } = await renderShell({ width: 120, height: 32 });
+    const archived = {
+      ...fixture.threads[0]!,
+      id: ThreadId.make("archived-one"),
+      title: "Old work",
+      archivedAt: "2026-01-01T00:00:00Z",
+    };
+    await act(async () =>
+      driver.registry.set(fixture.archivedThreads, { status: "live", threads: [archived] }),
+    );
+    await driver.input.pressKey("ARROW_RIGHT");
+    await driver.input.pressKey("ARROW_RIGHT");
+    expect(driver.captureFrame()).toContain("Projects Recent [Archived]");
+    expect(driver.captureFrame()).toContain("Archived threads (1)");
+    const row = driver.renderer.root.findDescendantById("navigation-archived-one")!;
+    expect(driver.captureRawFrame().split("\n")[row.screenY + 1]).toContain("Alpha");
+    await driver.mouse.click(row.screenX + 1, row.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    expect(driver.captureFrame()).toContain("Manage archived thread");
+    expect(driver.captureFrame()).toContain("Restore thread");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("Archived threads (1)");
+  });
+
   it.each([44, 120])(
     "switches sidebar views with Left/Right at width %i without intercepting editor arrows",
     async (width) => {
@@ -62,6 +91,8 @@ describeWithNativeFfi("connected AppShell", () => {
       await driver.input.pressKey("ARROW_RIGHT");
       expect(driver.captureFrame()).toContain("Recent threads (3)");
       await driver.input.pressKey("ARROW_RIGHT");
+      expect(driver.captureFrame()).toContain("Archived threads (0)");
+      await driver.input.pressKey("ARROW_LEFT");
       expect(driver.captureFrame()).toContain("Recent threads (3)");
       await driver.input.pressKey("ARROW_LEFT");
       expect(driver.captureFrame()).toContain("Projects (2)");
@@ -104,8 +135,8 @@ describeWithNativeFfi("connected AppShell", () => {
     expect(driver.captureFrame()).toContain("reply-2");
     const toggle = driver.renderer.root.findDescendantById("sidebar-view-toggle")!;
     await driver.mouse.click(toggle.screenX + 1, toggle.screenY, MouseButtons.LEFT, { delayMs: 0 });
-    expect(driver.captureFrame()).toContain("Threads (1) - Beta");
-    expect(driver.captureFrame()).toContain("reply-2");
+    expect(driver.captureFrame()).toContain("Archived threads (0)");
+    await driver.input.pressKey("b", { ctrl: true });
     await driver.input.pressKey("b", { ctrl: true });
     await driver.resize(44, 22);
     await driver.input.pressKey("ESCAPE");
@@ -134,6 +165,10 @@ describeWithNativeFfi("connected AppShell", () => {
       await driver.input.pressKey("ARROW_DOWN");
       await driver.input.pressKey("ARROW_DOWN");
       await switchView("ARROW_LEFT");
+      if (method !== "arrows") {
+        expect(driver.captureFrame()).toContain("Archived threads (0)");
+        await switchView("ARROW_LEFT");
+      }
       await driver.input.pressKey("RETURN");
       expect(driver.captureFrame()).toContain("Threads (2) - Alpha");
     },
@@ -422,7 +457,7 @@ describeWithNativeFfi("connected AppShell", () => {
       type: "thread.unarchive",
     });
     expect(driver.captureFrame()).toContain("No archived threads");
-    await driver.input.pressKey("ESCAPE");
+    await driver.input.pressKey("ARROW_LEFT");
 
     await driver.input.pressKey("ARROW_DOWN");
     await driver.input.pressKey("m");

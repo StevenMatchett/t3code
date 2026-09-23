@@ -46,7 +46,7 @@ export const SavedInteraction = Schema.Struct({
 export type SavedInteraction = typeof SavedInteraction.Type;
 export const SavedShell = Schema.Struct({
   route: Schema.Literals(["projects", "threads", "conversation"]),
-  sidebarView: Schema.optionalKey(Schema.Literals(["projects", "recent"])),
+  sidebarView: Schema.optionalKey(Schema.Literals(["projects", "recent", "archived"])),
   projectId: Schema.NullOr(ProjectId),
   threadId: Schema.NullOr(ThreadId),
 });
