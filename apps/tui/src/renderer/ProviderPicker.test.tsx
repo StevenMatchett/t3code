@@ -52,8 +52,8 @@ describe("composer dropdowns and slash skills", () => {
       runtimeMode: "approval-required",
     });
     expect(fixture.commands).toHaveLength(0);
-    expect(driver.captureFrame()).toContain("Plan v");
-    expect(driver.captureFrame()).toContain("Supervised v");
+    expect(driver.captureFrame()).toContain("Plan ▾");
+    expect(driver.captureFrame()).toContain("Supervised ▾");
     await driver.input.pressKey("RETURN");
     expect(fixture.commands.at(-1)).toMatchObject({
       type: "thread.turn.start",
