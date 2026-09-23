@@ -59,6 +59,37 @@ async function request(
 }
 
 describe("conversation interaction", () => {
+  it("shows only Local or Worktree immediately before Changes above the composer", async () => {
+    const { driver, fixture } = await setup();
+    const statusRow = () =>
+      driver
+        .captureRawFrame()
+        .split("\n")
+        .find((line) => line.includes("[D Changes]"));
+    expect(statusRow()).toContain("Local  [D Changes]");
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({ ...fixture.details[0]!, worktreePath: "/tmp/wt" }),
+      }),
+    );
+    await driver.flush();
+    expect(statusRow()).toContain("Worktree  [D Changes]");
+    expect(driver.captureRawFrame()).not.toContain("/tmp/wt");
+    expect(statusRow()).not.toContain("Local");
+    expect(
+      driver
+        .captureRawFrame()
+        .split("\n")
+        .filter((line) => line.includes("Worktree")),
+    ).toHaveLength(1);
+    const label = driver.renderer.root.findDescendantById("thread-workspace-label")!;
+    const changes = driver.renderer.root.findDescendantById("thread-diff-action")!;
+    expect(label.screenY).toBe(changes.screenY);
+    expect(label.screenX).toBeLessThan(changes.screenX);
+    expect(label.height).toBe(1);
+  });
+
   it("expands grouped tools by mouse and toggles all details with T", async () => {
     const { driver, fixture } = await setup();
     const activities: OrchestrationThreadActivity[] = ["first", "second", "third"].map((name) => ({

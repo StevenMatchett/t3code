@@ -1,5 +1,8 @@
 # T3 Code TUI fork
 
+<!-- Checkpoint test: restore this edit to verify checkpoint recovery. -->
+<!-- Checkpoint test 2: a second edit to verify another restore point. -->
+
 > [!IMPORTANT]
 > This repository is an experimental, unaffiliated TUI-focused fork of
 > [T3 Code](https://github.com/pingdotgg/t3code). The working name and assets are temporary.

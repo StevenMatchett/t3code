@@ -4,6 +4,7 @@ import * as Encoding from "effect/Encoding";
 import { twMerge } from "tailwind-merge";
 import { DraftId } from "../composerDraftStore";
 
+// Resolve conflicting Tailwind classes after combining conditional inputs.
 export function cn(...inputs: CxOptions) {
   return twMerge(cx(inputs));
 }
@@ -16,6 +17,7 @@ export function isWindowsPlatform(platform: string): boolean {
   return /^win(dows)?/i.test(platform);
 }
 
+// Ignore accents, case, and extra whitespace when comparing search text.
 export function normalizeSearchText(value: string): string {
   return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
 }

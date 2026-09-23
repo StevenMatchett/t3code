@@ -322,7 +322,6 @@ export function Conversation({
             gap -
             (interaction.error ? 1 : 0) -
             (queued ? 2 : 0) -
-            (thread?.worktreePath ? 1 : 0) -
             3,
         ),
       )
@@ -337,8 +336,7 @@ export function Conversation({
       questionHeight -
       (search ? 1 : 0) -
       (interaction.error ? 1 : 0) -
-      (queued ? 2 : 0) -
-      (thread?.worktreePath ? 1 : 0),
+      (queued ? 2 : 0),
   );
   const timeline = useMemo(
     () => (thread === null ? [] : projectRecordedThreadTimeline(thread)),
@@ -621,15 +619,6 @@ export function Conversation({
     );
   return (
     <Stack position="relative" flexDirection="column" width="100%" height="100%" overflow="hidden">
-      {thread?.worktreePath ? (
-        <Text
-          height={1}
-          flexShrink={0}
-          tone="accent"
-          wrapMode="none"
-          truncate
-        >{`Worktree: ${inlineTerminalText(thread.worktreePath)}`}</Text>
-      ) : null}
       <Stack
         id="conversation-history"
         flexGrow={1}
@@ -740,6 +729,10 @@ export function Conversation({
         </Stack>
       ) : null}
       <Stack id="conversation-activity" height={1} flexShrink={0} flexDirection="row">
+        <Text id="thread-workspace-label" tone="accent" height={1} flexShrink={0} wrapMode="none">
+          {thread?.worktreePath ? "Worktree" : "Local"}
+          {"  "}
+        </Text>
         <Text
           id="thread-diff-action"
           tone="accent"
@@ -765,6 +758,7 @@ export function Conversation({
                 : (interaction.notice ?? "T: tool details")}
         </Text>
         <Text tone="muted" flexShrink={0}>
+          {"  "}
           {anchor !== null ? "History / End: live" : ""}
         </Text>
       </Stack>
