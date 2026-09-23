@@ -287,21 +287,50 @@ for (const scenario of ["complete", "interrupt", "approval", "question", "choice
             Effect.timeout("15 seconds"),
           );
           const provider = catalogs[0].providers.find((item) => item.instanceId === "codex");
+          // Warm the workspace cache, then simulate a model catalog changing upstream.
+          NodeAssert.equal(
+            yield* Effect.promise(() => client.refreshProvider(registry, threadId, false)),
+            true,
+          );
+          yield* Effect.promise(async () => {
+            const scriptPath = NodePath.join(fixture.root, "peer", "script.json");
+            const script = JSON.parse(await NodeFSP.readFile(scriptPath, "utf8"));
+            script.models[0] = {
+              ...script.models[0],
+              id: "fixture-model-c",
+              model: "fixture-model-c",
+              displayName: "Fixture Model C",
+            };
+            await NodeFSP.writeFile(scriptPath, JSON.stringify(script));
+          });
           NodeAssert.equal(
             yield* Effect.promise(() => client.refreshProvider(registry, threadId, true)),
             true,
+          );
+          yield* AtomRegistry.toStream(registry, client.providers).pipe(
+            Stream.filter((value) =>
+              value.providers.some(
+                (item) =>
+                  item.instanceId === provider.instanceId &&
+                  item.models.some((model) => model.slug === "fixture-model-c") &&
+                  !item.models.some((model) => model.slug === "fixture-model-b"),
+              ),
+            ),
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.timeout("15 seconds"),
           );
           NodeAssert.equal(
             yield* Effect.promise(() =>
               client.actions.changeModel(registry, threadId, {
                 instanceId: provider.instanceId,
-                model: "fixture-model-b",
+                model: "fixture-model-c",
                 options: [{ id: "reasoningEffort", value: "high" }],
               }),
             ),
             true,
           );
-          yield* waitFor((thread) => thread.modelSelection.model === "fixture-model-b");
+          yield* waitFor((thread) => thread.modelSelection.model === "fixture-model-c");
           client.actions.observe(registry, threadId);
           NodeAssert.equal(
             client.actions.selectSkill(registry, threadId, provider.skills[0]),
@@ -380,7 +409,7 @@ for (const scenario of ["complete", "interrupt", "approval", "question", "choice
               NodeFSP.readFile(NodePath.join(fixture.root, "peer/script.json.turns"), "utf8"),
             )).trim(),
           );
-          NodeAssert.equal(turn.model, "fixture-model-b");
+          NodeAssert.equal(turn.model, "fixture-model-c");
           NodeAssert.equal(turn.effort, "high");
           NodeAssert.ok(
             turn.input.some((item) => item.type === "text" && item.text.includes(expectedPrompt)),

@@ -603,7 +603,9 @@ export function createTuiClient(
           environmentId,
           input: {
             instanceId: value.modelSelection.instanceId,
-            ...(cwd ? { cwd } : {}),
+            // Workspace refreshes only populate skills and may reuse cached models.
+            // Omit cwd for the model picker to force an instance-level probe.
+            ...(!models && cwd ? { cwd } : {}),
             refreshModels: models,
           },
         }),
