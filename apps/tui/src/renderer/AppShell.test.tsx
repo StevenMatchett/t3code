@@ -384,7 +384,7 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.input.pressKey("RETURN");
     expect(driver.captureFrame()).toContain("CONVERSATION");
     expect(driver.captureFrame()).toContain("Write");
-    expect(driver.captureFrame()).toContain("Scroll");
+    expect(driver.captureFrame()).toContain("Yank");
 
     await driver.input.pressKey("i");
     expect(driver.captureFrame()).toContain("MESSAGE");
@@ -726,7 +726,7 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.input.pressKey("TAB");
     expect(driver.captureFrame()).toContain("Enter selects");
     await driver.input.pressKey("TAB", { shift: true });
-    expect(driver.captureFrame()).toContain("Tab/G focus");
+    expect(driver.captureFrame()).toContain("Tab focus");
     await driver.input.pressKey("TAB");
     await driver.input.pressKey("ARROW_DOWN");
     await driver.input.pressKey("ARROW_DOWN");
@@ -740,7 +740,7 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.input.pressKey("TAB");
     expect(driver.captureFrame()).toContain("Enter selects");
     await driver.input.pressKey("ESCAPE");
-    expect(driver.captureFrame()).toContain("Tab/G focus");
+    expect(driver.captureFrame()).toContain("Tab focus");
   });
 
   it("cancels a running prompt from the composer controls", async () => {

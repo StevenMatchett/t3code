@@ -196,6 +196,9 @@ function Help() {
       <Text>Click model/reasoning or Tab then Enter</Text>
       <Text>/ Find in thread · In message box: search skills</Text>
       <Text>Mouse wheel / Up/Down / PgUp/PgDn Scroll End Follow latest</Text>
+      <Text>hjkl Move · w/b Words · 0/$ Line edges · gg/G First/last</Text>
+      <Text>v/V Visual/line selection · y/yy Yank · p Paste into prompt</Text>
+      <Text>Esc Clear selection/back · Ctrl+U/D Half page · Tab Agents</Text>
       <Text>A Requests T Tool detail Ctrl+X Stop turn</Text>
       <Text>E Edit from checkpoint: rewind chat, optionally revert files</Text>
       <Text>Ctrl+T Open thread shell Ctrl+\ Release shell focus</Text>

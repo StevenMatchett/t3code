@@ -189,6 +189,15 @@ The composer stays visible, with its border indicating when it owns keyboard inp
 activity is collapsed by default; press `t` from history to expand it. Errors and pending requests
 remain visible.
 
+In conversation and agent output, use `h/j/k/l` to move, `w/b` for words, `0/$` for line
+edges, and `gg/G` for the first/last loaded line. `Ctrl+U/D` moves half a page. Press `v`
+for character selection or `V` for whole-line selection, move to extend the highlight, then
+press `y` to yank. Without a selection, `y` or `yy` copies the current displayed line.
+Yanks go to your terminal clipboard when supported; `p` pastes the last yank into the
+message draft even when clipboard access is unavailable. Your terminal's usual paste shortcut
+also works in the composer. The cursor appears whenever output has focus. `Esc` clears a
+selection; press it again to leave output. `End` resumes live output. Use `Tab` to focus agents.
+
 The TUI remembers the selected project and thread, sidebar view, conversation scroll position,
 composer focus, tool detail visibility, and terminal tab. Reopening it reconnects to the same
 environment and restores that view, including after the TUI process is killed. State is stored

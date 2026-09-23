@@ -18,24 +18,41 @@ const themeKey: Record<Exclude<ShellTokenKind, "plain">, ThemeToken> = {
 export function ConversationText({
   line,
   search = "",
+  selection,
   onToggleToolGroup,
 }: {
   readonly line: ConversationLine;
   readonly search?: string;
+  readonly selection?:
+    | { readonly start: number; readonly end: number; readonly cursor?: boolean }
+    | undefined;
   readonly onToggleToolGroup?: (id: string) => void;
 }) {
   const { capabilities, theme } = useUi();
-  const matches = textMatches(line.text, search);
+  const matches = selection ? [selection] : textMatches(line.text, search);
   const highlight = (text: string, start: number) => {
     const parts = [];
     let cursor = 0;
     for (const match of matches) {
       const from = Math.max(0, match.start - start);
-      const to = Math.min(text.length, match.end - start);
+      const to = Math.min(text.length, Math.max(match.start + 1, match.end) - start);
       if (from >= to) continue;
       parts.push(text.slice(cursor, from));
       parts.push(
-        <span key={from} attributes={TextAttributes.INVERSE | TextAttributes.BOLD}>
+        <span
+          key={from}
+          attributes={
+            selection && capabilities.color
+              ? TextAttributes.BOLD
+              : TextAttributes.INVERSE | TextAttributes.BOLD
+          }
+          {...(selection && capabilities.color
+            ? {
+                fg: theme.panel,
+                bg: selection.cursor ? theme.text : theme.accent,
+              }
+            : {})}
+        >
           {text.slice(from, to)}
         </span>,
       );
@@ -67,7 +84,7 @@ export function ConversationText({
         strong={line.strong}
         {...(line.highlight && !capabilities.color ? { attributes: TextAttributes.INVERSE } : {})}
       >
-        {line.spans
+        {line.spans?.length
           ? line.spans.map((span) => {
               const key = String(offset);
               offset += span.text.length;
@@ -97,7 +114,7 @@ export function ConversationText({
                   </span>
                 );
               })
-            : highlight(line.text, 0)}
+            : highlight(line.text || (selection ? " " : ""), 0)}
       </Text>
     </Stack>
   );

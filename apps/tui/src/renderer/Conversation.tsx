@@ -22,6 +22,7 @@ import { textMatches } from "../ui/textSearch.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
 import { inlineTerminalText, wrapTerminalWords } from "../ui/textLayout.ts";
+import { useOutputVim } from "./useOutputVim.ts";
 import { ThreadTerminal } from "./ThreadTerminal.tsx";
 import type { HotkeyHint, HotkeyState } from "../ui/HotkeyBar.tsx";
 
@@ -187,7 +188,10 @@ export function Conversation({
     const terminalHint = client.terminals ? [{ key: "Ctrl+T", label: "Terminal" }] : [];
     if (selectedAgent)
       return [
-        { key: "↑↓", label: "Scroll" },
+        { key: "hjkl", label: "Move" },
+        { key: "v/V", label: "Select" },
+        { key: "y/yy", label: "Yank" },
+        { key: "p", label: "Paste" },
         { key: "PgUp/Dn", label: "Page" },
         { key: "Home/End", label: "Jump" },
         { key: "Ctrl+K", label: "Search" },
@@ -255,7 +259,10 @@ export function Conversation({
     return [
       { key: "Enter", label: "Write" },
       ...terminalHint,
-      { key: "↑↓", label: "Scroll" },
+      { key: "hjkl", label: "Move" },
+      { key: "v/V", label: "Select" },
+      { key: "y/yy", label: "Yank" },
+      { key: "p", label: "Paste" },
       { key: "/", label: "Find text" },
       { key: "A", label: "Requests" },
       ...(agents.length ? [{ key: "Tab", label: "Agents" }] : []),
@@ -390,6 +397,45 @@ export function Conversation({
     const line = lines[target];
     setAnchor(target === maxStart || line === undefined ? null : { id: line.id, line: line.line });
   };
+  const vim = useOutputVim({
+    lines,
+    start,
+    count,
+    scrollTo: (next) => {
+      const line = lines[Math.max(0, Math.min(maxStart, next))];
+      setAnchor(line ? { id: line.id, line: line.line } : null);
+    },
+    onPaste: (text) => {
+      if (!client.actions.addPaste(registry, threadId, text)) {
+        client.actions.setDraft(
+          registry,
+          threadId,
+          registry.get(client.actions.state(threadId)).draft + text,
+        );
+      }
+      activateComposer();
+    },
+  });
+  const agentVim = useOutputVim({
+    lines: selectedAgentLines,
+    start: Math.max(
+      0,
+      Math.min(agentOutputStart, selectedAgentLines.length - Math.max(1, height - 4)),
+    ),
+    count: Math.max(1, height - 4),
+    scrollTo: setAgentOutputStart,
+    onPaste: (text) => {
+      if (!client.actions.addPaste(registry, threadId, text)) {
+        client.actions.setDraft(
+          registry,
+          threadId,
+          registry.get(client.actions.state(threadId)).draft + text,
+        );
+      }
+      setSelectedAgentId(null);
+      activateComposer();
+    },
+  });
   const cancelTurn = () => {
     void client.actions.interrupt(registry, threadId);
   };
@@ -416,7 +462,13 @@ export function Conversation({
       return;
     }
     if (selectedAgent) {
+      if (agentVim.handleKey(key)) {
+        key.preventDefault();
+        key.stopPropagation();
+        return;
+      }
       if (key.ctrl || key.meta || key.option) return;
+      agentVim.reset();
       const visible = Math.max(1, height - 4);
       const maximum = Math.max(0, selectedAgentLines.length - visible);
       if (key.name === "escape") {
@@ -480,7 +532,13 @@ export function Conversation({
       key.stopPropagation();
       return;
     }
+    if (mode === "history" && vim.handleKey(key)) {
+      key.preventDefault();
+      key.stopPropagation();
+      return;
+    }
     if (key.ctrl || key.meta || key.option || mode !== "history") return;
+    vim.reset();
     switch (key.name) {
       case "/":
         setSearch({ query: "", index: 0 });
@@ -495,10 +553,6 @@ export function Conversation({
         break;
       case "a":
         setMode(question && requests.approvals.length === 0 ? "questions" : "requests");
-        break;
-      case "g":
-        if (agents.length === 0) return;
-        activateAgents("history");
         break;
       case "t":
         setShowDetails((value) => !value);
@@ -638,6 +692,7 @@ export function Conversation({
           const direction = event.scroll?.direction;
           if (direction !== "up" && direction !== "down") return;
           const distance = Math.max(3, Math.round(Math.abs(event.scroll?.delta ?? 1)));
+          vim.reset();
           scrollTo(start + (direction === "up" ? -distance : distance));
           event.preventDefault();
           event.stopPropagation();
@@ -649,10 +704,15 @@ export function Conversation({
         {lines.length === 0 ? (
           <Text tone="muted">{empty}</Text>
         ) : (
-          lines.slice(start, start + count).map((line) => (
+          lines.slice(start, start + count).map((line, offset) => (
             <ConversationText
               key={`${line.id}:${line.line}`}
               line={line}
+              selection={
+                active && mode === "history" && !search && !selectedAgent
+                  ? vim.range(start + offset)
+                  : undefined
+              }
               search={search?.query ?? ""}
               onToggleToolGroup={(id) => {
                 setAnchor({ id, line: 0 });
@@ -776,6 +836,7 @@ export function Conversation({
         </Text>
         <Text tone="muted" flexShrink={0}>
           {"  "}
+          {mode === "history" && vim.status ? `${vim.status} · ` : ""}
           {anchor !== null ? "History / End: live" : ""}
         </Text>
       </Stack>
@@ -787,9 +848,15 @@ export function Conversation({
         editorHeight={editorHeight}
         suggestedReplies={suggestedReplies}
         availableHeight={height - 1}
-        onActivate={activateComposer}
+        onActivate={() => {
+          vim.reset();
+          activateComposer();
+        }}
         onDraftChange={() => setAnchor(null)}
-        onBlur={() => setMode("history")}
+        onBlur={() => {
+          vim.reset();
+          setMode("history");
+        }}
         onMenuChange={setComposerMenuOpen}
         {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
         onSubmit={() => {
@@ -822,8 +889,14 @@ export function Conversation({
           width={width}
           height={height}
           start={agentOutputStart}
-          onScroll={setAgentOutputStart}
+          selectionAt={(row) => (active ? agentVim.range(row) : undefined)}
+          status={agentVim.status}
+          onScroll={(next) => {
+            agentVim.reset();
+            setAgentOutputStart(next);
+          }}
           onClose={() => {
+            agentVim.reset();
             setSelectedAgentId(null);
             setAgentOutputStart(0);
           }}

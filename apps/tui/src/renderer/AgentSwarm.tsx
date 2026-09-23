@@ -72,7 +72,7 @@ export function AgentSwarmPanel({
   return (
     <Panel
       id="agent-swarm"
-      title={`Agent swarm${active ? " · Enter selects" : " · Tab/G focus"}`}
+      title={`Agent swarm${active ? " · Enter selects" : " · Tab focus"}`}
       height={height}
       flexShrink={0}
       width="100%"
@@ -157,6 +157,8 @@ export function AgentOutputOverlay({
   start,
   onScroll,
   onClose,
+  selectionAt,
+  status,
 }: {
   readonly agent: RuntimeSubagent;
   readonly activities: readonly OrchestrationThreadActivity[];
@@ -165,6 +167,8 @@ export function AgentOutputOverlay({
   readonly start: number;
   readonly onScroll: (next: number) => void;
   readonly onClose: () => void;
+  readonly selectionAt?: (row: number) => { start: number; end: number } | undefined;
+  readonly status?: string;
 }) {
   const lines = agentOutputLines(agent, activities, Math.max(1, width - 4));
   const count = Math.max(1, height - 4);
@@ -187,6 +191,7 @@ export function AgentOutputOverlay({
       <Stack height={1} flexShrink={0} flexDirection="row">
         <Text flexGrow={1} tone={statusTone(agent.status)} strong wrapMode="none" truncate>
           {agent.status}
+          {status ? ` · ${status}` : ""}
         </Text>
         <Text
           id="agent-output-close"
@@ -221,7 +226,13 @@ export function AgentOutputOverlay({
         ) : (
           lines
             .slice(resolvedStart, resolvedStart + count)
-            .map((line) => <ConversationText key={`${line.id}:${line.line}`} line={line} />)
+            .map((line, offset) => (
+              <ConversationText
+                key={`${line.id}:${line.line}`}
+                line={line}
+                selection={selectionAt?.(resolvedStart + offset)}
+              />
+            ))
         )}
       </Stack>
     </Panel>

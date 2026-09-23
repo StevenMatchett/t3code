@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "@effect/vitest";
-import { parseColor } from "@opentui/core";
+import { parseColor, TextAttributes } from "@opentui/core";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
 import { richTerminalCapabilities } from "./capabilities.ts";
 import { UiProvider } from "./context.tsx";
@@ -71,6 +71,50 @@ describeWithNativeFfi("ShellCommandText", () => {
       parseColor(defaultTheme.syntaxOperator).toInts(),
     );
   });
+
+  it.each(["markdown", "shell", "user"] as const)(
+    "keeps selected %s text readable with explicit colors",
+    async (kind) => {
+      const text = "git diff --check";
+      const driver = await createTuiTestDriver(
+        <ConversationText
+          line={{
+            id: "selected",
+            line: 0,
+            text,
+            tone: "text",
+            strong: false,
+            ...(kind === "markdown"
+              ? {
+                  spans: [
+                    { text: "git", code: true },
+                    { text: " diff --check", bold: true },
+                  ],
+                }
+              : {}),
+            shell: kind === "shell",
+            highlight: kind === "user",
+          }}
+          selection={{ start: 0, end: text.length }}
+        />,
+        { width: 30, height: 1 },
+      );
+      drivers.add(driver);
+      expect(driver.captureFrame()).toContain(text);
+      const selected = driver.captureSpans().lines[0]!.spans.filter((span) => span.text.trim());
+      expect(
+        selected
+          .map((span) => span.text)
+          .join("")
+          .trim(),
+      ).toBe(text);
+      for (const span of selected) {
+        expect(span.fg.toInts()).toEqual(parseColor(defaultTheme.panel).toInts());
+        expect(span.bg.toInts()).toEqual(parseColor(defaultTheme.accent).toInts());
+        expect(span.attributes & TextAttributes.INVERSE).toBe(0);
+      }
+    },
+  );
 
   it("renders user text in a full-width highlighted row instead of right-aligning it", async () => {
     const driver = await createTuiTestDriver(
