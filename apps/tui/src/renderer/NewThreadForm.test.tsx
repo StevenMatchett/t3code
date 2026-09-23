@@ -31,6 +31,71 @@ async function click(driver: TuiTestDriver, id: string) {
 }
 
 describe("new thread form", () => {
+  it.each([false, true])(
+    "navigates fields with arrows while preserving text cursor keys (kitty=%s)",
+    async (kitty) => {
+      const { driver, fixture } = await setup(kitty);
+      await driver.input.pressKey("n");
+      await driver.input.typeText("Task");
+      await driver.input.pressKey("ARROW_LEFT");
+      await driver.input.typeText("!");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("ARROW_RIGHT");
+      await driver.input.pressKey("RETURN");
+      expect(driver.captureFrame()).toContain("Base ref");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("ARROW_RIGHT");
+      await driver.input.pressKey("RETURN");
+      for (let index = 0; index < 3; index += 1) await driver.input.pressKey("ARROW_UP");
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("ARROW_UP");
+      expect(driver.captureFrame()).toContain("Supervised v");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("RETURN");
+      expect(fixture.creationCommands[0]).toMatchObject({
+        title: "Tas!k",
+        runtimeMode: "approval-required",
+      });
+      expect(fixture.worktreeRequests).toHaveLength(1);
+    },
+  );
+
+  it.each(["approval-required", "auto-accept-edits", "auto", "full-access"] as const)(
+    "creates a thread with %s access selected by mouse",
+    async (runtimeMode) => {
+      const { driver, fixture } = await setup();
+      await driver.input.pressKey("n");
+      await click(driver, "new-thread-permissions");
+      await click(driver, `new-thread-access-${runtimeMode}`);
+      await click(driver, "new-thread-create");
+      expect(fixture.creationCommands[0]).toMatchObject({ runtimeMode });
+      await driver.input.pressKey("i");
+      await driver.input.typeText("first prompt");
+      await driver.input.pressKey("RETURN");
+      expect(fixture.commands[0]).toMatchObject({ type: "thread.turn.start", runtimeMode });
+    },
+  );
+  it.each([false, true])(
+    "selects supervised access by keyboard and cancels picker changes (kitty=%s)",
+    async (kitty) => {
+      const { driver, fixture } = await setup(kitty);
+      await driver.input.pressKey("n");
+      for (let index = 0; index < 4; index += 1) await driver.input.pressKey("TAB");
+      await driver.input.pressKey("RETURN");
+      for (let index = 0; index < 3; index += 1) await driver.input.pressKey("ARROW_UP");
+      await driver.input.pressKey("RETURN");
+      expect(driver.captureFrame()).toContain("Supervised v");
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("ESCAPE");
+      expect(driver.captureFrame()).toContain("Supervised v");
+      await driver.input.pressKey("TAB");
+      await driver.input.pressKey("RETURN");
+      expect(fixture.creationCommands[0]).toMatchObject({ runtimeMode: "approval-required" });
+    },
+  );
   it("opens an empty shared thread in the current checkout from the visible action", async () => {
     const { driver, fixture } = await setup();
     await click(driver, "new-thread-action");
@@ -69,6 +134,7 @@ describe("new thread form", () => {
       await driver.input.pressKey("TAB");
       await driver.input.pressKey("TAB");
       await driver.input.pressKey("TAB");
+      await driver.input.pressKey("TAB");
       await driver.input.pressKey("RETURN");
       expect(fixture.worktreeRequests).toHaveLength(1);
       expect(fixture.worktreeRequests[0]).toMatchObject({
@@ -76,7 +142,7 @@ describe("new thread form", () => {
         cwd: "/workspace/alpha",
       });
       expect(fixture.creationCommands[0]!.worktreePath).toContain("/worktrees/");
-      expect(driver.captureFrame()).toContain("Worktree:");
+      expect(driver.captureFrame()).toContain("Worktree  [D Changes]");
       expect(driver.captureFrame()).toContain("No messages in this thread");
       expect(fixture.commands).toHaveLength(0);
       await driver.input.pressKey("ESCAPE");
@@ -117,8 +183,16 @@ describe("new thread form", () => {
     drivers.add(driver);
     await driver.input.pressKey("n");
     await click(driver, "new-thread-worktree");
+    await click(driver, "new-thread-permissions");
+    await click(driver, "new-thread-access-approval-required");
     await click(driver, "new-thread-create");
     expect(driver.captureFrame()).toContain("/remote/retained-tree");
+    await click(driver, "new-thread-permissions");
+    expect(driver.captureFrame()).not.toContain("Access level · Esc cancels");
+    await click(driver, "new-thread-create");
+    expect(driver.registry.get(newThreads.state).attempt?.input.runtimeMode).toBe(
+      "approval-required",
+    );
     await click(driver, "new-thread-restart");
     expect(driver.registry.get(newThreads.state).attempt).not.toBeNull();
     expect(driver.captureFrame()).toContain("Start over keeps");

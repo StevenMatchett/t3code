@@ -4,6 +4,7 @@ import type {
   ModelSelection,
   OrchestrationProjectShell,
   ProjectId,
+  RuntimeMode,
   ServerSettings,
   ThreadId,
 } from "@t3tools/contracts";
@@ -13,6 +14,7 @@ import { useContext, useEffect, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import type { ProviderCatalog } from "../features/chat/providerChoices.ts";
 import { selectionForModel } from "../features/chat/providerChoices.ts";
+import { permissionChoices } from "../features/chat/composerModes.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
@@ -116,6 +118,10 @@ function Fields({
         : null),
   );
   const [focus, setFocus] = useState("title");
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(
+    creation.attempt?.input.runtimeMode ?? defaults.defaultRuntimeMode,
+  );
+  const [permissionsMenu, setPermissionsMenu] = useState(false);
   const [modelMenu, setModelMenu] = useState(false);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -134,6 +140,7 @@ function Fields({
         "worktree",
         ...(mode === "worktree" ? ["base"] : []),
         "model",
+        "permissions",
         "create",
         "cancel",
       ];
@@ -173,14 +180,22 @@ function Fields({
           mode,
           baseRef,
           modelSelection: selection,
-          runtimeMode: creation.attempt?.input.runtimeMode ?? defaults.defaultRuntimeMode,
+          runtimeMode: creation.attempt?.input.runtimeMode ?? runtimeMode,
         });
       return;
     }
     if (locked) return;
     setFocus(target);
     if (target === "local" || target === "worktree") setMode(target);
-    else if (target === "model") {
+    else if (target === "permissions") {
+      setPermissionsMenu(true);
+      setCursor(
+        Math.max(
+          0,
+          permissionChoices.findIndex((choice) => choice.id === runtimeMode),
+        ),
+      );
+    } else if (target === "model") {
       setModelMenu(true);
       setQuery("");
       setCursor(0);
@@ -199,7 +214,16 @@ function Fields({
   };
   useKeyboard((key) => {
     if (key.ctrl || key.meta || key.option) return;
-    if (modelMenu) {
+    if (permissionsMenu) {
+      if (key.name === "escape") setPermissionsMenu(false);
+      else if (key.name === "up") setCursor((value) => Math.max(0, value - 1));
+      else if (key.name === "down")
+        setCursor((value) => Math.min(permissionChoices.length - 1, value + 1));
+      else if ((key.name === "return" || key.name === "enter") && !key.repeated) {
+        setRuntimeMode(permissionChoices[cursor]!.id);
+        setPermissionsMenu(false);
+      } else return;
+    } else if (modelMenu) {
       switch (key.name) {
         case "escape":
           setModelMenu(false);
@@ -219,6 +243,9 @@ function Fields({
       }
     } else if (key.name === "escape") activate("cancel");
     else if (key.name === "tab") advance(key.shift ? -1 : 1);
+    else if (key.name === "up" || key.name === "down") advance(key.name === "up" ? -1 : 1);
+    else if ((key.name === "left" || key.name === "right") && focus !== "title" && focus !== "base")
+      advance(key.name === "left" ? -1 : 1);
     else if (
       (key.name === "enter" ||
         key.name === "return" ||
@@ -283,7 +310,7 @@ function Fields({
           minWidth={1}
           value={title}
           placeholder="New thread"
-          focused={!locked && focus === "title" && !modelMenu}
+          focused={!locked && focus === "title" && !modelMenu && !permissionsMenu}
           onInput={setTitle}
           onMouseDown={() => {
             if (!locked) setFocus("title");
@@ -308,7 +335,7 @@ function Fields({
             flexGrow={1}
             minWidth={1}
             value={baseRef}
-            focused={!locked && focus === "base" && !modelMenu}
+            focused={!locked && focus === "base" && !modelMenu && !permissionsMenu}
             onInput={setBaseRef}
             onMouseDown={() => {
               if (!locked) setFocus("base");
@@ -324,12 +351,13 @@ function Fields({
           `${selectedChoice?.provider.displayName ?? selection?.instanceId ?? "No provider"} / ${selectedChoice?.model.name ?? selection?.model ?? "No available model"} v`,
         )}
       </Stack>
-      <Text
-        height={1}
-        tone="muted"
-        wrapMode="none"
-        truncate
-      >{`Permissions: ${creation.attempt?.input.runtimeMode ?? defaults.defaultRuntimeMode}`}</Text>
+      <Stack height={1} flexDirection="row">
+        <Text width={10}>Access</Text>
+        {button(
+          "permissions",
+          `${permissionChoices.find((choice) => choice.id === (creation.attempt?.input.runtimeMode ?? runtimeMode))?.label ?? "Permissions"} v`,
+        )}
+      </Stack>
       <Text height={2} tone="muted">
         {mode === "worktree"
           ? "New branch and worktree from the base ref's committed files. No setup scripts run automatically."
@@ -375,6 +403,43 @@ function Fields({
           : null}
         {button("cancel", locked ? "[ Close ]" : "[ Cancel ]")}
       </Stack>
+      {permissionsMenu ? (
+        <Panel
+          title="Access level · Esc cancels"
+          position="absolute"
+          top={0}
+          left={0}
+          width="100%"
+          height="100%"
+          zIndex={25}
+          flexDirection="column"
+        >
+          {permissionChoices.map((choice, index) => (
+            <Stack
+              key={choice.id}
+              id={`new-thread-access-${choice.id}`}
+              height={2}
+              flexShrink={0}
+              onMouseDown={(event) => {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                setRuntimeMode(choice.id);
+                setPermissionsMenu(false);
+              }}
+            >
+              <SelectionRow
+                selected={cursor === index}
+                active
+                label={`${choice.id === runtimeMode ? "* " : ""}${choice.label}`}
+              />
+              <Text height={1} tone="muted" wrapMode="none" truncate>
+                {choice.detail}
+              </Text>
+            </Stack>
+          ))}
+        </Panel>
+      ) : null}
       {modelMenu ? (
         <Panel
           position="absolute"
