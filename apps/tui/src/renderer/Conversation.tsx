@@ -765,7 +765,7 @@ export function Conversation({
                 : (interaction.notice ?? "T: tool details")}
         </Text>
         <Text tone="muted" flexShrink={0}>
-          {anchor !== null ? "History / End: live" : page?.hasMore ? "Home: earlier" : ""}
+          {anchor !== null ? "History / End: live" : ""}
         </Text>
       </Stack>
       <ComposerControls
