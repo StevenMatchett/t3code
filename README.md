@@ -100,6 +100,18 @@ If you already have the checkout, run `vp i` from its root. The `start-tui.sh` l
 the TUI and uses `npx` to run Node 26.4.0, including the required FFI support. Its first run may
 download that Node version.
 
+If your saved TUI connection needs to be repaired, run this from the checkout root while your
+existing T3 Code server is running:
+
+```bash
+./start-tui.sh --link-and-pair
+```
+
+The launcher runs `t3 connect link`, creates a fresh pairing link from the running server, saves
+the TUI connection, and starts the TUI. It uses `~/.t3` by default; set `T3CODE_HOME` to the
+server's base directory if yours differs. The T3 Connect link becomes active when the server next
+starts.
+
 ### 3. Generate a pairing key from the running T3 Code environment
 
 On the machine running T3 Code, open another terminal and run this **outside a development
