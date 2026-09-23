@@ -60,6 +60,67 @@ const describeWithNativeFfi = runtime.process?.getBuiltinModule?.("node:ffi")
   : describe.skip;
 
 describeWithNativeFfi("connected AppShell", () => {
+  it("shows elapsed work time in the sidebar before and after turn projection", async () => {
+    const { driver, fixture } = await renderShell({ width: 120, height: 28 });
+    const startedAt = new Date(Date.now() - 65_000).toISOString();
+    const current = driver.registry.get(fixture.shell);
+    const snapshot = Option.getOrThrow(current.snapshot);
+    await act(async () =>
+      driver.registry.set(fixture.shell, {
+        ...current,
+        snapshot: Option.some({
+          ...snapshot,
+          threads: snapshot.threads.map((thread) =>
+            thread.id === fixture.threads[0]!.id
+              ? {
+                  ...thread,
+                  session: {
+                    threadId: thread.id,
+                    status: "starting" as const,
+                    providerName: null,
+                    runtimeMode: "full-access" as const,
+                    activeTurnId: null,
+                    lastError: null,
+                    updatedAt: startedAt,
+                  },
+                }
+              : thread,
+          ),
+        }),
+      }),
+    );
+    await driver.input.pressKey("ARROW_RIGHT");
+    const row = driver.renderer.root.findDescendantById("navigation-thread-0")!;
+    const rowText = () => driver.captureRawFrame().split("\n")[row.screenY];
+    expect(rowText()).toMatch(/First conversation.*1m \d+s/);
+
+    await act(async () =>
+      driver.registry.set(fixture.shell, {
+        ...current,
+        snapshot: Option.some({
+          ...snapshot,
+          threads: snapshot.threads.map((thread) =>
+            thread.id === fixture.threads[0]!.id
+              ? {
+                  ...thread,
+                  latestTurn: {
+                    turnId: TurnId.make("sidebar-timed-turn"),
+                    state: "running" as const,
+                    requestedAt: startedAt,
+                    startedAt,
+                    completedAt: null,
+                    assistantMessageId: null,
+                  },
+                }
+              : thread,
+          ),
+        }),
+      }),
+    );
+    await driver.flush();
+    expect(rowText()).toMatch(/First conversation.*1m \d+s/);
+  });
+
   it("shows archived sidebar rows with project context and opens management by mouse", async () => {
     const { driver, fixture } = await renderShell({ width: 120, height: 32 });
     const archived = {

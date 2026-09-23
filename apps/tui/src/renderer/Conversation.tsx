@@ -15,6 +15,7 @@ import { threadActivityPhase } from "../features/chat/threadActivity.ts";
 import { pastedImagePaths } from "../features/chat/imageAttachments.ts";
 import { suggestedReplies as parseSuggestedReplies } from "../features/chat/suggestedReplies.ts";
 import { ThreadActivityIndicator } from "../ui/ThreadActivityIndicator.tsx";
+import { TurnTiming } from "../ui/TurnTiming.tsx";
 import { conversationLines } from "../ui/conversationLines.ts";
 import { ConversationText } from "../ui/ShellCommandText.tsx";
 import { textMatches } from "../ui/textSearch.ts";
@@ -580,6 +581,15 @@ export function Conversation({
         live,
       )
     : "stale";
+  const timingTurn =
+    phase === "completed" || (phase !== "stale" && thread?.latestTurn?.state === "running")
+      ? (thread?.latestTurn ?? null)
+      : null;
+  const runningSince =
+    phase !== "stale" &&
+    (thread?.session?.status === "starting" || thread?.session?.status === "running")
+      ? thread.session.updatedAt
+      : null;
   const project = Option.getOrNull(shell.snapshot)?.projects.find(
     (item) => item.id === thread?.projectId,
   );
@@ -747,7 +757,14 @@ export function Conversation({
           [D Changes]{" "}
         </Text>
         <ThreadActivityIndicator phase={phase} visible={active} />
-        <Text tone={requestCount ? "warning" : "muted"} flexGrow={1} wrapMode="none" truncate>
+        <TurnTiming turn={timingTurn} runningSince={runningSince} />
+        <Text
+          tone={requestCount ? "warning" : "muted"}
+          flexGrow={1}
+          minWidth={0}
+          wrapMode="none"
+          truncate
+        >
           {"  "}
           {requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
             ? "A: respond to requests"

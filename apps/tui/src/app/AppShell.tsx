@@ -4,12 +4,14 @@ import { TextAttributes } from "@opentui/core";
 import type {
   EnvironmentId,
   OrchestrationProjectShell,
+  OrchestrationLatestTurn,
   OrchestrationThreadShell,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
 import { threadActivityPhase, type ThreadActivityPhase } from "../features/chat/threadActivity.ts";
 import { ThreadActivityIndicator } from "../ui/ThreadActivityIndicator.tsx";
+import { TurnTiming } from "../ui/TurnTiming.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
@@ -98,6 +100,8 @@ function List({
     readonly text: string;
     readonly subline?: string;
     readonly phase?: ThreadActivityPhase;
+    readonly latestTurn?: OrchestrationLatestTurn | null;
+    readonly runningSince?: string | null;
   }>;
   readonly selectedId: string | null;
   readonly count: number;
@@ -139,7 +143,16 @@ function List({
               label={item.text}
               trailing={
                 item.phase ? (
-                  <ThreadActivityIndicator phase={item.phase} compact visible={visible} />
+                  <Stack flexDirection="row">
+                    {item.phase === "running" || item.phase === "starting" ? (
+                      <TurnTiming
+                        turn={item.latestTurn ?? null}
+                        runningSince={item.runningSince ?? null}
+                        compact
+                      />
+                    ) : null}
+                    <ThreadActivityIndicator phase={item.phase} compact visible={visible} />
+                  </Stack>
                 ) : undefined
               }
             />
@@ -302,6 +315,8 @@ export function AppShellView({
         id: item.id,
         text: `${item.title}${item.worktreePath ? " [WT]" : ""}`,
         phase: phases.get(item.id)!,
+        latestTurn: item.latestTurn,
+        runningSince: item.session?.updatedAt ?? null,
         ...(recent
           ? {
               subline:

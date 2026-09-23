@@ -36,6 +36,16 @@ export function ActivityClockProvider({
   );
 }
 
+export function useActivityClock() {
+  const clock = useContext(ClockContext) ?? fallbackClock;
+  return useSyncExternalStore(clock.subscribe, clock.snapshot, clock.snapshot);
+}
+
+export function useLocalDay() {
+  const clock = useContext(ClockContext) ?? fallbackClock;
+  return useSyncExternalStore(clock.subscribe, clock.localDay, clock.localDay);
+}
+
 function Working({
   compact,
   phase,
@@ -43,8 +53,7 @@ function Working({
   readonly compact: boolean;
   readonly phase: ThreadActivityPhase;
 }) {
-  const clock = useContext(ClockContext) ?? fallbackClock;
-  const frame = useSyncExternalStore(clock.subscribe, clock.snapshot, clock.snapshot);
+  const { frame } = useActivityClock();
   return (
     <Text
       height={1}

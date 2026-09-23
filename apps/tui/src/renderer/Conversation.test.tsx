@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "@effect/vitest";
 import {
   ApprovalRequestId,
   EventId,
+  TurnId,
   type OrchestrationThreadActivity,
   type UploadChatImageAttachment,
 } from "@t3tools/contracts";
@@ -59,6 +60,82 @@ async function request(
 }
 
 describe("conversation interaction", () => {
+  it("shows a timer while the session starts before a turn is projected", async () => {
+    const { driver, fixture, id } = await setup();
+    const startedAt = new Date(Date.now() - 65_000).toISOString();
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({
+          ...fixture.details[0]!,
+          session: {
+            threadId: id,
+            status: "starting" as const,
+            providerName: null,
+            runtimeMode: "full-access" as const,
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: startedAt,
+          },
+        }),
+      }),
+    );
+    await driver.flush();
+    expect(
+      driver
+        .captureRawFrame()
+        .split("\n")
+        .find((line) => line.includes("[D Changes]")),
+    ).toMatch(/Starting\s+1m \d+s/);
+    await driver.resize(44, 28);
+    expect(
+      driver
+        .captureRawFrame()
+        .split("\n")
+        .find((line) => line.includes("[D Changes]")),
+    ).toMatch(/Starting\s+1m \d+s/);
+  });
+
+  it("shows live turn time and the local finish time after completion", async () => {
+    const { driver, fixture } = await setup();
+    const startedAt = new Date(Date.now() - 65_000).toISOString();
+    const completedAt = new Date(Date.now() - 5_000).toISOString();
+    const turn = {
+      turnId: TurnId.make("timed-turn"),
+      state: "running" as const,
+      requestedAt: startedAt,
+      startedAt,
+      completedAt: null,
+      assistantMessageId: null,
+    };
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({ ...fixture.details[0]!, latestTurn: turn }),
+      }),
+    );
+    await driver.flush();
+    const statusRow = () =>
+      driver
+        .captureRawFrame()
+        .split("\n")
+        .find((line) => line.includes("[D Changes]"));
+    expect(statusRow()).toMatch(/Working\s+1m (4|5)s/);
+
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({
+          ...fixture.details[0]!,
+          latestTurn: { ...turn, state: "completed" as const, completedAt },
+        }),
+      }),
+    );
+    await driver.flush();
+    const localTime = new Date(completedAt).toLocaleTimeString(undefined, { timeStyle: "short" });
+    expect(statusRow()).toContain(`Took 1m 0s · Finished ${localTime}`);
+  });
+
   it("shows only Local or Worktree immediately before Changes above the composer", async () => {
     const { driver, fixture } = await setup();
     const statusRow = () =>

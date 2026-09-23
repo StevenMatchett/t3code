@@ -12,14 +12,15 @@ export function createActivityClock(
   },
 ) {
   const listeners = new Set<() => void>();
-  let frame = 0;
+  let snapshot = { frame: 0, now: Date.now() };
   let stop: (() => void) | undefined;
   return {
-    snapshot: () => frame,
+    snapshot: () => snapshot,
+    localDay: () => new Date(snapshot.now).setHours(0, 0, 0, 0),
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       stop ??= schedule(() => {
-        frame = (frame + 1) % 4;
+        snapshot = { frame: (snapshot.frame + 1) % 4, now: Date.now() };
         for (const notify of listeners) notify();
       });
       return () => {
