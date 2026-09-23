@@ -188,19 +188,19 @@ export function ComposerControls({
   const buttons = [
     {
       id: "models",
-      label: `Model: ${model?.shortName ?? model?.name ?? thread?.modelSelection.model ?? "Loading"} ▾`,
+      label: `Model: ${model?.shortName ?? model?.name ?? thread?.modelSelection.model ?? "Loading"} ▼`,
     },
     ...descriptors.map((item) => ({
       id: `option:${item.id}`,
-      label: `${item.label}: ${getProviderOptionCurrentLabel(item) ?? "Default"} ▾`,
+      label: `${item.label}: ${getProviderOptionCurrentLabel(item) ?? "Default"} ▼`,
     })),
     {
       id: "mode",
-      label: `${interactionMode === "plan" ? "Plan" : "Chat"} ▾`,
+      label: `${interactionMode === "plan" ? "Plan" : "Chat"} ▼`,
     },
     {
       id: "permissions",
-      label: `${permissionChoices.find((choice) => choice.id === runtimeMode)?.label ?? "Permissions"} ▾`,
+      label: `${permissionChoices.find((choice) => choice.id === runtimeMode)?.label ?? "Permissions"} ▼`,
     },
   ];
   const cancelIndex = suggestedReplies.length + buttons.length + 1;
