@@ -297,10 +297,10 @@ export function Conversation({
   }, [hints, hotkeyContext, onHintsChange]);
   const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
   const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;
-  // Include the border and controls in the cap; retain one input row on tiny terminals.
+  // Include the border, divider and controls in the cap; retain one input row on tiny terminals.
   const maxEditorHeight = Math.max(
     1,
-    Math.floor(terminalHeight * 0.3) - attachmentHeight - suggestedReplyHeight - 3,
+    Math.floor(terminalHeight * 0.3) - attachmentHeight - suggestedReplyHeight - 4,
   );
   const editorLines = useMemo(
     () => wrapTerminalWords(interaction.draft, Math.max(1, width - 5)).length,
@@ -317,7 +317,7 @@ export function Conversation({
           15,
           Math.floor(height / 2),
           height -
-            (editorHeight + attachmentHeight + suggestedReplyHeight + 3) -
+            (editorHeight + attachmentHeight + suggestedReplyHeight + 4) -
             agentPanelHeight -
             gap -
             (interaction.error ? 1 : 0) -
@@ -331,7 +331,7 @@ export function Conversation({
     1,
     height -
       1 -
-      (editorHeight + attachmentHeight + suggestedReplyHeight + 3) -
+      (editorHeight + attachmentHeight + suggestedReplyHeight + 4) -
       gap -
       agentPanelHeight -
       questionHeight -

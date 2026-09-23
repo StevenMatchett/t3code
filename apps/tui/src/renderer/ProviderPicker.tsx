@@ -76,6 +76,7 @@ export function ComposerControls({
   });
   const background = useThemeColor("panel");
   const foreground = useThemeColor("text");
+  const dividerColor = useThemeColor("border");
   const selectedBackground = useThemeColor("selection");
   const [savedComposer] = useState(() => client.session?.composer(threadId));
   const editor = useRef<PromptEditorControl | null>(null);
@@ -429,7 +430,7 @@ export function ComposerControls({
   });
   const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
   const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;
-  const height = editorHeight + attachmentHeight + suggestedReplyHeight + 3;
+  const height = editorHeight + attachmentHeight + suggestedReplyHeight + 4;
   const menuHeight = Math.max(4, Math.min(10, availableHeight - height));
   const count = Math.max(1, menuHeight - (menu === "skills" ? 3 : 4));
   const start = Math.max(0, Math.min(index - Math.floor(count / 2), rows.length - count));
@@ -538,6 +539,15 @@ export function ComposerControls({
             </Text>
           </Stack>
         ) : null}
+        <Stack
+          id="composer-divider"
+          height={1}
+          width="100%"
+          flexShrink={0}
+          border={["top"]}
+          borderStyle="single"
+          {...(dividerColor ? { borderColor: dividerColor } : {})}
+        />
         <Stack height={1} flexShrink={0} flexDirection="row" width="100%">
           {buttons.map((button, buttonIndex) => (
             <Stack

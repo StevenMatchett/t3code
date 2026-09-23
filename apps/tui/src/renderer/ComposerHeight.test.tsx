@@ -36,20 +36,20 @@ async function setup() {
 describe("composer content height", () => {
   it("grows with typing and newlines, caps at 30% of the window, and shrinks when cleared", async () => {
     const { driver, composer, editor, draft } = await setup();
-    expect(composer().height).toBe(4);
+    expect(composer().height).toBe(5);
     await driver.input.typeText("word ".repeat(30));
     expect(editor().height).toBe(editor().editorView.getTotalVirtualLineCount());
-    expect(composer().height).toBeGreaterThan(4);
+    expect(composer().height).toBeGreaterThan(5);
     await draft("one\ntwo\nthree\nfour");
     expect(editor().height).toBe(4);
-    expect(composer().height).toBe(7);
+    expect(composer().height).toBe(8);
     await draft(Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n"));
     expect(composer().height).toBe(18);
     expect(editor().scrollY).toBeGreaterThan(0);
     await driver.input.typeText(" end");
     expect(driver.captureFrame()).toContain("line 29 end");
     await draft("");
-    expect(composer().height).toBe(4);
+    expect(composer().height).toBe(5);
     expect(editor().scrollY).toBe(0);
   });
 
