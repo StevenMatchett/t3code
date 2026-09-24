@@ -671,7 +671,6 @@ export function AppShell({
             composerFocusRequest={composerFocusRequest}
             onRestore={() => setThreadOverlay({ type: "restore" })}
             onDiff={() => setThreadOverlay({ type: "diff" })}
-            onOpenPullRequest={openPullRequest}
             onTerminalFocusChange={handleTerminalFocusChange}
           />
         ) : null}

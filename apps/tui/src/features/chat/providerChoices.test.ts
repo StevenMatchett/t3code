@@ -35,7 +35,7 @@ describe("provider choices", () => {
       registry.dispose();
     }
   });
-  it("refuses stale options, running turns, and providers that require a fresh thread", async () => {
+  it("refuses stale options and providers that require a fresh thread", async () => {
     const f = makeClientFixture();
     const registry = AtomRegistry.make();
     const id = f.details[0]!.id;
@@ -60,12 +60,6 @@ describe("provider choices", () => {
       };
       registry.update(f.states[0]!, (value) => ({ ...value, data: Option.some(thread) }));
       expect(
-        await f.client.actions.changeModel(registry, id, {
-          instanceId: f.provider.instanceId,
-          model: "opaque/model-b",
-        }),
-      ).toBe(false);
-      expect(
         modelChangeProblem(
           { ...thread, latestTurn: { ...thread.latestTurn, state: "completed" } },
           { ...f.provider, requiresNewThreadForModelChange: true },
@@ -77,6 +71,63 @@ describe("provider choices", () => {
       registry.dispose();
     }
   });
+  it("changes the selected model during a turn and uses it on the next turn", async () => {
+    const f = makeClientFixture();
+    const registry = AtomRegistry.make();
+    const id = f.details[0]!.id;
+    const original = f.details[0]!.modelSelection;
+    const selection = { instanceId: f.provider.instanceId, model: "opaque/model-b" };
+    try {
+      const running = {
+        ...f.details[0]!,
+        latestTurn: {
+          turnId: TurnId.make("active"),
+          state: "running" as const,
+          requestedAt: f.details[0]!.createdAt,
+          startedAt: null,
+          completedAt: null,
+          assistantMessageId: null,
+        },
+      };
+      registry.update(f.states[0]!, (value) => ({ ...value, data: Option.some(running) }));
+      f.client.actions.setDraft(registry, id, "queued follow-up");
+      expect(await f.client.actions.send(registry, id)).toBe(true);
+      expect(registry.get(f.client.actions.state(id)).queue[0]?.command.modelSelection).toEqual(
+        original,
+      );
+      expect(await f.client.actions.changeModel(registry, id, selection)).toBe(true);
+      expect(f.commands[0]).toMatchObject({
+        type: "thread.meta.update",
+        modelSelection: selection,
+      });
+      expect(registry.get(f.client.actions.state(id)).notice).toBe(
+        "Model selected for the next turn.",
+      );
+      expect(registry.get(f.client.actions.state(id)).error).toBeNull();
+      expect(running.modelSelection).toEqual(original);
+      expect(Option.getOrThrow(registry.get(f.states[0]!).data).modelSelection).toEqual(selection);
+      expect(registry.get(f.client.actions.state(id)).queue[0]?.command.modelSelection).toEqual(
+        selection,
+      );
+
+      registry.update(f.states[0]!, (value) => ({
+        ...value,
+        data: Option.map(value.data, (thread) => ({
+          ...thread,
+          latestTurn: { ...running.latestTurn, state: "completed" as const },
+        })),
+      }));
+      expect(await f.client.actions.flushQueue(registry, id)).toBe(true);
+      expect(f.commands.at(-1)).toMatchObject({
+        type: "thread.turn.start",
+        modelSelection: selection,
+        message: { text: "queued follow-up" },
+      });
+    } finally {
+      registry.dispose();
+    }
+  });
+
   it("preserves compatible options without inventing values when switching models", () => {
     const f = makeClientFixture();
     expect(

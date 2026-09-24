@@ -8,10 +8,13 @@ import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
 import { defaultTheme } from "../ui/theme.ts";
 import { AppShell } from "./AppShell.tsx";
 
+import * as Browser from "../platform/browser.ts";
+
 const drivers = new Set<TuiTestDriver>();
 afterEach(async () => {
   await Promise.all([...drivers].map((driver) => driver.close()));
   drivers.clear();
+  vi.restoreAllMocks();
 });
 async function setup(text?: string) {
   const fixture = makeClientFixture();
@@ -37,6 +40,69 @@ async function setup(text?: string) {
 }
 
 describe("Vim output navigation", () => {
+  it("opens the link inside a visual selection with uppercase O and never falls back to a PR", async () => {
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
+    const { driver, fixture } = await setup("See [Example](https://example.com) here");
+    const resolve = vi.spyOn(fixture.client, "resolvePullRequest");
+    await driver.input.typeText("gg");
+    await driver.input.pressKey("o", { shift: true });
+    expect(driver.captureFrame()).toContain("No link selected");
+    expect(resolve).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    await driver.input.typeText("v");
+    await driver.input.typeText("$");
+    await driver.input.pressKey("o", { shift: true });
+    expect(open).toHaveBeenCalledExactlyOnceWith("https://example.com");
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("does not choose an arbitrary link when a selection contains two destinations", async () => {
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
+    const { driver } = await setup("[One](https://example.com/1) [Two](https://example.com/2)");
+    await driver.input.typeText("ggv");
+    await driver.input.typeText("$");
+    await driver.input.typeText("o");
+    expect(driver.captureFrame()).toContain("Select just one link");
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("identifies a link under the cursor and opens or copies its complete destination", async () => {
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
+    const { driver, copy } = await setup("👩‍💻 [Docs](https://example.com/docs) end");
+    await driver.input.typeText("ggll");
+    expect(driver.captureFrame()).toContain("o: open link");
+    expect(
+      driver
+        .captureSpans()
+        .lines.flatMap((line) => line.spans)
+        .some(
+          (span) => span.text.includes("ocs") && (span.attributes & TextAttributes.UNDERLINE) !== 0,
+        ),
+    ).toBe(true);
+    await driver.input.typeText("o");
+    expect(open).toHaveBeenCalledWith("https://example.com/docs");
+    expect(driver.captureFrame()).toContain("Opened in browser");
+    await driver.input.typeText("y");
+    expect(copy).toHaveBeenLastCalledWith("https://example.com/docs");
+    await driver.input.typeText("0");
+    expect(driver.captureFrame()).not.toContain("o: open link");
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps wrapped URLs intact and reports unavailable or failing browsers", async () => {
+    const url = "https://example.com/" + "a".repeat(110);
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(false);
+    const { driver, copy } = await setup(url);
+    await driver.input.typeText("ggjo");
+    expect(open).toHaveBeenCalledWith(url);
+    expect(driver.captureFrame()).toContain("Browser unavailable");
+    await driver.input.typeText("y");
+    expect(copy).toHaveBeenLastCalledWith(url);
+    open.mockRejectedValueOnce(new Error("failed"));
+    await driver.input.typeText("o");
+    expect(driver.captureFrame()).toContain("Could not open browser");
+  });
+
   it("shows the cursor immediately on entering output and returning from the composer", async () => {
     const { driver } = await setup();
     const cursors = () =>

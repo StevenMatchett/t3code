@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import { MouseButtons } from "@opentui/core/testing";
+import { TurnId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { act } from "react";
 import { makeClientFixture } from "../testing/clientFixture.ts";
@@ -128,6 +129,36 @@ describe("composer dropdowns and slash skills", () => {
     expect(frame.indexOf("Repo second")).toBeLessThan(frame.indexOf("Unscoped local"));
     expect(frame.indexOf("Unscoped local")).toBeLessThan(frame.indexOf("Global first"));
   });
+  it("updates a running thread's model without shifting the composer into an error state", async () => {
+    const { driver, fixture, id } = await setup(true);
+    const thread = fixture.details[0]!;
+    await act(async () =>
+      driver.registry.update(fixture.states[0]!, (value) => ({
+        ...value,
+        data: Option.some({
+          ...thread,
+          latestTurn: {
+            turnId: TurnId.make("running-turn"),
+            state: "running" as const,
+            requestedAt: thread.createdAt,
+            startedAt: null,
+            completedAt: null,
+            assistantMessageId: null,
+          },
+        }),
+      })),
+    );
+    await clickControl(driver, "composer-models");
+    expect(driver.captureFrame()).toContain("Applies to the next turn.");
+    await clickLabel(driver, "Alternate model");
+    expect(
+      Option.getOrThrow(driver.registry.get(fixture.states[0]!).data).modelSelection.model,
+    ).toBe("opaque/model-b");
+    expect(driver.captureFrame()).toContain("Model selected for the next turn.");
+    expect(driver.captureFrame()).not.toContain("Wait for the current turn to finish");
+    expect(driver.registry.get(fixture.client.actions.state(id)).error).toBeNull();
+  });
+
   it("selects the model and reasoning from visible clickable dropdowns without losing the prompt", async () => {
     const { driver, fixture, id } = await setup(true);
     await driver.input.typeText("analyze this change");

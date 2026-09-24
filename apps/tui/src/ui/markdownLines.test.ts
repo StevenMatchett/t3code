@@ -3,6 +3,29 @@ import stringWidth from "string-width";
 import { markdownLines } from "./markdownLines.ts";
 
 describe("Markdown conversation layout", () => {
+  it("retains full destinations across wrapping and excludes prose punctuation", () => {
+    const url = "https://example.com/a_(b)";
+    const lines = markdownLines(`See ${url}.`, 10);
+    expect(
+      lines
+        .flatMap((line) => line.spans)
+        .filter((span) => span.href)
+        .map((span) => span.text)
+        .join(""),
+    ).toBe(url);
+    expect(
+      lines
+        .flatMap((line) => line.spans)
+        .filter((span) => span.href)
+        .every((span) => span.href === url),
+    ).toBe(true);
+    expect(
+      markdownLines("[bad](javascript:alert) [file](file:///tmp/test)", 80)
+        .flatMap((line) => line.spans)
+        .some((span) => span.href),
+    ).toBe(false);
+  });
+
   it("wraps whole words without losing inline styles or explicit blank lines", () => {
     const lines = markdownLines("hello **beautiful world**\n\nnext line", 12);
     expect(lines.map((line) => line.text)).toEqual([

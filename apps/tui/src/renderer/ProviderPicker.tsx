@@ -257,7 +257,10 @@ export function ComposerControls({
           ? models.map((item) => ({
               id: item.slug,
               label: `${item.slug === thread?.modelSelection.model ? "* " : ""}${item.name}  [${item.slug}]`,
-              detail: item.slug,
+              detail:
+                thread?.latestTurn?.state === "running" || thread?.session?.status === "starting"
+                  ? "Applies to the next turn."
+                  : item.slug,
             }))
           : choices.map((item, index) => ({
               id: String(index),

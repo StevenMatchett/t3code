@@ -3,6 +3,8 @@ import { useRenderer } from "@opentui/react";
 import { useRef, useState } from "react";
 import type { ConversationLine } from "../ui/conversationLines.ts";
 
+import { openBrowser } from "../platform/browser.ts";
+
 interface Position {
   readonly id: string;
   readonly line: number;
@@ -84,6 +86,19 @@ export function useOutputVim({
         end: chars.slice(0, to).join("").length,
       };
     };
+    const selectedLinks = new Set<string>();
+    for (let row = first; row <= last; row++) {
+      const selected = range(row);
+      if (!selected) continue;
+      let offset = 0;
+      for (const span of lines[row]?.spans ?? []) {
+        const start = offset;
+        offset += span.text.length;
+        if (span.href && selected.start < offset && selected.end > start)
+          selectedLinks.add(span.href);
+      }
+    }
+    const link = selectedLinks.size === 1 ? [...selectedLinks][0] : undefined;
     const reset = () => {
       setCursor(null);
       setSelection(null);
@@ -91,8 +106,22 @@ export function useOutputVim({
       pendingG.current = false;
     };
     const handleKey = (key: KeyEvent) => {
-      if (key.meta || key.option || !lines.length) return false;
-      const name = key.name;
+      if (key.meta || key.option) return false;
+      const name = key.name.toLowerCase();
+      if (!key.ctrl && name === "o") {
+        if (!link) {
+          setNotice(selectedLinks.size > 1 ? "Select just one link to open" : "No link selected");
+          return true;
+        }
+        setNotice("Opening link...");
+        void openBrowser(link).then(
+          (opened) =>
+            setNotice(opened ? "Opened in browser" : "Browser unavailable · y: copy link"),
+          () => setNotice("Could not open browser · y: copy link"),
+        );
+        return true;
+      }
+      if (!lines.length) return false;
       if (key.ctrl && !["d", "u", "f"].includes(name)) return false;
       const gg = pendingG.current && name === "g" && !key.shift;
       pendingG.current = false;
@@ -164,7 +193,7 @@ export function useOutputVim({
                   return line.text.slice(selected.start, selected.end);
                 })
                 .join("\n") + (linewise ? "\n" : "")
-            : lines[index]!.text + "\n";
+            : (link ?? lines[index]!.text + "\n");
         register.current = text;
         const copied = renderer.copyToClipboardOSC52(text);
         setNotice(copied ? "Yanked to clipboard" : "Yanked locally · clipboard unavailable");
@@ -187,9 +216,13 @@ export function useOutputVim({
       handleKey,
       reset,
       range,
-      status:
+      status: [
         notice ||
-        (selection ? (linewise ? "VISUAL LINE" : "VISUAL") : lines.length ? "NORMAL" : ""),
+          (selection ? (linewise ? "VISUAL LINE" : "VISUAL") : lines.length ? "NORMAL" : ""),
+        link ? `o: open link · y: copy link · ${link}` : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
     };
   };
   return { ...view(snapshot), handleKey: (key: KeyEvent) => view(state.current).handleKey(key) };

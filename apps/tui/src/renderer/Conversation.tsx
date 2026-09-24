@@ -38,7 +38,6 @@ export function Conversation({
   onDiff,
   onRestore,
   composerFocusRequest = 0,
-  onOpenPullRequest,
   onHintsChange,
   onTerminalFocusChange,
 }: {
@@ -53,7 +52,6 @@ export function Conversation({
   readonly composerFocusRequest?: number;
   readonly onRestore?: () => void;
   readonly onDiff?: () => void;
-  readonly onOpenPullRequest?: () => void;
   readonly onHintsChange?: (state: HotkeyState) => void;
   readonly onTerminalFocusChange?: (focused: boolean) => void;
 }) {
@@ -269,7 +267,7 @@ export function Conversation({
       { key: "T", label: "Details" },
       { key: "D", label: "Diff" },
       { key: "E", label: "Edit from checkpoint" },
-      { key: "O", label: "Open PR" },
+      { key: "O", label: "Open link" },
       { key: "N", label: "New thread" },
       { key: "Ctrl+K", label: "Search" },
       { key: "Esc", label: "Threads" },
@@ -564,9 +562,6 @@ export function Conversation({
       case "d":
         onDiff?.();
         break;
-      case "o":
-        onOpenPullRequest?.();
-        break;
       case "escape":
       case "left":
       case "backspace":
@@ -834,7 +829,7 @@ export function Conversation({
                 ? "Sends after next tool call / turn end"
                 : (interaction.notice ?? "T: tool details")}
         </Text>
-        <Text tone="muted" flexShrink={0}>
+        <Text tone="muted" flexShrink={0} maxWidth="70%" wrapMode="none" truncate>
           {"  "}
           {mode === "history" && vim.status ? `${vim.status} · ` : ""}
           {anchor !== null ? "History / End: live" : ""}

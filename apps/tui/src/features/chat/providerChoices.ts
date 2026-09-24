@@ -59,8 +59,6 @@ export function modelChangeProblem(
     return "Changing provider accounts is not supported in this picker. Use a separate T3 thread.";
   if (!provider.models.some((model) => model.slug === next.model))
     return "That model is no longer advertised by this provider.";
-  if (thread.latestTurn?.state === "running" || thread.session?.status === "starting")
-    return "Wait for the current turn to finish, or stop it before changing models.";
   if (
     provider.requiresNewThreadForModelChange &&
     (thread.session !== null ||

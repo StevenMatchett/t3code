@@ -328,7 +328,15 @@ export function makeThreadInteractions(options: {
     if (sent || modelChanged || replies.length !== current.replies.length)
       update(registry, threadId, {
         replies,
-        ...(modelChanged ? { modelPending: null, notice: "Model updated." } : {}),
+        ...(modelChanged
+          ? {
+              modelPending: null,
+              notice:
+                thread.latestTurn?.state === "running" || thread.session?.status === "starting"
+                  ? "Model selected for the next turn."
+                  : "Model updated.",
+            }
+          : {}),
         ...(failed
           ? {
               error: "The provider could not apply the response. Review the request and retry.",
@@ -829,7 +837,15 @@ export function makeThreadInteractions(options: {
         ))
       )
         return false;
+      const accepted = registry.get(state(threadId));
       update(registry, threadId, {
+        // A queued follow-up has not started yet, so it should use the newly
+        // selected model. Keep attempted commands unchanged for safe retries.
+        queue: accepted.queue.map((entry) =>
+          entry.attempted || entry.status === "sending"
+            ? entry
+            : { ...entry, command: { ...entry.command, modelSelection: selection } },
+        ),
         modelPending: thread.modelSelection,
         notice: "Model change accepted; awaiting shared state.",
       });

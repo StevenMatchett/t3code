@@ -7,12 +7,40 @@ export interface MarkdownSpan {
   readonly bold?: boolean;
   readonly italic?: boolean;
   readonly code?: boolean;
+  readonly href?: string;
 }
 export interface MarkdownLine {
   readonly text: string;
   readonly spans: readonly MarkdownSpan[];
   readonly tone: ThemeToken;
   readonly strong: boolean;
+}
+
+function webUrl(text: string): boolean {
+  try {
+    return ["http:", "https:"].includes(new URL(text).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/** Detect before wrapping so every fragment retains the complete destination. */
+function linkSpans(span: MarkdownSpan): MarkdownSpan[] {
+  if (span.href) return [span];
+  const result: MarkdownSpan[] = [];
+  let offset = 0;
+  for (const match of span.text.matchAll(/https?:\/\/[^\s<>"`]+/gu)) {
+    let href = match[0].replace(/[.,;:!?]+$/u, "");
+    while (href.endsWith(")") && href.split(")").length > href.split("(").length)
+      href = href.slice(0, -1);
+    href = href.replace(/[\]}]+$/u, "");
+    if (!webUrl(href)) continue;
+    if (match.index > offset) result.push({ ...span, text: span.text.slice(offset, match.index) });
+    result.push({ ...span, text: href, href });
+    offset = match.index + href.length;
+  }
+  if (offset < span.text.length) result.push({ ...span, text: span.text.slice(offset) });
+  return result.length ? result : [span];
 }
 
 function inline(text: string): MarkdownSpan[] {
@@ -25,11 +53,15 @@ function inline(text: string): MarkdownSpan[] {
     if (match[2]) spans.push({ text: match[2], code: true });
     else if (match[3] || match[4]) spans.push({ text: match[3] ?? match[4]!, bold: true });
     else if (match[5] || match[6]) spans.push({ text: match[5] ?? match[6]!, italic: true });
-    else spans.push({ text: `${match[7]} (${match[8]})` });
+    else
+      spans.push({
+        text: `${match[7]} (${match[8]})`,
+        ...(webUrl(match[8]!) ? { href: match[8]! } : {}),
+      });
     offset = match.index + match[0].length;
   }
   if (offset < text.length) spans.push({ text: text.slice(offset) });
-  return spans;
+  return spans.flatMap(linkSpans);
 }
 
 /** Keeps Markdown layout in the same physical-line coordinate system as history scrolling. */
@@ -64,7 +96,7 @@ export function markdownLines(source: string, width: number): MarkdownLine[] {
       : heading
         ? heading[1]!
         : raw.replace(/^(\s*)[-*+]\s+/u, "$1• ").replace(/^\s*>\s?/u, "│ ");
-    const spans = fence ? [{ text, code: true }] : inline(text);
+    const spans = fence ? linkSpans({ text, code: true }) : inline(text);
     const tone: ThemeToken = heading ? "accent" : quote ? "muted" : "text";
     for (const current of wrapTerminalSpans(spans, columns, !fence)) {
       result.push({

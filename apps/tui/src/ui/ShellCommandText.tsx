@@ -89,11 +89,14 @@ export function ConversationText({
               const key = String(offset);
               offset += span.text.length;
               const attributes =
-                (span.bold ? TextAttributes.BOLD : 0) | (span.italic ? TextAttributes.ITALIC : 0);
+                (span.bold ? TextAttributes.BOLD : 0) |
+                (span.italic ? TextAttributes.ITALIC : 0) |
+                (span.href ? TextAttributes.UNDERLINE : 0);
               return (
                 <span
                   key={key}
                   attributes={attributes}
+                  {...(span.href && capabilities.color ? { fg: theme.accent } : {})}
                   {...(span.code && capabilities.color
                     ? { fg: theme.syntaxString, bg: theme.selection }
                     : {})}

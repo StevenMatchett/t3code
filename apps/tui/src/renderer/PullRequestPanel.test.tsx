@@ -39,11 +39,17 @@ async function setup() {
   return { driver, fixture };
 }
 
+async function openPullRequest(driver: TuiTestDriver) {
+  await driver.input.pressKey("k", { ctrl: true });
+  await driver.input.typeText("Open pull request");
+  await driver.input.pressKey("RETURN");
+}
+
 describe("open branch pull request", () => {
   it("opens the selected worktree branch PR and keeps O as text in the composer", async () => {
     const { driver, fixture } = await setup();
     const resolve = vi.spyOn(fixture.client, "resolvePullRequest");
-    await driver.input.pressKey("o");
+    await openPullRequest(driver);
     expect(resolve).toHaveBeenCalledWith(driver.registry, {
       cwd: "/worktrees/pr",
       branch: "feature/pr",
@@ -78,7 +84,7 @@ describe("open branch pull request", () => {
     vi.spyOn(fixture.client, "resolvePullRequest").mockRejectedValueOnce(
       new Error("No PR for feature/pr."),
     );
-    await driver.input.pressKey("o");
+    await openPullRequest(driver);
     expect(driver.captureFrame()).toContain("No PR for feature/pr.");
     expect(Browser.openBrowser).not.toHaveBeenCalled();
     await driver.input.pressKey("r");
@@ -87,7 +93,7 @@ describe("open branch pull request", () => {
   it("retains the link when launching the browser fails", async () => {
     const { driver } = await setup();
     vi.mocked(Browser.openBrowser).mockRejectedValue(new Error("Browser unavailable."));
-    await driver.input.pressKey("o");
+    await openPullRequest(driver);
     expect(driver.captureFrame()).toContain("Browser unavailable.");
     expect(driver.captureFrame()).toContain("https://github.com/example/repo/pull/42");
   });
@@ -99,7 +105,7 @@ describe("open branch pull request", () => {
       branch: "feature/pr",
     });
     vi.spyOn(fixture.client, "resolvePullRequest").mockReturnValue(pending.promise);
-    await driver.input.pressKey("o");
+    await openPullRequest(driver);
     expect(driver.captureFrame()).toContain("Finding pull request...");
     await driver.input.pressKey("ESCAPE");
     await act(async () => pending.resolve(pr));

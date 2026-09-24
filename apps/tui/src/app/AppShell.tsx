@@ -206,7 +206,7 @@ function Help() {
       <Text>P New project</Text>
       <Text>M Manage thread Shift+A Archived threads (navigation)</Text>
       <Text>D View saved thread changes (navigation or history)</Text>
-      <Text>O Open branch pull request in browser (navigation or history)</Text>
+      <Text>O Open selected output link (history); open branch PR (thread list)</Text>
       <Text tone="muted">Ctrl+C asks before closing the TUI; the shared server keeps running.</Text>
       <Text tone="muted">
         Provider switching in existing threads and Git actions remain pending.
