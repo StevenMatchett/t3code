@@ -40,6 +40,57 @@ async function setup(text?: string) {
 }
 
 describe("Vim output navigation", () => {
+  it("opens a mouse-highlighted label instead of the link under the Vim cursor", async () => {
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
+    const { driver } = await setup(
+      "[First](https://example.com/first)\n👩‍💻 [Second](https://example.com/second)",
+    );
+    await driver.input.typeText("i");
+    const frame = driver.captureFrame().split("\n");
+    const row = frame.findIndex((line) => line.includes("Second"));
+    await driver.mouse.drag(6, row, 7, row);
+    expect(driver.renderer.getSelection()?.getSelectedText()).toContain("Se");
+    await driver.input.pressKey("o", { shift: true });
+    expect(open).toHaveBeenCalledExactlyOnceWith("https://example.com/second");
+    await driver.input.typeText("gg");
+    expect(driver.renderer.getSelection()).toBeNull();
+    await driver.input.typeText("o");
+    expect(open).toHaveBeenLastCalledWith("https://example.com/first");
+  });
+
+  it("opens the full URL from a mouse-selected wrapped fragment", async () => {
+    const url = "https://example.com/" + "a".repeat(110);
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
+    const { driver } = await setup(url);
+    const row = driver
+      .captureFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("https://"));
+    await driver.mouse.drag(4, row + 1, 8, row + 1);
+    expect(driver.renderer.getSelection()?.getSelectedText()).toBe("aaaaa");
+    await driver.input.typeText("o");
+    expect(open).toHaveBeenCalledExactlyOnceWith(url);
+  });
+
+  it("respects mouse selections with no link or multiple destinations", async () => {
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
+    const { driver } = await setup(
+      "[One](https://example.com/1)\nplain text\n[Two](https://example.com/2)",
+    );
+    const row = driver
+      .captureFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("One ("));
+    await driver.mouse.drag(3, row + 1, 7, row + 1);
+    await driver.input.typeText("o");
+    expect(driver.captureFrame()).toContain("No link selected");
+    expect(open).not.toHaveBeenCalled();
+    await driver.mouse.drag(3, row, 6, row + 2);
+    await driver.input.typeText("o");
+    expect(driver.captureFrame()).toContain("Select just one link");
+    expect(open).not.toHaveBeenCalled();
+  });
+
   it("opens the link inside a visual selection with uppercase O and never falls back to a PR", async () => {
     const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
     const { driver, fixture } = await setup("See [Example](https://example.com) here");

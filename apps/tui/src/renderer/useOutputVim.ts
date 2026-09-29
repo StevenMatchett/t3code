@@ -1,7 +1,9 @@
 import type { KeyEvent } from "@opentui/core";
-import { useRenderer } from "@opentui/react";
+import { useRenderer, useSelectionHandler } from "@opentui/react";
 import { useRef, useState } from "react";
 import type { ConversationLine } from "../ui/conversationLines.ts";
+
+import { outputMouseLinks } from "../ui/outputMouseLinks.ts";
 
 import { openBrowser } from "../platform/browser.ts";
 
@@ -44,6 +46,9 @@ export function useOutputVim({
   const setSelection = (selection: Position | null) => update({ selection });
   const setLinewise = (linewise: boolean) => update({ linewise });
   const setNotice = (notice: string) => update({ notice });
+  useSelectionHandler(() => {
+    if (outputMouseLinks(renderer.getSelection(), lines)) setNotice("");
+  });
   const register = useRef("");
   const pendingG = useRef(false);
   // Terminal input can deliver several keystrokes before React renders again.
@@ -63,6 +68,7 @@ export function useOutputVim({
       column: Math.max(0, Math.min(col, Math.max(0, characters(lines[row]!.text).length - 1))),
     });
     const move = (row: number, col = column) => {
+      renderer.clearSelection();
       row = Math.max(0, Math.min(lines.length - 1, row));
       setCursor(position(row, col));
       // Pin the viewport while navigating, including when it currently ends at live output.
@@ -86,20 +92,24 @@ export function useOutputVim({
         end: chars.slice(0, to).join("").length,
       };
     };
-    const selectedLinks = new Set<string>();
-    for (let row = first; row <= last; row++) {
-      const selected = range(row);
-      if (!selected) continue;
-      let offset = 0;
-      for (const span of lines[row]?.spans ?? []) {
-        const start = offset;
-        offset += span.text.length;
-        if (span.href && selected.start < offset && selected.end > start)
-          selectedLinks.add(span.href);
+    const mouseLinks = outputMouseLinks(renderer.getSelection(), lines);
+    const selectedLinks = mouseLinks ?? new Set<string>();
+    if (!mouseLinks) {
+      for (let row = first; row <= last; row++) {
+        const selected = range(row);
+        if (!selected) continue;
+        let offset = 0;
+        for (const span of lines[row]?.spans ?? []) {
+          const start = offset;
+          offset += span.text.length;
+          if (span.href && selected.start < offset && selected.end > start)
+            selectedLinks.add(span.href);
+        }
       }
     }
     const link = selectedLinks.size === 1 ? [...selectedLinks][0] : undefined;
     const reset = () => {
+      renderer.clearSelection();
       setCursor(null);
       setSelection(null);
       setNotice("");

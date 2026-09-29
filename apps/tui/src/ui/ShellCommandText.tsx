@@ -4,6 +4,7 @@ import { useUi } from "./context.tsx";
 import { Stack, Text } from "./primitives.tsx";
 import { shellHighlightTokens, type ShellTokenKind } from "./shellHighlight.ts";
 import type { ThemeToken } from "./theme.ts";
+import { registerOutputLine } from "./outputMouseLinks.ts";
 import { textMatches } from "./textSearch.ts";
 
 const themeKey: Record<Exclude<ShellTokenKind, "plain">, ThemeToken> = {
@@ -78,6 +79,9 @@ export function ConversationText({
       {...(backgroundColor ? { backgroundColor } : {})}
     >
       <Text
+        ref={(renderable) => {
+          if (renderable) registerOutputLine(renderable, line);
+        }}
         height={1}
         wrapMode="none"
         tone={line.tone}
