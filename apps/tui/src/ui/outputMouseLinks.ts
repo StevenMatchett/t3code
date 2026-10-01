@@ -4,6 +4,17 @@ import type { ConversationLine } from "./conversationLines.ts";
 
 const outputLines = new WeakMap<Renderable, ConversationLine>();
 
+/** Hit-test terminal cells so wide characters and wrapped URLs retain their destination. */
+export function outputLinkAtColumn(line: ConversationLine, column: number): string | null {
+  let offset = 0;
+  for (const span of line.spans ?? []) {
+    const start = offset;
+    offset += stringWidth(span.text);
+    if (column >= start && column < offset) return span.href ?? null;
+  }
+  return null;
+}
+
 export function registerOutputLine(renderable: TextRenderable, line: ConversationLine) {
   outputLines.set(renderable, line);
 }

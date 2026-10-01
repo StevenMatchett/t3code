@@ -4,7 +4,7 @@ import { useUi } from "./context.tsx";
 import { Stack, Text } from "./primitives.tsx";
 import { shellHighlightTokens, type ShellTokenKind } from "./shellHighlight.ts";
 import type { ThemeToken } from "./theme.ts";
-import { registerOutputLine } from "./outputMouseLinks.ts";
+import { outputLinkAtColumn, registerOutputLine } from "./outputMouseLinks.ts";
 import { textMatches } from "./textSearch.ts";
 
 const themeKey: Record<Exclude<ShellTokenKind, "plain">, ThemeToken> = {
@@ -21,6 +21,7 @@ export function ConversationText({
   search = "",
   selection,
   onToggleToolGroup,
+  onOpenLinkMenu,
 }: {
   readonly line: ConversationLine;
   readonly search?: string;
@@ -28,6 +29,9 @@ export function ConversationText({
     | { readonly start: number; readonly end: number; readonly cursor?: boolean }
     | undefined;
   readonly onToggleToolGroup?: (id: string) => void;
+  readonly onOpenLinkMenu?:
+    | ((href: string, position: { x: number; y: number }) => void)
+    | undefined;
 }) {
   const { capabilities, theme } = useUi();
   const matches = selection ? [selection] : textMatches(line.text, search);
@@ -79,6 +83,14 @@ export function ConversationText({
       {...(backgroundColor ? { backgroundColor } : {})}
     >
       <Text
+        onMouseDown={(event) => {
+          if (event.button !== 2 || !onOpenLinkMenu || !event.currentTarget) return;
+          const href = outputLinkAtColumn(line, event.x - event.currentTarget.screenX);
+          if (!href) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenLinkMenu(href, { x: event.x, y: event.y });
+        }}
         ref={(renderable) => {
           if (renderable) registerOutputLine(renderable, line);
         }}

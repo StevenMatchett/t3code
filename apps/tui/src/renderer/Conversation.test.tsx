@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { act } from "react";
-import { TextAttributes } from "@opentui/core";
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { MouseButtons } from "@opentui/core/testing";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
@@ -451,6 +451,63 @@ describe("conversation interaction", () => {
       type: "thread.turn.start",
       message: { text: paste },
     });
+  });
+
+  it.each([false, true])(
+    "toggles pasted dictation with Ctrl+P while keeping the draft and sending intact (kitty=%s)",
+    async (kitty) => {
+      const { driver, fixture, id } = await setup(kitty);
+      const paste = "My complete dictated message is visible here. ".repeat(6);
+      await driver.input.paste(paste);
+      const draft = driver.registry.get(fixture.client.actions.state(id));
+      expect(driver.captureFrame()).toContain("Ctrl+P Show pasted text");
+      await driver.input.pressKey("p", { ctrl: true });
+      expect(driver.captureFrame()).toContain("My complete dictated message");
+      expect(driver.captureFrame()).toContain("Ctrl+P Hide pasted text");
+      expect(driver.registry.get(fixture.client.actions.state(id))).toBe(draft);
+      await driver.input.typeText(" and a follow-up");
+      await driver.input.pressKey("p", { ctrl: true });
+      expect(driver.captureFrame()).not.toContain("My complete dictated message");
+      await driver.input.pressKey("p", { ctrl: true });
+      await driver.input.pressKey("RETURN");
+      expect(fixture.commands[0]).toMatchObject({
+        type: "thread.turn.start",
+        message: { text: paste + " and a follow-up" },
+      });
+      expect(driver.renderer.root.findDescendantById("pasted-text-preview")).toBeUndefined();
+    },
+  );
+
+  it("also toggles pasted text by clicking the visible control", async () => {
+    const { driver } = await setup();
+    await driver.input.paste("Pasted words are available in the preview. ".repeat(6));
+    const toggle = () => driver.renderer.root.findDescendantById("paste-visibility-toggle")!;
+    await driver.mouse.click(toggle().screenX + 2, toggle().screenY, MouseButtons.LEFT, {
+      delayMs: 0,
+    });
+    expect(driver.captureFrame()).toContain("Pasted words are available");
+    await driver.mouse.click(toggle().screenX + 2, toggle().screenY, MouseButtons.LEFT, {
+      delayMs: 0,
+    });
+    expect(driver.captureFrame()).not.toContain("Pasted words are available");
+    expect(driver.captureFrame()).toContain("Ctrl+P Show pasted text");
+  });
+
+  it("allows scrolling to the end of a long paste while preserving it for sending", async () => {
+    const { driver, fixture, id } = await setup();
+    const paste = Array.from({ length: 20 }, (_, i) => `Dictated line ${i}`).join("\n");
+    await driver.input.paste(paste);
+    await driver.input.pressKey("p", { ctrl: true });
+    const preview = driver.renderer.root.findDescendantById(
+      "pasted-text-preview",
+    ) as ScrollBoxRenderable;
+    expect(driver.captureFrame()).toContain("Dictated line 0");
+    await driver.mouse.scroll(preview.screenX + 1, preview.screenY + 1, "down", { delayMs: 0 });
+    expect(preview.scrollTop).toBeGreaterThan(0);
+    await act(async () => preview.scrollTo(preview.scrollHeight));
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Dictated line 19");
+    expect(driver.registry.get(fixture.client.actions.state(id)).pastes[0]?.text).toBe(paste);
   });
 
   it.each([false, true])(

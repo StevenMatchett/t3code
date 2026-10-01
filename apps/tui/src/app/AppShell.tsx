@@ -192,6 +192,7 @@ function Help() {
       <Text tone="accent">CONVERSATION</Text>
       <Text>Enter / i Write prompt Esc Return to history</Text>
       <Text>Enter Send Shift+Enter New line</Text>
+      <Text>Ctrl+P Show/hide pasted text; click the message toggle to preview it</Text>
       <Text>Up in an empty message recalls prompts; Down moves forward</Text>
       <Text>Click model/reasoning or Tab then Enter</Text>
       <Text>/ Find in thread · In message box: search skills</Text>
@@ -207,6 +208,7 @@ function Help() {
       <Text>M Manage thread Shift+A Archived threads (navigation)</Text>
       <Text>D View saved thread changes (navigation or history)</Text>
       <Text>O Open selected output link (history); open branch PR (thread list)</Text>
+      <Text>Right-click an output link: Copy link / Go to link (no selection needed)</Text>
       <Text tone="muted">Ctrl+C asks before closing the TUI; the shared server keeps running.</Text>
       <Text tone="muted">
         Provider switching in existing threads and Git actions remain pending.

@@ -4,7 +4,7 @@ import type { ModelSelection, ThreadId } from "@t3tools/contracts";
 import { formatProviderSkillDisplayName } from "@t3tools/client-runtime/providerSkills";
 import { getProviderOptionDescriptors, getProviderOptionCurrentLabel } from "@t3tools/shared/model";
 import * as Option from "effect/Option";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { permissionChoices, planModeProblem } from "../features/chat/composerModes.ts";
 import { selectableSkills, selectionForModel } from "../features/chat/providerChoices.ts";
@@ -28,6 +28,9 @@ export function ComposerControls({
   active,
   focused,
   editorHeight,
+  showPastes = false,
+  pastePreviewHeight = 0,
+  onTogglePastes,
   suggestedReplies,
   availableHeight,
   onActivate,
@@ -44,6 +47,9 @@ export function ComposerControls({
   readonly active: boolean;
   readonly focused: boolean;
   readonly editorHeight: number;
+  readonly showPastes?: boolean;
+  readonly pastePreviewHeight?: number;
+  readonly onTogglePastes?: () => void;
   readonly suggestedReplies: readonly string[];
   readonly availableHeight: number;
   readonly onActivate: () => void;
@@ -60,6 +66,10 @@ export function ComposerControls({
   const threadState = useAtomValue(client.thread(threadId));
   const shell = useAtomValue(client.shell);
   const interaction = useAtomValue(client.actions.state(threadId));
+  const pastedText = useMemo(
+    () => (showPastes ? interaction.pastes.map((paste) => paste.text).join("\n\n") : ""),
+    [showPastes, interaction.pastes],
+  );
   const thread = Option.getOrNull(threadState.data);
   const provider = catalog.providers.find(
     (item) => item.instanceId === thread?.modelSelection.instanceId,
@@ -433,7 +443,7 @@ export function ComposerControls({
   });
   const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
   const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;
-  const height = editorHeight + attachmentHeight + suggestedReplyHeight + 4;
+  const height = editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4;
   const menuHeight = Math.max(4, Math.min(10, availableHeight - height));
   const count = Math.max(1, menuHeight - (menu === "skills" ? 3 : 4));
   const start = Math.max(0, Math.min(index - Math.floor(count / 2), rows.length - count));
@@ -458,6 +468,35 @@ export function ComposerControls({
         borderTone={focused ? "borderFocused" : "border"}
         flexDirection="column"
       >
+        {interaction.pastes.length && onTogglePastes ? (
+          <Stack height={pastePreviewHeight} flexShrink={0} flexDirection="column">
+            <Text
+              id="paste-visibility-toggle"
+              tone="accent"
+              height={1}
+              onMouseDown={(event) => {
+                if (!active || event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                onTogglePastes();
+              }}
+            >
+              {`[Ctrl+P ${showPastes ? "Hide" : "Show"} pasted text]`}
+            </Text>
+            {showPastes ? (
+              <scrollbox
+                id="pasted-text-preview"
+                height={pastePreviewHeight - 1}
+                width="100%"
+                scrollX={false}
+              >
+                <Text selectable wrapMode="word">
+                  {pastedText}
+                </Text>
+              </scrollbox>
+            ) : null}
+          </Stack>
+        ) : null}
         <PromptEditor
           control={editor}
           initialCursor={savedComposer?.cursor ?? interaction.draft.length}

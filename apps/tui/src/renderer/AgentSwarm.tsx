@@ -159,6 +159,7 @@ export function AgentOutputOverlay({
   onClose,
   selectionAt,
   status,
+  onOpenLinkMenu,
 }: {
   readonly agent: RuntimeSubagent;
   readonly activities: readonly OrchestrationThreadActivity[];
@@ -169,6 +170,9 @@ export function AgentOutputOverlay({
   readonly onClose: () => void;
   readonly selectionAt?: (row: number) => { start: number; end: number } | undefined;
   readonly status?: string;
+  readonly onOpenLinkMenu?:
+    | ((href: string, position: { x: number; y: number }) => void)
+    | undefined;
 }) {
   const lines = agentOutputLines(agent, activities, Math.max(1, width - 4));
   const count = Math.max(1, height - 4);
@@ -230,6 +234,7 @@ export function AgentOutputOverlay({
               <ConversationText
                 key={`${line.id}:${line.line}`}
                 line={line}
+                onOpenLinkMenu={onOpenLinkMenu}
                 selection={selectionAt?.(resolvedStart + offset)}
               />
             ))

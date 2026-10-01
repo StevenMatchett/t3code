@@ -3,6 +3,7 @@ import { EventId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { act } from "react";
 import { parseColor, TextAttributes } from "@opentui/core";
+import { MouseButtons } from "@opentui/core/testing";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
 import { defaultTheme } from "../ui/theme.ts";
@@ -40,6 +41,83 @@ async function setup(text?: string) {
 }
 
 describe("Vim output navigation", () => {
+  it("copies the right-clicked link without highlighting, including after wide characters", async () => {
+    const { driver, copy } = await setup(
+      "[First](https://example.com/first)\n👩‍💻 [Second](https://example.com/second?query=1#part)",
+    );
+    const frame = driver.captureFrame().split("\n");
+    const row = frame.findIndex((line) => line.includes("Second"));
+    // The emoji occupies two terminal cells even though it spans five UTF-16 units.
+    await driver.mouse.click(6, row, MouseButtons.RIGHT, { delayMs: 0 });
+    expect(driver.renderer.getSelection()).toBeNull();
+    expect(driver.captureFrame()).toContain("Copy link");
+    expect(driver.captureFrame()).toContain("Go to link");
+    const item = driver.renderer.root.findDescendantById("output-link-menu-0")!;
+    await driver.mouse.click(item.screenX + 1, item.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    expect(copy).toHaveBeenCalledExactlyOnceWith("https://example.com/second?query=1#part");
+    expect(driver.renderer.root.findDescendantById("output-link-menu")).toBeUndefined();
+    expect(driver.captureFrame()).toContain("Copied link");
+  });
+
+  it("opens the whole destination from a right-clicked wrapped URL", async () => {
+    const url = "https://example.com/" + "a".repeat(110);
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
+    const { driver, copy } = await setup(url);
+    const row = driver
+      .captureFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("https://"));
+    await driver.mouse.click(4, row + 1, MouseButtons.RIGHT, { delayMs: 0 });
+    expect(driver.captureFrame()).toContain("Copy link");
+    await driver.input.pressKey("ARROW_DOWN");
+    expect(driver.captureFrame()).toContain("> Go to link");
+    await driver.input.pressKey("RETURN");
+    expect(open).toHaveBeenCalledExactlyOnceWith(url);
+    expect(copy).not.toHaveBeenCalled();
+    expect(driver.renderer.root.findDescendantById("output-link-menu")).toBeUndefined();
+  });
+
+  it("dismisses the link menu with Escape or an outside click without executing an action", async () => {
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
+    const { driver, copy } = await setup("[Link](https://example.com)\nplain text");
+    const row = driver
+      .captureFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("Link ("));
+    await driver.mouse.click(3, row, MouseButtons.RIGHT, { delayMs: 0 });
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.renderer.root.findDescendantById("output-link-menu")).toBeUndefined();
+    expect(driver.renderer.root.findDescendantById("conversation-history")).toBeDefined();
+    await driver.mouse.click(3, row, MouseButtons.RIGHT, { delayMs: 0 });
+    await driver.mouse.click(90, row + 1, MouseButtons.LEFT, { delayMs: 0 });
+    expect(driver.renderer.root.findDescendantById("output-link-menu")).toBeUndefined();
+    await driver.mouse.click(3, row + 1, MouseButtons.RIGHT, { delayMs: 0 });
+    expect(driver.renderer.root.findDescendantById("output-link-menu")).toBeUndefined();
+    expect(open).not.toHaveBeenCalled();
+    expect(copy).not.toHaveBeenCalled();
+  });
+
+  it("keeps Enter in the link menu from submitting a focused draft", async () => {
+    const { driver, fixture, copy } = await setup("[Link](https://example.com)");
+    await driver.input.pressKey("RETURN");
+    await driver.input.typeText("Do not send this draft");
+    const row = driver
+      .captureFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("Link ("));
+    await driver.mouse.click(3, row, MouseButtons.RIGHT, { delayMs: 0 });
+    await driver.input.pressKey("RETURN");
+    expect(copy).toHaveBeenCalledExactlyOnceWith("https://example.com");
+    expect(fixture.commands).toHaveLength(0);
+    expect(driver.registry.get(fixture.client.actions.state(fixture.details[0]!.id)).draft).toBe(
+      "Do not send this draft",
+    );
+    await driver.input.typeText(" still editing");
+    expect(driver.registry.get(fixture.client.actions.state(fixture.details[0]!.id)).draft).toBe(
+      "Do not send this draft still editing",
+    );
+  });
+
   it("opens a mouse-highlighted label instead of the link under the Vim cursor", async () => {
     const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
     const { driver } = await setup(

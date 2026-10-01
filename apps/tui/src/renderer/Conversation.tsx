@@ -1,5 +1,5 @@
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
-import { decodePasteBytes } from "@opentui/core";
+import { decodePasteBytes, type BoxRenderable } from "@opentui/core";
 import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -23,6 +23,7 @@ import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
 import { inlineTerminalText, wrapTerminalWords } from "../ui/textLayout.ts";
 import { useOutputVim } from "./useOutputVim.ts";
+import { useOutputLinkMenu } from "../ui/OutputLinkMenu.tsx";
 import { ThreadTerminal } from "./ThreadTerminal.tsx";
 import type { HotkeyHint, HotkeyState } from "../ui/HotkeyBar.tsx";
 
@@ -78,6 +79,9 @@ export function Conversation({
   );
   const [terminalOpen, setTerminalOpen] = useState(savedView?.terminalOpen ?? false);
   const [showDetails, setShowDetails] = useState(savedView?.showDetails ?? false);
+  const [showPastes, setShowPastes] = useState(false);
+  const container = useRef<BoxRenderable | null>(null);
+  const linkMenu = useOutputLinkMenu({ active, width, height, container });
   const [expandedToolGroups, setExpandedToolGroups] = useState<ReadonlyMap<string, boolean>>(
     () => new Map(savedView?.expandedToolGroups),
   );
@@ -164,7 +168,15 @@ export function Conversation({
     setMode("agents");
   };
   usePaste((event) => {
-    if (!active || selectedAgent || mode === "questions" || terminalOpen || search) return;
+    if (
+      !active ||
+      linkMenu.isOpen ||
+      selectedAgent ||
+      mode === "questions" ||
+      terminalOpen ||
+      search
+    )
+      return;
     const text = decodePasteBytes(event.bytes);
     const paths = pastedImagePaths(text);
     if (!paths && !client.actions.addPaste(registry, threadId, text)) return;
@@ -177,6 +189,12 @@ export function Conversation({
     if (thread) client.actions.observe(registry, thread.id);
   }, [client, registry, thread]);
   const hints = useMemo<readonly HotkeyHint[]>(() => {
+    if (linkMenu.isOpen)
+      return [
+        { key: "↑↓", label: "Choose action" },
+        { key: "Enter", label: "Select" },
+        { key: "Esc", label: "Close menu" },
+      ];
     if (search)
       return [
         { key: "Enter/↓", label: "Next match" },
@@ -184,6 +202,9 @@ export function Conversation({
         { key: "Esc", label: "Close search" },
       ];
     const terminalHint = client.terminals ? [{ key: "Ctrl+T", label: "Terminal" }] : [];
+    const pasteHint = interaction.pastes.length
+      ? [{ key: "Ctrl+P", label: showPastes ? "Hide pastes" : "Show pastes" }]
+      : [];
     if (selectedAgent)
       return [
         { key: "hjkl", label: "Move" },
@@ -215,6 +236,7 @@ export function Conversation({
       else
         return suggestedReplies.length
           ? [
+              ...pasteHint,
               { key: "↑↓", label: "Choose reply" },
               ...terminalHint,
               { key: "Enter", label: "Select" },
@@ -223,6 +245,7 @@ export function Conversation({
               { key: "Esc", label: "History" },
             ]
           : [
+              ...pasteHint,
               {
                 key: "Enter",
                 label: thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send",
@@ -255,6 +278,7 @@ export function Conversation({
         { key: "Tab/Esc", label: "Back" },
       ];
     return [
+      ...pasteHint,
       { key: "Enter", label: "Write" },
       ...terminalHint,
       { key: "hjkl", label: "Move" },
@@ -274,6 +298,9 @@ export function Conversation({
       ...(width >= 58 ? [{ key: "?", label: "Help" }] : []),
     ];
   }, [
+    linkMenu.isOpen,
+    interaction.pastes.length,
+    showPastes,
     agents.length,
     client.terminals,
     composerMenuOpen,
@@ -285,23 +312,30 @@ export function Conversation({
     thread?.latestTurn?.state,
     width,
   ]);
-  const hotkeyContext = selectedAgent
-    ? "Agent output"
-    : mode === "questions"
-      ? "Question"
-      : mode === "composer"
-        ? composerMenuOpen
-          ? "Menu"
-          : "Message"
-        : mode === "requests"
-          ? "Requests"
-          : mode === "agents"
-            ? "Agents"
-            : "Conversation";
+  const hotkeyContext = linkMenu.isOpen
+    ? "Link menu"
+    : selectedAgent
+      ? "Agent output"
+      : mode === "questions"
+        ? "Question"
+        : mode === "composer"
+          ? composerMenuOpen
+            ? "Menu"
+            : "Message"
+          : mode === "requests"
+            ? "Requests"
+            : mode === "agents"
+              ? "Agents"
+              : "Conversation";
   useEffect(() => {
     onHintsChange?.({ context: hotkeyContext, hints });
   }, [hints, hotkeyContext, onHintsChange]);
   const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
+  const pastePreviewHeight = interaction.pastes.length
+    ? showPastes
+      ? Math.max(2, Math.min(9, Math.floor(height / 3)))
+      : 1
+    : 0;
   const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;
   // Include the border, divider and controls in the cap; retain one input row on tiny terminals.
   const maxEditorHeight = Math.max(
@@ -323,7 +357,7 @@ export function Conversation({
           15,
           Math.floor(height / 2),
           height -
-            (editorHeight + attachmentHeight + suggestedReplyHeight + 4) -
+            (editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4) -
             agentPanelHeight -
             gap -
             (interaction.error ? 1 : 0) -
@@ -336,7 +370,7 @@ export function Conversation({
     1,
     height -
       1 -
-      (editorHeight + attachmentHeight + suggestedReplyHeight + 4) -
+      (editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4) -
       gap -
       agentPanelHeight -
       questionHeight -
@@ -439,6 +473,27 @@ export function Conversation({
   };
   useKeyboard((key) => {
     if (!active) return;
+    if (linkMenu.handleKey(key)) {
+      key.preventDefault();
+      key.stopPropagation();
+      return;
+    }
+    if (
+      key.ctrl &&
+      key.name === "p" &&
+      !key.meta &&
+      !key.option &&
+      !terminalOpen &&
+      !selectedAgent &&
+      !search &&
+      (mode === "history" || mode === "composer") &&
+      interaction.pastes.length
+    ) {
+      key.preventDefault();
+      key.stopPropagation();
+      if (!key.repeated) setShowPastes((value) => !value);
+      return;
+    }
     if (search && !terminalOpen && !selectedAgent && mode === "history") {
       if (key.name === "escape") {
         scrollTo(start);
@@ -677,7 +732,14 @@ export function Conversation({
       </Panel>
     );
   return (
-    <Stack position="relative" flexDirection="column" width="100%" height="100%" overflow="hidden">
+    <Stack
+      ref={container}
+      position="relative"
+      flexDirection="column"
+      width="100%"
+      height="100%"
+      overflow="hidden"
+    >
       <Stack
         id="conversation-history"
         flexGrow={1}
@@ -703,6 +765,7 @@ export function Conversation({
             <ConversationText
               key={`${line.id}:${line.line}`}
               line={line}
+              onOpenLinkMenu={linkMenu.open}
               selection={
                 active && mode === "history" && !search && !selectedAgent
                   ? vim.range(start + offset)
@@ -831,16 +894,23 @@ export function Conversation({
         </Text>
         <Text tone="muted" flexShrink={0} maxWidth="70%" wrapMode="none" truncate>
           {"  "}
-          {mode === "history" && vim.status ? `${vim.status} · ` : ""}
+          {linkMenu.notice
+            ? `${linkMenu.notice} · `
+            : mode === "history" && vim.status
+              ? `${vim.status} · `
+              : ""}
           {anchor !== null ? "History / End: live" : ""}
         </Text>
       </Stack>
       <ComposerControls
         client={client}
         threadId={threadId}
-        active={active}
+        active={active && !linkMenu.isOpen}
         focused={mode === "composer"}
         editorHeight={editorHeight}
+        showPastes={showPastes}
+        pastePreviewHeight={pastePreviewHeight}
+        onTogglePastes={() => setShowPastes((value) => !value)}
         suggestedReplies={suggestedReplies}
         availableHeight={height - 1}
         onActivate={() => {
@@ -895,8 +965,10 @@ export function Conversation({
             setSelectedAgentId(null);
             setAgentOutputStart(0);
           }}
+          onOpenLinkMenu={linkMenu.open}
         />
       ) : null}
+      {linkMenu.element}
     </Stack>
   );
 }
