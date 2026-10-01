@@ -612,6 +612,9 @@ importers:
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112(patch_hash=8bef799f35729cf3465eb428196f617b434a7c9f658d56acb2874d74b21b98b2)
+      marked:
+        specifier: 17.0.1
+        version: 17.0.1
       react:
         specifier: 'catalog:'
         version: 19.2.6

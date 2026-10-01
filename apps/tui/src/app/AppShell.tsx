@@ -193,6 +193,7 @@ function Help() {
       <Text>Enter / i Write prompt Esc Return to history</Text>
       <Text>Enter Send Shift+Enter New line</Text>
       <Text>Ctrl+P Show/hide pasted text; click the message toggle to preview it</Text>
+      <Text>Ctrl+R Toggle rendered Markdown / raw source in output</Text>
       <Text>Up in an empty message recalls prompts; Down moves forward</Text>
       <Text>Click model/reasoning or Tab then Enter</Text>
       <Text>/ Find in thread · In message box: search skills</Text>

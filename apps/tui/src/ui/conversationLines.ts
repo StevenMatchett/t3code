@@ -20,6 +20,7 @@ export function conversationLines(
   width: number,
   expanded: boolean,
   expandedGroups: ReadonlyMap<string, boolean> = new Map(),
+  renderMarkdown = true,
 ): readonly ConversationLine[] {
   const result: ConversationLine[] = [];
   let pending: TimelineRow[] = [];
@@ -27,7 +28,7 @@ export function conversationLines(
     const tools = pending.filter((row) => row.kind === "tool");
     const first = tools[0];
     if (tools.length < 2 || !first || (expanded && !expandedGroups.has(`tools:${first.id}`))) {
-      result.push(...renderRows(pending, width, expanded));
+      result.push(...renderRows(pending, width, expanded, renderMarkdown));
     } else {
       const id = `tools:${first.id}`;
       const open = expandedGroups.get(id) ?? expanded;
@@ -44,7 +45,7 @@ export function conversationLines(
           toolGroupId: id,
         })),
       );
-      if (open) result.push(...renderRows(pending, width, true));
+      if (open) result.push(...renderRows(pending, width, true, renderMarkdown));
     }
     pending = [];
   };
@@ -60,7 +61,7 @@ export function conversationLines(
       row.status !== "inProgress";
     if (!groupable || (pending.length > 0 && pending[0]?.turnId !== row.turnId)) flush();
     if (groupable) pending.push(row);
-    else result.push(...renderRows([row], width, expanded));
+    else result.push(...renderRows([row], width, expanded, renderMarkdown));
   }
   flush();
   return result;
@@ -70,11 +71,12 @@ function renderRows(
   rows: readonly TimelineRow[],
   width: number,
   expanded: boolean,
+  renderMarkdown: boolean,
 ): readonly ConversationLine[] {
   return rows.flatMap<ConversationLine>((row) => {
     if (row.source === "message" && row.kind === "assistant") {
       return [
-        ...markdownLines(row.text, width),
+        ...markdownLines(row.text, width, renderMarkdown),
         { text: "", spans: [], tone: "text" as const, strong: false },
       ].map((line, index) => ({ ...line, id: row.id, line: index }));
     }
@@ -111,6 +113,29 @@ function renderRows(
       if (!expanded && row.kind !== "tool" && !error) return [];
       const status =
         row.status === "inProgress" ? "running" : (row.status ?? (error ? "failed" : "tool"));
+      if (
+        !error &&
+        (row.kind === "reasoning" || row.kind === "activity") &&
+        !row.command &&
+        !row.files?.length
+      ) {
+        const prefix = `[${status}] ${row.toolName ? `${inlineTerminalText(row.toolName)} - ` : ""}`;
+        const visiblePrefix = prefix.length < width ? prefix : "";
+        return markdownLines(
+          [row.text, row.detail].filter(Boolean).join("\n\n"),
+          Math.max(1, width - visiblePrefix.length),
+          renderMarkdown,
+        ).map((current, index) => {
+          const padding = index === 0 ? visiblePrefix : " ".repeat(visiblePrefix.length);
+          return {
+            ...current,
+            text: padding + current.text,
+            spans: [{ text: padding }, ...current.spans],
+            id: row.id,
+            line: index,
+          };
+        });
+      }
       const summary = row.command ?? [row.toolName, row.text].filter(Boolean).join(" - ");
       const heading = wrapTerminalLines(`[${status}] ${inlineTerminalText(summary)}`, width).slice(
         0,

@@ -57,6 +57,7 @@ export const ConversationView = Schema.Struct({
   ),
   terminalOpen: Schema.Boolean,
   showDetails: Schema.Boolean,
+  renderMarkdown: Schema.optionalKey(Schema.Boolean),
   agentsExpanded: Schema.Boolean,
   selectedAgentId: Schema.NullOr(Schema.String),
   expandedToolGroups: Schema.Array(Schema.Tuple([Schema.String, Schema.Boolean])),

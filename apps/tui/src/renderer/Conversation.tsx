@@ -79,6 +79,7 @@ export function Conversation({
   );
   const [terminalOpen, setTerminalOpen] = useState(savedView?.terminalOpen ?? false);
   const [showDetails, setShowDetails] = useState(savedView?.showDetails ?? false);
+  const [renderMarkdown, setRenderMarkdown] = useState(savedView?.renderMarkdown ?? true);
   const [showPastes, setShowPastes] = useState(false);
   const container = useRef<BoxRenderable | null>(null);
   const linkMenu = useOutputLinkMenu({ active, width, height, container });
@@ -100,6 +101,7 @@ export function Conversation({
       anchor,
       terminalOpen,
       showDetails,
+      renderMarkdown,
       agentsExpanded,
       selectedAgentId,
       expandedToolGroups: [...expandedToolGroups],
@@ -111,6 +113,7 @@ export function Conversation({
     anchor,
     terminalOpen,
     showDetails,
+    renderMarkdown,
     agentsExpanded,
     selectedAgentId,
     expandedToolGroups,
@@ -144,9 +147,14 @@ export function Conversation({
   const selectedAgentLines = useMemo(
     () =>
       selectedAgent
-        ? agentOutputLines(selectedAgent, thread?.activities ?? [], Math.max(1, width - 4))
+        ? agentOutputLines(
+            selectedAgent,
+            thread?.activities ?? [],
+            Math.max(1, width - 4),
+            renderMarkdown,
+          )
         : [],
-    [selectedAgent, thread?.activities, width],
+    [selectedAgent, thread?.activities, width, renderMarkdown],
   );
   const requestCount = requests.approvals.length + requests.userInputs.length;
   const latestMessage = thread?.messages.at(-1);
@@ -205,8 +213,13 @@ export function Conversation({
     const pasteHint = interaction.pastes.length
       ? [{ key: "Ctrl+P", label: showPastes ? "Hide pastes" : "Show pastes" }]
       : [];
+    const markdownHint = {
+      key: "Ctrl+R",
+      label: renderMarkdown ? "Raw Markdown" : "Render Markdown",
+    };
     if (selectedAgent)
       return [
+        markdownHint,
         { key: "hjkl", label: "Move" },
         { key: "v/V", label: "Select" },
         { key: "y/yy", label: "Yank" },
@@ -227,6 +240,7 @@ export function Conversation({
     if (mode === "composer")
       if (composerMenuOpen)
         return [
+          markdownHint,
           { key: "↑↓", label: "Select" },
           ...terminalHint,
           { key: "Enter/Tab", label: "Choose" },
@@ -236,6 +250,7 @@ export function Conversation({
       else
         return suggestedReplies.length
           ? [
+              markdownHint,
               ...pasteHint,
               { key: "↑↓", label: "Choose reply" },
               ...terminalHint,
@@ -245,6 +260,7 @@ export function Conversation({
               { key: "Esc", label: "History" },
             ]
           : [
+              markdownHint,
               ...pasteHint,
               {
                 key: "Enter",
@@ -271,6 +287,7 @@ export function Conversation({
       ];
     if (mode === "agents")
       return [
+        markdownHint,
         { key: "↑↓", label: "Select" },
         { key: "Enter", label: "Toggle/open" },
         ...terminalHint,
@@ -278,6 +295,7 @@ export function Conversation({
         { key: "Tab/Esc", label: "Back" },
       ];
     return [
+      markdownHint,
       ...pasteHint,
       { key: "Enter", label: "Write" },
       ...terminalHint,
@@ -301,6 +319,7 @@ export function Conversation({
     linkMenu.isOpen,
     interaction.pastes.length,
     showPastes,
+    renderMarkdown,
     agents.length,
     client.terminals,
     composerMenuOpen,
@@ -383,8 +402,8 @@ export function Conversation({
     [thread],
   );
   const lines = useMemo(
-    () => conversationLines(timeline, width, showDetails, expandedToolGroups),
-    [timeline, width, showDetails, expandedToolGroups],
+    () => conversationLines(timeline, width, showDetails, expandedToolGroups, renderMarkdown),
+    [timeline, width, showDetails, expandedToolGroups, renderMarkdown],
   );
   const maxStart = Math.max(0, lines.length - count);
   const searchQuery = search?.query ?? "";
@@ -471,11 +490,32 @@ export function Conversation({
   const cancelTurn = () => {
     void client.actions.interrupt(registry, threadId);
   };
+  const toggleMarkdown = () => {
+    vim.reset();
+    agentVim.reset();
+    setAnchor((current) => (current ? { id: current.id, line: 0 } : null));
+    setAgentOutputStart(0);
+    setRenderMarkdown((current) => !current);
+  };
   useKeyboard((key) => {
     if (!active) return;
     if (linkMenu.handleKey(key)) {
       key.preventDefault();
       key.stopPropagation();
+      return;
+    }
+    if (
+      key.ctrl &&
+      key.name === "r" &&
+      !key.meta &&
+      !key.option &&
+      !terminalOpen &&
+      !search &&
+      (selectedAgent || mode === "history" || mode === "composer" || mode === "agents")
+    ) {
+      key.preventDefault();
+      key.stopPropagation();
+      if (!key.repeated) toggleMarkdown();
       return;
     }
     if (
@@ -877,6 +917,23 @@ export function Conversation({
         <ThreadActivityIndicator phase={phase} visible={active} />
         <TurnTiming turn={timingTurn} runningSince={runningSince} />
         <Text
+          id="output-markdown-toggle"
+          tone="accent"
+          height={1}
+          minWidth={0}
+          wrapMode="none"
+          truncate
+          onMouseDown={(event) => {
+            if (!active || linkMenu.isOpen || event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setSearch(null);
+            toggleMarkdown();
+          }}
+        >
+          {renderMarkdown ? " [Ctrl+R Markdown]" : " [Ctrl+R Raw]"}
+        </Text>
+        <Text
           tone={requestCount ? "warning" : "muted"}
           flexGrow={1}
           minWidth={0}
@@ -956,6 +1013,8 @@ export function Conversation({
           start={agentOutputStart}
           selectionAt={(row) => (active ? agentVim.range(row) : undefined)}
           status={agentVim.status}
+          renderMarkdown={renderMarkdown}
+          onToggleMarkdown={toggleMarkdown}
           onScroll={(next) => {
             agentVim.reset();
             setAgentOutputStart(next);

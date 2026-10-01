@@ -41,6 +41,61 @@ async function setup(text?: string) {
 }
 
 describe("Vim output navigation", () => {
+  it("toggles rendered output with Ctrl+R and the view control without editing the draft", async () => {
+    const source = "# Summary\n**Done** and ~~old~~\n[Docs](https://example.com/docs)";
+    const { driver, fixture } = await setup(source);
+    expect(driver.captureFrame()).toContain("Done and old");
+    expect(driver.captureFrame()).not.toContain("**Done**");
+    expect(
+      driver
+        .captureSpans()
+        .lines.flatMap((line) => line.spans)
+        .some(
+          (span) =>
+            span.text.includes("old") && (span.attributes & TextAttributes.STRIKETHROUGH) !== 0,
+        ),
+    ).toBe(true);
+    await driver.input.pressKey("RETURN");
+    await driver.input.typeText("Unsent draft");
+    await driver.input.pressKey("r", { ctrl: true });
+    expect(driver.captureFrame()).toContain("# Summary");
+    expect(driver.captureFrame()).toContain("**Done** and ~~old~~");
+    expect(driver.captureFrame()).toContain("[Docs](https://example.com/docs)");
+    const toggle = driver.renderer.root.findDescendantById("output-markdown-toggle")!;
+    await driver.mouse.click(toggle.screenX + 2, toggle.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    expect(driver.captureFrame()).toContain("Done and old");
+    expect(driver.captureFrame()).not.toContain("**Done**");
+    await driver.input.typeText(" still editing");
+    expect(driver.registry.get(fixture.client.actions.state(fixture.details[0]!.id)).draft).toBe(
+      "Unsent draft still editing",
+    );
+    expect(fixture.commands).toHaveLength(0);
+  });
+
+  it("copies the full destination from a raw Markdown link without a selection", async () => {
+    const { driver, copy } = await setup("[Docs](https://example.com/docs)");
+    await driver.input.pressKey("r", { ctrl: true });
+    const frame = driver.captureFrame().split("\n");
+    const row = frame.findIndex((line) => line.includes("[Docs](https://example.com/docs)"));
+    const column = frame[row]!.indexOf("https://") + 2;
+    await driver.mouse.click(column, row, MouseButtons.RIGHT, { delayMs: 0 });
+    expect(driver.captureFrame()).toContain("Copy link");
+    await driver.input.pressKey("RETURN");
+    expect(copy).toHaveBeenCalledExactlyOnceWith("https://example.com/docs");
+    expect(driver.renderer.getSelection()).toBeNull();
+  });
+
+  it("resets output selections when changing display modes and yanks the displayed source", async () => {
+    const { driver, copy } = await setup("**Done**\nnext");
+    await driver.input.typeText("ggv");
+    await driver.input.pressKey("r", { ctrl: true });
+    await driver.input.typeText("ggy");
+    await driver.input.typeText("y");
+    expect(copy).toHaveBeenLastCalledWith("**Done**\n");
+    await driver.input.pressKey("r", { ctrl: true });
+    await driver.input.typeText("ggyy");
+    expect(copy).toHaveBeenLastCalledWith("Done\n");
+  });
   it("copies the right-clicked link without highlighting, including after wide characters", async () => {
     const { driver, copy } = await setup(
       "[First](https://example.com/first)\n👩‍💻 [Second](https://example.com/second?query=1#part)",
@@ -401,6 +456,49 @@ describe("Vim output navigation", () => {
     await driver.input.typeText("p");
     expect(driver.renderer.root.findDescendantById("agent-output-overlay")).toBeUndefined();
     expect(driver.registry.get(fixture.client.actions.state(thread.id)).draft).toBe(yanked);
+  });
+
+  it("uses the same Markdown toggle for agent output and the conversation", async () => {
+    const { driver, fixture } = await setup("**Main reply**");
+    const thread = driver.registry.get(fixture.states[0]!);
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...thread,
+        data: Option.map(thread.data, (detail) => ({
+          ...detail,
+          activities: [
+            {
+              id: EventId.make("agent-markdown"),
+              kind: "task.started",
+              tone: "info" as const,
+              summary: "**Agent reply**",
+              turnId: null,
+              createdAt: detail.createdAt,
+              payload: {
+                taskId: "markdown-agent",
+                taskType: "subagent",
+                agentKind: "agent",
+                title: "Researcher",
+              },
+            },
+          ],
+        })),
+      }),
+    );
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Agent: Researcher");
+    expect(driver.captureFrame()).toContain("Agent reply");
+    expect(driver.captureFrame()).not.toContain("**Agent reply**");
+    await driver.input.pressKey("r", { ctrl: true });
+    expect(driver.captureFrame()).toContain("**Agent reply**");
+    const toggle = driver.renderer.root.findDescendantById("agent-output-markdown-toggle")!;
+    await driver.mouse.click(toggle.screenX + 2, toggle.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    expect(driver.captureFrame()).not.toContain("**Agent reply**");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("Main reply");
+    expect(driver.captureFrame()).not.toContain("**Main reply**");
   });
 
   it("scrolls with the cursor and supports G and half-page movement", async () => {

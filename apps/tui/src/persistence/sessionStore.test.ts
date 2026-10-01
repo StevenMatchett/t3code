@@ -56,6 +56,29 @@ function open(
 }
 
 describe("TUI session persistence", () => {
+  it("restores Markdown preferences and accepts views saved before the toggle existed", () => {
+    const path = directory();
+    const first = open(path);
+    const view = {
+      mode: "history" as const,
+      anchor: null,
+      terminalOpen: false,
+      showDetails: false,
+      agentsExpanded: true,
+      selectedAgentId: null,
+      expandedToolGroups: [],
+    };
+    first.session.saveConversation(first.id, { ...view, renderMarkdown: false });
+    const legacyId = ThreadId.make("legacy");
+    first.session.saveConversation(legacyId, view);
+    first.session.close();
+    const second = open(path);
+    expect(second.session.conversation(first.id)?.renderMarkdown).toBe(false);
+    expect(second.session.conversation(legacyId)).toEqual(view);
+    second.session.saveConversation(first.id, { ...view, renderMarkdown: true });
+    second.session.close();
+    expect(open(path).session.conversation(first.id)?.renderMarkdown).toBe(true);
+  });
   it("remembers the archived sidebar view", () => {
     const path = directory();
     const first = open(path);

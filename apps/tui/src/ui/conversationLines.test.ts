@@ -10,6 +10,55 @@ const base = {
 };
 
 describe("conversationLines", () => {
+  it("toggles assistant and reasoning Markdown while leaving commands and their output literal", () => {
+    const rows: TimelineRow[] = [
+      {
+        ...base,
+        sourceId: MessageId.make("reply"),
+        id: "reply",
+        source: "message",
+        kind: "assistant",
+        text: "**Answer**",
+        streaming: true,
+      },
+      {
+        ...base,
+        id: "thought",
+        source: "activity",
+        kind: "reasoning",
+        text: "**Thinking**",
+        detail: "- Next step",
+        activityKind: "reasoning",
+        activityTone: "info",
+      },
+      {
+        ...base,
+        id: "cmd",
+        source: "activity",
+        kind: "tool",
+        text: "Command",
+        command: "echo '**literal**'",
+        detail: "**literal**",
+        activityKind: "tool.completed",
+        activityTone: "tool",
+      },
+    ];
+    const rendered = conversationLines(rows, 80, true)
+      .map((line) => line.text)
+      .join("\n");
+    expect(rendered).toContain("Answer");
+    expect(rendered).not.toContain("**Answer**");
+    expect(rendered).not.toContain("**Thinking**");
+    expect(rendered).toContain("• Next step");
+    expect(rendered).toContain("echo '**literal**'");
+    expect(rendered).toContain("  **literal**");
+    const raw = conversationLines(rows, 80, true, new Map(), false)
+      .map((line) => line.text)
+      .join("\n");
+    expect(raw).toContain("**Answer**");
+    expect(raw).toContain("**Thinking**");
+    expect(raw).toContain("- Next step");
+  });
   const tool = (
     id: string,
     status = "completed" as "completed" | "inProgress" | "failed",

@@ -3,6 +3,7 @@ import { formatSubagentModelLabel } from "@t3tools/client-runtime/state/subagent
 import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 
 import { conversationLines } from "../ui/conversationLines.ts";
+import { markdownLines } from "../ui/markdownLines.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { ConversationText } from "../ui/ShellCommandText.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
@@ -28,13 +29,23 @@ export function agentOutputLines(
   agent: RuntimeSubagent,
   activities: readonly OrchestrationThreadActivity[],
   width: number,
+  renderMarkdown = true,
 ) {
   const attributed = activities.filter((activity) => activityBelongsToAgent(activity, agent.id));
-  return conversationLines(
+  const lines = conversationLines(
     projectRecordedThreadTimeline({ messages: [], activities: attributed }),
     width,
     true,
+    new Map(),
+    renderMarkdown,
   );
+  return lines.length
+    ? lines
+    : markdownLines(
+        agent.error ?? agent.result ?? agent.progress ?? "No agent output yet.",
+        width,
+        renderMarkdown,
+      ).map((line, index) => ({ ...line, id: `agent:${agent.id}`, line: index }));
 }
 
 const statusTone = (status: RuntimeSubagent["status"]) =>
@@ -160,6 +171,8 @@ export function AgentOutputOverlay({
   selectionAt,
   status,
   onOpenLinkMenu,
+  renderMarkdown,
+  onToggleMarkdown,
 }: {
   readonly agent: RuntimeSubagent;
   readonly activities: readonly OrchestrationThreadActivity[];
@@ -170,15 +183,16 @@ export function AgentOutputOverlay({
   readonly onClose: () => void;
   readonly selectionAt?: (row: number) => { start: number; end: number } | undefined;
   readonly status?: string;
+  readonly renderMarkdown: boolean;
+  readonly onToggleMarkdown: () => void;
   readonly onOpenLinkMenu?:
     | ((href: string, position: { x: number; y: number }) => void)
     | undefined;
 }) {
-  const lines = agentOutputLines(agent, activities, Math.max(1, width - 4));
+  const lines = agentOutputLines(agent, activities, Math.max(1, width - 4), renderMarkdown);
   const count = Math.max(1, height - 4);
   const maxStart = Math.max(0, lines.length - count);
   const resolvedStart = Math.max(0, Math.min(maxStart, start));
-  const fallback = agent.error ?? agent.result ?? agent.progress ?? "No agent output yet.";
   return (
     <Panel
       id="agent-output-overlay"
@@ -196,6 +210,19 @@ export function AgentOutputOverlay({
         <Text flexGrow={1} tone={statusTone(agent.status)} strong wrapMode="none" truncate>
           {agent.status}
           {status ? ` · ${status}` : ""}
+        </Text>
+        <Text
+          id="agent-output-markdown-toggle"
+          flexShrink={0}
+          tone="accent"
+          onMouseDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleMarkdown();
+          }}
+        >
+          {renderMarkdown ? "[Ctrl+R Markdown] " : "[Ctrl+R Raw] "}
         </Text>
         <Text
           id="agent-output-close"
@@ -225,20 +252,14 @@ export function AgentOutputOverlay({
           event.stopPropagation();
         }}
       >
-        {lines.length === 0 ? (
-          <Text tone="muted">{inlineTerminalText(fallback)}</Text>
-        ) : (
-          lines
-            .slice(resolvedStart, resolvedStart + count)
-            .map((line, offset) => (
-              <ConversationText
-                key={`${line.id}:${line.line}`}
-                line={line}
-                onOpenLinkMenu={onOpenLinkMenu}
-                selection={selectionAt?.(resolvedStart + offset)}
-              />
-            ))
-        )}
+        {lines.slice(resolvedStart, resolvedStart + count).map((line, offset) => (
+          <ConversationText
+            key={`${line.id}:${line.line}`}
+            line={line}
+            onOpenLinkMenu={onOpenLinkMenu}
+            selection={selectionAt?.(resolvedStart + offset)}
+          />
+        ))}
       </Stack>
     </Panel>
   );

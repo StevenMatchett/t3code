@@ -35,6 +35,7 @@
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "effect": "catalog:",
+    "marked": "17.0.1",
     "react": "catalog:",
     "react-devtools-core": "catalog:",
     "scheduler": "catalog:",

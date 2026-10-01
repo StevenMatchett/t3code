@@ -107,6 +107,7 @@ export function ConversationText({
               const attributes =
                 (span.bold ? TextAttributes.BOLD : 0) |
                 (span.italic ? TextAttributes.ITALIC : 0) |
+                (span.strikethrough ? TextAttributes.STRIKETHROUGH : 0) |
                 (span.href ? TextAttributes.UNDERLINE : 0);
               return (
                 <span
