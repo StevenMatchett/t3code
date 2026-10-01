@@ -22,6 +22,12 @@ NodeTest.test(
 set -eu
 printf '%s\\n' "$*" >> "$TUI_LAUNCHER_TEST_LOG"
 case "$*" in
+  *'check-dependencies.mjs'*)
+    if [[ "\${TUI_LAUNCHER_TEST_MISSING:-}" == true ]]; then
+      printf '%s\\n' 'Run pnpm run install:tui from the checkout root.' >&2
+      exit 1
+    fi
+    ;;
   *'t3@latest connect link'*) exit 0 ;;
   *'t3@latest pair'*) printf '%s\\n' 'Pairing URL: http://127.0.0.1:3773/pair#token=fixture-secret' ;;
   *'--pair-stdin'*)
@@ -59,17 +65,30 @@ esac
       NodeAssert.ifError(result.error);
       NodeAssert.equal(result.status, 0, result.stderr);
       const commands = (await NodeFSP.readFile(log, "utf8")).trim().split("\n");
-      NodeAssert.equal(commands.length, 5);
-      NodeAssert.match(commands[1], new RegExp(`t3@latest connect link --base-dir ${home}$`));
+      NodeAssert.equal(commands.length, 6);
+      NodeAssert.match(commands[0], /apps\/tui\/scripts\/check-dependencies.mjs$/);
+      NodeAssert.match(commands[2], new RegExp(`t3@latest connect link --base-dir ${home}$`));
       NodeAssert.match(
-        commands[2],
+        commands[3],
         new RegExp(`t3@latest pair --base-dir ${home} --label T3 TUI$`),
       );
-      NodeAssert.match(commands[3], /--connect http:\/\/127\.0\.0\.1:3773 --pair-stdin$/);
-      NodeAssert.match(commands[4], /--connect http:\/\/127\.0\.0\.1:3773$/);
+      NodeAssert.match(commands[4], /--connect http:\/\/127\.0\.0\.1:3773 --pair-stdin$/);
+      NodeAssert.match(commands[5], /--connect http:\/\/127\.0\.0\.1:3773$/);
       NodeAssert.ok(
         !`${result.stdout}${result.stderr}${commands.join("\n")}`.includes("fixture-secret"),
       );
+      await NodeFSP.writeFile(log, "");
+      const missing = NodeChildProcess.spawnSync("bash", [launcher, "--link-and-pair"], {
+        env: { ...env, TUI_LAUNCHER_TEST_MISSING: "true" },
+        encoding: "utf8",
+        timeout: 10_000,
+      });
+      NodeAssert.ifError(missing.error);
+      NodeAssert.equal(missing.status, 1);
+      NodeAssert.match(missing.stderr, /pnpm run install:tui/);
+      const stopped = (await NodeFSP.readFile(log, "utf8")).trim().split("\n");
+      NodeAssert.equal(stopped.length, 1);
+      NodeAssert.match(stopped[0], /check-dependencies.mjs$/);
     } finally {
       await NodeFSP.rm(root, { recursive: true, force: true });
     }

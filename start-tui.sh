@@ -7,6 +7,8 @@ cd "$script_dir"
 
 node_runner=(npx --yes node@26.4.0)
 
+"${node_runner[@]}" apps/tui/scripts/check-dependencies.mjs
+
 "${node_runner[@]}" apps/tui/node_modules/typescript/bin/tsc \
   --noEmit false \
   --outDir apps/tui/dist \

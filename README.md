@@ -96,7 +96,10 @@ cd t3code
 vp i
 ```
 
-If you already have the checkout, run `vp i` from its root. The `start-tui.sh` launcher compiles
+After pulling updates, run `pnpm run install:tui` from the checkout root to install any new TUI
+dependencies. The launcher checks for missing dependencies before compiling.
+
+The `start-tui.sh` launcher compiles
 the TUI and uses `npx` to run Node 26.4.0, including the required FFI support. Its first run may
 download that Node version.
 
