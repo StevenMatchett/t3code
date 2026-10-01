@@ -1,5 +1,6 @@
 import { ArrowUpIcon, ClockIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
+import { PastedTextView } from "./PastedTextView";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
   getQuestionAnswerPreview,
@@ -1935,6 +1936,17 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             markdownCwd={ctx.markdownCwd}
           />
         </div>
+        <PastedTextView
+          files={userFiles
+            .filter((file) => file.source?._tag === "pasted-text")
+            .map((file) => ({
+              id: file.id,
+              name: file.name,
+              mimeType: file.mimeType,
+              sizeBytes: file.sizeBytes,
+              asset: { environmentId: ctx.activeThreadEnvironmentId, attachmentId: file.id },
+            }))}
+        />
       </div>
       <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100">
         <div className="flex shrink-0 items-center gap-2">

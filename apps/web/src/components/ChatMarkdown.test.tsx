@@ -5,6 +5,7 @@ import { create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
+import * as localApi from "../localApi";
 import { GitHubIcon } from "./Icons";
 import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
@@ -63,6 +64,60 @@ import ChatMarkdown, {
   hasMarkdownFilePrimaryAction,
   shouldUseMarkdownFileBrowserPrimaryAction,
 } from "./ChatMarkdown";
+
+describe("ChatMarkdown output link menu", () => {
+  it.each(["https://example.com/docs?topic=menus#copy", "mailto:hello@example.com"])(
+    "copies %s directly from a right-click without selecting text",
+    async (href) => {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      const getSelection = vi.fn(() => {
+        throw new Error("No selection needed");
+      });
+      vi.stubGlobal("window", { getSelection });
+      vi.stubGlobal("navigator", { clipboard: { writeText } });
+      const show = vi.fn().mockResolvedValue("copy-link");
+      const openExternal = vi.fn().mockResolvedValue(undefined);
+      const apiSpy = vi.spyOn(localApi, "readLocalApi").mockReturnValue({
+        ...localApi.createLocalApi(),
+        contextMenu: { show, close: vi.fn() },
+        shell: { openExternal, openSystemSettings: vi.fn() },
+      });
+      let renderer: ReactTestRenderer | undefined;
+      try {
+        await act(async () => {
+          renderer = create(<ChatMarkdown cwd={undefined} text={`[**Docs**](${href})`} />);
+        });
+        const preventDefault = vi.fn();
+        const stopPropagation = vi.fn();
+        await act(async () => {
+          renderer!.root.findByType("a").props.onContextMenu({
+            preventDefault,
+            stopPropagation,
+            clientX: 12,
+            clientY: 24,
+          });
+        });
+        expect(show).toHaveBeenCalledWith(
+          [
+            { id: "copy-link", label: "Copy link" },
+            { id: "open-external", label: "Go to link" },
+          ],
+          { x: 12, y: 24 },
+        );
+        expect(writeText).toHaveBeenCalledWith(href);
+        expect(openExternal).not.toHaveBeenCalled();
+        expect(getSelection).not.toHaveBeenCalled();
+        expect(preventDefault).toHaveBeenCalled();
+        expect(stopPropagation).toHaveBeenCalled();
+      } finally {
+        await act(async () => renderer?.unmount());
+        apiSpy.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+});
 
 function codeButton(renderer: ReactTestRenderer, label: string) {
   const button = renderer.root

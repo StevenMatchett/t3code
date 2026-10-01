@@ -2,6 +2,7 @@ import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
+import { PastedTextView } from "./PastedTextView";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { filterComposerPullRequestMatches } from "@t3tools/shared/composerPullRequestMatches";
 import { importPastedComposerText, readPastedComposerContext } from "../composerInlineTokenPaste";
@@ -6602,6 +6603,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     })}
                   </div>
                 )}
+
+              {!isComposerCollapsedMobile && !isComposerApprovalState && (
+                <PastedTextView
+                  files={composerFiles
+                    .filter((file) => file.source?._tag === "pasted-text")
+                    .map((file) => ({
+                      id: file.id,
+                      name: file.name,
+                      mimeType: file.mimeType,
+                      sizeBytes: file.sizeBytes,
+                      file: file.file,
+                      ...(file.uploadedAttachmentId && file.uploadEnvironmentId
+                        ? {
+                            asset: {
+                              environmentId: file.uploadEnvironmentId,
+                              attachmentId: file.uploadedAttachmentId,
+                            },
+                          }
+                        : {}),
+                    }))}
+                />
+              )}
 
               <div
                 className={cn(

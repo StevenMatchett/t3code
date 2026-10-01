@@ -1,4 +1,3 @@
-import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
 import { useAtomValue } from "@effect/atom-react";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
@@ -31,7 +30,6 @@ import type {
   EnvironmentId,
   ScopedThreadRef,
   ServerProviderSkill,
-  ThreadPullRequestKey,
 } from "@t3tools/contracts";
 import { faviconUrlForOrigin } from "@t3tools/shared/favicon";
 import {
@@ -160,7 +158,7 @@ import { useAssetUrlRefresh, useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
 import { useRemoteOpenResolution, type RemoteOpenMode } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
-import { readThreadShell, useProjects } from "../state/entities";
+import { useProjects } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { shellEnvironment } from "../state/shell";
 import { assetEnvironment } from "../state/assets";
@@ -2248,7 +2246,6 @@ function useChatMarkdownState({
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
-  const pullRequestLinking = usePullRequestLinking(threadRef?.environmentId);
   const environmentId = threadRef?.environmentId ?? explicitEnvironmentId ?? null;
   const remoteOpen = useRemoteOpenResolution(environmentId);
   const canUseShellActions = canUseMarkdownFileShellActions(
@@ -2396,35 +2393,6 @@ function useChatMarkdownState({
   // synchronously whether to intercept its `_blank`, and a subscription is what
   // makes a persisted "app" apply once settings hydrate after launch.
   const linkTargetPreference = useClientSettings((settings) => settings.browserLinkTarget);
-  const resolveThreadPullRequest = useCallback(
-    (href: string): (ThreadPullRequestKey & { readonly url: string }) | null => {
-      if (
-        threadRef === undefined ||
-        readThreadShell(threadRef) === null ||
-        !pullRequestLinking.canLink(href)
-      )
-        return null;
-      const parsed = parseChangeRequestUrl(href);
-      return parsed === null ? null : { ...parsed, url: href };
-    },
-    [pullRequestLinking, threadRef],
-  );
-  const linkedThreadPullRequestFor = useCallback(
-    (href: string) => {
-      if (threadRef === undefined || !pullRequestLinking.isLinked(readThreadShell(threadRef), href))
-        return null;
-      const parsed = parseChangeRequestUrl(href);
-      return parsed === null ? null : { ...parsed, url: href };
-    },
-    [pullRequestLinking, threadRef],
-  );
-  const updateThreadPullRequestLink = useCallback(
-    async (href: string, linked: boolean) => {
-      if (threadRef === undefined || (!linked && linkedThreadPullRequestFor(href) === null)) return;
-      await pullRequestLinking.changeLink(threadRef, href, linked);
-    },
-    [linkedThreadPullRequestFor, pullRequestLinking, threadRef],
-  );
   const openExternalLinkInPreview = useCallback(
     (url: string) => {
       if (!threadRef) {
@@ -2637,14 +2605,11 @@ function useChatMarkdownState({
       openExternalLinkInPreview,
       openMarkdownMedia,
       projects,
-      linkedThreadPullRequestFor,
-      resolveThreadPullRequest,
       resolvedTheme,
       serverConfig,
       skills,
       text,
       threadRef,
-      updateThreadPullRequestLink,
     }),
     [
       cwd,
@@ -2666,14 +2631,11 @@ function useChatMarkdownState({
       openExternalLinkInPreview,
       openMarkdownMedia,
       projects,
-      linkedThreadPullRequestFor,
-      resolveThreadPullRequest,
       resolvedTheme,
       serverConfig,
       skills,
       text,
       threadRef,
-      updateThreadPullRequestLink,
     ],
   );
   return {
@@ -2810,10 +2772,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       linkTargetPreference,
       openExternalLinkInPreview,
       projects,
-      linkedThreadPullRequestFor,
-      resolveThreadPullRequest,
       serverConfig,
-      updateThreadPullRequestLink,
       fileLinkChip,
       renderContextReference,
     } = use(ChatMarkdownRendererContext);
@@ -2950,52 +2909,19 @@ const CHAT_MARKDOWN_COMPONENTS = {
             });
           }}
           onContextMenu={(event) => {
-            if (!href || !faviconHost) return;
+            if (!href || isSameDocumentLink) return;
             event.preventDefault();
             event.stopPropagation();
             const api = readLocalApi();
             if (!api) return;
-            const threadLinkAction =
-              linkedThreadPullRequestFor(href) !== null
-                ? "unlink-from-thread"
-                : resolveThreadPullRequest(href) === null
-                  ? undefined
-                  : "link-to-thread";
             void showExternalLinkContextMenu({
               href,
-              canOpenInPreview,
-              threadLinkAction,
               position: { x: event.clientX, y: event.clientY },
               showContextMenu: (items, position) => api.contextMenu.show(items, position),
-              openInPreview: async (target) => {
-                const result = await openExternalLinkInPreview(target);
-                if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-                  reportMarkdownActionFailure(
-                    { operation: "open-link-in-preview", target },
-                    result.cause,
-                  );
-                }
-              },
               openExternal: (target) => api.shell.openExternal(target),
               copyLink: (target) => writeTextToClipboard(target, "link"),
-              updateThreadLink: updateThreadPullRequestLink,
               reportFailure: (operation, cause) => {
                 reportMarkdownActionFailure({ operation, target: href }, cause);
-                if (
-                  operation === "link-pull-request-to-thread" ||
-                  operation === "unlink-pull-request-from-thread"
-                ) {
-                  toastManager.add(
-                    stackedThreadToast({
-                      type: "error",
-                      title:
-                        operation === "link-pull-request-to-thread"
-                          ? "Unable to link pull request"
-                          : "Unable to unlink pull request",
-                      description: cause instanceof Error ? cause.message : "The request failed.",
-                    }),
-                  );
-                }
               },
             });
           }}
