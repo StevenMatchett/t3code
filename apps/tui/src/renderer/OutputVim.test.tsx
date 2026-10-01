@@ -132,6 +132,50 @@ describe("Vim output navigation", () => {
     expect(driver.renderer.root.findDescendantById("output-link-menu")).toBeUndefined();
   });
 
+  it("highlights the link action under the pointer across each row's full width", async () => {
+    const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
+    const { driver, copy } = await setup("[Link](https://example.com)");
+    const row = driver
+      .captureFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("Link ("));
+    await driver.mouse.click(3, row, MouseButtons.RIGHT, { delayMs: 0 });
+    expect(driver.captureFrame()).toContain("> Copy link");
+    const copyItem = driver.renderer.root.findDescendantById("output-link-menu-0")!;
+    const goItem = driver.renderer.root.findDescendantById("output-link-menu-1")!;
+    await driver.mouse.moveTo(goItem.screenX + goItem.width - 1, goItem.screenY);
+    expect(driver.captureFrame()).toContain("> Go to link");
+    expect(driver.captureFrame()).not.toContain("> Copy link");
+    await driver.mouse.moveTo(copyItem.screenX + 2, copyItem.screenY);
+    expect(driver.captureFrame()).toContain("> Copy link");
+    expect(driver.captureFrame()).not.toContain("> Go to link");
+    expect(copy).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    expect(driver.renderer.getSelection()).toBeNull();
+    await driver.mouse.moveTo(goItem.screenX + 2, goItem.screenY);
+    await driver.input.pressKey("RETURN");
+    expect(open).toHaveBeenCalledExactlyOnceWith("https://example.com");
+    expect(copy).not.toHaveBeenCalled();
+    expect(driver.renderer.root.findDescendantById("output-link-menu")).toBeUndefined();
+  });
+
+  it("updates hover after keyboard selection while the pointer stays in the same row", async () => {
+    const { driver, copy } = await setup("[Link](https://example.com)");
+    const row = driver
+      .captureFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("Link ("));
+    await driver.mouse.click(3, row, MouseButtons.RIGHT, { delayMs: 0 });
+    const item = driver.renderer.root.findDescendantById("output-link-menu-0")!;
+    await driver.mouse.moveTo(item.screenX + 2, item.screenY);
+    await driver.input.pressKey("ARROW_DOWN");
+    expect(driver.captureFrame()).toContain("> Go to link");
+    await driver.mouse.moveTo(item.screenX + 3, item.screenY);
+    expect(driver.captureFrame()).toContain("> Copy link");
+    await driver.mouse.click(item.screenX + 3, item.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    expect(copy).toHaveBeenCalledExactlyOnceWith("https://example.com");
+  });
+
   it("dismisses the link menu with Escape or an outside click without executing an action", async () => {
     const open = vi.spyOn(Browser, "openBrowser").mockResolvedValue(true);
     const { driver, copy } = await setup("[Link](https://example.com)\nplain text");

@@ -22,6 +22,11 @@ export function useOutputLinkMenu({
     null,
   );
   const [notice, setNotice] = useState("");
+  const select = (index: number) => {
+    setMenu((current) =>
+      current === null || current.selected === index ? current : { ...current, selected: index },
+    );
+  };
   const menuWidth = Math.min(20, width);
   const open = (href: string, position: { x: number; y: number }) => {
     if (!active) return;
@@ -98,6 +103,8 @@ export function useOutputLinkMenu({
                 id={`output-link-menu-${index}`}
                 height={1}
                 width="100%"
+                onMouseOver={() => select(index)}
+                onMouseMove={() => select(index)}
                 onMouseDown={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
