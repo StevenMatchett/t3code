@@ -194,6 +194,10 @@ export function openTuiSessionState(options: {
   }
   return {
     error,
+    soundsEnabled:
+      read("sounds", Schema.decodeUnknownSync(Schema.Struct({ enabled: Schema.Boolean })))
+        ?.enabled ?? true,
+    saveSoundsEnabled: (enabled) => save("sounds", { enabled }),
     shell: shell ? { ...shell, modal: null } : undefined,
     interactions,
     saveShell: ({ route, sidebarView, projectId, threadId }) =>

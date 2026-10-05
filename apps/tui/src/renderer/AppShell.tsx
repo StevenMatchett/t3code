@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
-import { useMemo, useContext, useEffect, useState, useCallback } from "react";
+import { useMemo, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { AppShellView, useAppShellState } from "../app/AppShell.tsx";
 import {
@@ -38,6 +38,8 @@ import {
   ProjectContextMenu,
   type ThreadMenuAction,
 } from "./ThreadContextMenu.tsx";
+import { createSoundTracker } from "../features/chat/notificationSounds.ts";
+import { createNotificationAudio } from "../platform/notificationAudio.ts";
 
 const NO_SESSION_ERROR = Atom.make<string | null>(null);
 
@@ -47,6 +49,7 @@ type PaletteEntry = CommandPaletteItem & {
     | { readonly type: "new-thread" }
     | { readonly type: "archived" }
     | { readonly type: "help" }
+    | { readonly type: "toggle-sounds" }
     | { readonly type: "toggle-sidebar-view" }
     | { readonly type: "diff" }
     | { readonly type: "restore" }
@@ -125,6 +128,23 @@ export function AppShell({
     };
   }, [copyNotice]);
   const snapshot = Option.getOrNull(shell.snapshot);
+  const [soundsEnabled, setSoundsEnabled] = useState(client.session?.soundsEnabled ?? true);
+  const [trackSounds] = useState(createSoundTracker);
+  const audio = useRef<ReturnType<typeof createNotificationAudio> | null>(null);
+  useEffect(() => {
+    audio.current = createNotificationAudio();
+    return () => {
+      audio.current?.close();
+      audio.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    const live =
+      connection.phase === "connected" && shell.status === "live" && Option.isNone(shell.error);
+    const sound = trackSounds(snapshot?.threads ?? [], live);
+    if (!soundsEnabled || !live) audio.current?.stop();
+    else if (sound) audio.current?.play(sound);
+  }, [snapshot, connection.phase, shell.status, shell.error, soundsEnabled, trackSounds]);
   const archived = useAtomValue(client.archivedThreads);
   const rows = useMemo(
     () => ({
@@ -227,6 +247,13 @@ export function AppShell({
     );
     const commands: PaletteEntry[] = [
       {
+        id: "command:sounds",
+        label: soundsEnabled ? "Turn notification sounds off" : "Turn notification sounds on",
+        detail: "Command · Input and completion chimes",
+        keywords: "audio mute unmute alerts approval finished",
+        target: { type: "toggle-sounds" },
+      },
+      {
         id: "command:sidebar-view",
         label: `Show ${nextSidebarView(state.sidebarView)} in sidebar`,
         detail: "Command · Ctrl+B",
@@ -325,6 +352,7 @@ export function AppShell({
     ];
   }, [
     paletteSearchQuery,
+    soundsEnabled,
     rows.projects,
     rows.threads,
     selectedThread,
@@ -337,6 +365,12 @@ export function AppShell({
     if (!entry) return;
     closePalette();
     switch (entry.target.type) {
+      case "toggle-sounds": {
+        const enabled = !soundsEnabled;
+        setSoundsEnabled(enabled);
+        client.session?.saveSoundsEnabled(enabled);
+        break;
+      }
       case "toggle-sidebar-view":
         dispatch({ type: "toggle-sidebar-view" });
         break;

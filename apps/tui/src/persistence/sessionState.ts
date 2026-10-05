@@ -72,6 +72,8 @@ export type TerminalView = typeof TerminalView.Type;
 
 export interface TuiSessionState {
   readonly error: Atom.Atom<string | null>;
+  readonly soundsEnabled: boolean;
+  readonly saveSoundsEnabled: (enabled: boolean) => void;
   readonly shell: ShellState | undefined;
   readonly interactions: ReadonlyMap<ThreadId, SavedInteraction>;
   readonly saveShell: (state: ShellState) => void;

@@ -193,6 +193,14 @@ require pairing again, never an automatic replacement server. Quitting the TUI l
 T3 server running. The project list, active threads, and conversation history come from that same
 server and update when another client changes them.
 
+The TUI plays distinct chimes when an agent needs input or approval and when a turn finishes.
+Search for “notification sounds” in the command palette (`Ctrl+K`) to turn them off or on;
+your preference is saved for the TUI session. Local sessions play chimes on the machine running
+the TUI: Linux needs `paplay`, `pw-play`, or `aplay` and an audio output; macOS and Windows use
+their built-in audio players. Over SSH, the TUI sends two terminal bells for input and one for
+completion to your local terminal. Enable audible bells in that terminal's settings to hear them;
+the terminal controls their sound and may rate-limit repeated bells.
+
 Use Up/Down or Tab to select a project or thread, Enter or Right to open it, and Escape or Left to
 go back. Within a conversation, Up/Down and Page Up/Down scroll; End follows the latest output.
 The mouse wheel scrolls conversation history, and project or thread rows can be opened with a

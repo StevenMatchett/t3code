@@ -56,6 +56,18 @@ function open(
 }
 
 describe("TUI session persistence", () => {
+  it("defaults sounds on and restores the saved preference", () => {
+    const path = directory();
+    const first = open(path);
+    expect(first.session.soundsEnabled).toBe(true);
+    first.session.saveSoundsEnabled(false);
+    first.session.close();
+    const second = open(path);
+    expect(second.session.soundsEnabled).toBe(false);
+    second.session.saveSoundsEnabled(true);
+    second.session.close();
+    expect(open(path).session.soundsEnabled).toBe(true);
+  });
   it("restores Markdown preferences and accepts views saved before the toggle existed", () => {
     const path = directory();
     const first = open(path);
