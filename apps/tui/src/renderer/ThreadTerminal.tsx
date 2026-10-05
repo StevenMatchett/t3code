@@ -66,7 +66,11 @@ export function ThreadTerminal({
   const serverIds = summaries
     .filter((terminal) => terminal.threadId === threadId)
     .map((terminal) => terminal.terminalId);
-  const [savedView] = useState(() => client.session?.terminal(threadId));
+  const [savedView] = useState(() => {
+    const saved = client.session?.terminal(threadId);
+    // A saved tab can outlive its shell; only restore tabs we have not dismissed.
+    return saved && !discardedIds(client, threadId).has(saved.terminalId) ? saved : undefined;
+  });
   const [firstTerminalId] = useState(
     () =>
       savedView?.terminalId ??

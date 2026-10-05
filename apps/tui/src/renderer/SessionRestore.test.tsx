@@ -1,7 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, AtomRegistry } from "effect/unstable/reactivity";
+import { EMPTY_TERMINAL_BUFFER_STATE } from "@t3tools/client-runtime/state/terminal";
 import * as Option from "effect/Option";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -165,6 +166,51 @@ describe("restoring the TUI session", () => {
     );
     expect(second.session.terminal(id)).toEqual({ terminalId: "term-2", focused: false });
   });
+
+  for (const end of ["exit", "close"] as const) {
+    it(`opens a new shell after ${end} with a saved terminal tab`, async () => {
+      const app = setup(directory());
+      const driver = await app.render();
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("RETURN");
+      const id = ThreadId.make("thread-0");
+
+      for (const terminalId of ["term-1", "term-2"]) {
+        await driver.input.pressKey("t", { ctrl: true });
+        expect(driver.captureFrame()).toContain(`[${terminalId}]`);
+        expect(app.session.terminal(id)?.terminalId).toBe(terminalId);
+
+        if (end === "exit") {
+          await act(async () =>
+            app.registry.set(
+              app.fixture.terminalBuffer,
+              AsyncResult.success({
+                ...EMPTY_TERMINAL_BUFFER_STATE,
+                status: "exited",
+                version: 1,
+              }),
+            ),
+          );
+          await driver.flush();
+        } else {
+          await driver.input.pressKey("\\", { ctrl: true });
+          await driver.input.pressKey("x");
+        }
+        expect(driver.captureFrame()).toContain("Visible line 59");
+
+        await act(async () =>
+          app.registry.set(
+            app.fixture.terminalBuffer,
+            AsyncResult.success({ ...EMPTY_TERMINAL_BUFFER_STATE, status: "running" }),
+          ),
+        );
+      }
+
+      await driver.input.pressKey("t", { ctrl: true });
+      expect(driver.captureFrame()).toContain("[term-3]");
+      expect(app.fixture.terminalAttachInputs.at(-1)).toMatchObject({ terminalId: "term-3" });
+    });
+  }
 
   it("restores the conversation scroll anchor and tool detail preference", async () => {
     const path = directory();
