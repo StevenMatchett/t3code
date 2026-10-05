@@ -194,7 +194,7 @@ T3 server running. The project list, active threads, and conversation history co
 server and update when another client changes them.
 
 The TUI plays distinct chimes when an agent needs input or approval and when a turn finishes.
-Search for “notification sounds” in the command palette (`Ctrl+K`) to turn them off or on;
+Press `Ctrl+G` or search for “notification sounds” in the command palette (`Ctrl+K`) to toggle them;
 your preference is saved for the TUI session. Local sessions play chimes on the machine running
 the TUI: Linux needs `paplay`, `pw-play`, or `aplay` and an audio output; macOS and Windows use
 their built-in audio players. Over SSH, the TUI sends two terminal bells for input and one for

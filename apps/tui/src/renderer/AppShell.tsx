@@ -101,7 +101,7 @@ export function AppShell({
   const [terminalFocused, setTerminalFocused] = useState(false);
   const [paletteSearchQuery, setPaletteSearchQuery] = useState("");
   const threadSearch = useAtomValue(client.threadSearch(paletteSearchQuery));
-  const [copyNotice, setCopyNotice] = useState<{
+  const [notice, setNotice] = useState<{
     readonly text: string;
     readonly failed: boolean;
   } | null>(null);
@@ -109,24 +109,24 @@ export function AppShell({
     const text = selection.getSelectedText();
     if (!text) return;
     const copied = renderer.copyToClipboardOSC52(text);
-    setCopyNotice({
+    setNotice({
       text: copied ? "Copied to clipboard." : "Copy unavailable in this terminal.",
       failed: !copied,
     });
   });
   useEffect(() => {
-    if (!copyNotice) return;
+    if (!notice) return;
     const fiber = Effect.runFork(
       Effect.sleep("2 seconds").pipe(
         Effect.andThen(
-          Effect.sync(() => setCopyNotice((current) => (current === copyNotice ? null : current))),
+          Effect.sync(() => setNotice((current) => (current === notice ? null : current))),
         ),
       ),
     );
     return () => {
       Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [copyNotice]);
+  }, [notice]);
   const snapshot = Option.getOrNull(shell.snapshot);
   const [soundsEnabled, setSoundsEnabled] = useState(client.session?.soundsEnabled ?? true);
   const [trackSounds] = useState(createSoundTracker);
@@ -210,7 +210,7 @@ export function AppShell({
       ? client.threadManagement.unarchive(registry, thread.id)
       : client.threadManagement.archive(registry, thread.id));
     if (!accepted) {
-      setCopyNotice({ text: "The environment did not accept that change.", failed: true });
+      setNotice({ text: "The environment did not accept that change.", failed: true });
     } else if (state.route === "conversation" && state.threadId === thread.id) {
       dispatch({ type: "back" });
     }
@@ -249,7 +249,7 @@ export function AppShell({
       {
         id: "command:sounds",
         label: soundsEnabled ? "Turn notification sounds off" : "Turn notification sounds on",
-        detail: "Command · Input and completion chimes",
+        detail: "Command · Ctrl+G · Input and completion chimes",
         keywords: "audio mute unmute alerts approval finished",
         target: { type: "toggle-sounds" },
       },
@@ -360,17 +360,20 @@ export function AppShell({
     state.sidebarView,
     threadSearch.matches,
   ]);
+  const toggleSounds = () => {
+    const enabled = !soundsEnabled;
+    setSoundsEnabled(enabled);
+    client.session?.saveSoundsEnabled(enabled);
+    if (!enabled) audio.current?.stop();
+  };
   const choosePaletteEntry = (id: string) => {
     const entry = paletteEntries.find((item) => item.id === id);
     if (!entry) return;
     closePalette();
     switch (entry.target.type) {
-      case "toggle-sounds": {
-        const enabled = !soundsEnabled;
-        setSoundsEnabled(enabled);
-        client.session?.saveSoundsEnabled(enabled);
+      case "toggle-sounds":
+        toggleSounds();
         break;
-      }
       case "toggle-sidebar-view":
         dispatch({ type: "toggle-sidebar-view" });
         break;
@@ -412,6 +415,12 @@ export function AppShell({
   };
   useKeyboard((key) => {
     if (!active || navigationMenu || terminalFocused) return;
+    if (key.ctrl && !key.meta && !key.option && !key.shift && key.name.toLowerCase() === "g") {
+      key.preventDefault();
+      key.stopPropagation();
+      toggleSounds();
+      return;
+    }
     if (key.ctrl && key.name === "b" && !state.modal && !threadOverlay) {
       key.preventDefault();
       key.stopPropagation();
@@ -587,7 +596,12 @@ export function AppShell({
         width={width}
         height={height}
         hotkeys={hotkeys}
-        notice={sessionError ? { text: sessionError, failed: true } : copyNotice}
+        soundShortcut={
+          active && !terminalFocused && !navigationMenu
+            ? { key: "Ctrl+G", label: soundsEnabled ? "Sounds on" : "Sounds off" }
+            : undefined
+        }
+        notice={sessionError ? { text: sessionError, failed: true } : notice}
         managementOverlay={
           threadOverlay?.type === "restore" && state.threadId
             ? {

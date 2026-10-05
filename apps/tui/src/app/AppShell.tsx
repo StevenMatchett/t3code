@@ -42,6 +42,7 @@ export interface AppShellViewProps {
   readonly width: number;
   readonly height: number;
   readonly hotkeys?: HotkeyState;
+  readonly soundShortcut?: HotkeyHint | undefined;
   readonly notice?: {
     readonly text: string;
     readonly failed: boolean;
@@ -206,6 +207,7 @@ function Help() {
       <Text>Esc Back R Reconnect</Text>
       <Text>Ctrl+B Cycle Projects / Recent / Archived sidebar</Text>
       <Text>Ctrl+K Search conversation output, projects, threads, and commands</Text>
+      <Text>Ctrl+G Toggle notification sounds</Text>
       <Text tone="accent">CONVERSATION</Text>
       <Text>Enter / i Write prompt Esc Return to history</Text>
       <Text>Enter Send Shift+Enter New line</Text>
@@ -249,6 +251,7 @@ export function AppShellView({
   width,
   height,
   hotkeys,
+  soundShortcut,
   notice,
   children,
   onOpenProject,
@@ -669,23 +672,24 @@ export function AppShellView({
                       ? "Projects"
                       : "Threads")
           }
-          hints={
-            managementOverlay?.hints ??
-            (state.modal === "new-thread" || state.modal === "new-project"
-              ? [
-                  { key: "Tab", label: "Next field" },
-                  { key: "Enter", label: "Activate" },
-                  { key: "Esc", label: "Close" },
-                ]
-              : state.modal
-                ? [{ key: "Esc", label: "Close" }]
-                : conversation
-                  ? (hotkeys?.hints ?? [
-                      { key: "Enter", label: "Write" },
-                      { key: "Esc", label: "Threads" },
-                    ])
-                  : navigationHints)
-          }
+          hints={[
+            ...(soundShortcut ? [soundShortcut] : []),
+            ...(managementOverlay?.hints ??
+              (state.modal === "new-thread" || state.modal === "new-project"
+                ? [
+                    { key: "Tab", label: "Next field" },
+                    { key: "Enter", label: "Activate" },
+                    { key: "Esc", label: "Close" },
+                  ]
+                : state.modal
+                  ? [{ key: "Esc", label: "Close" }]
+                  : conversation
+                    ? (hotkeys?.hints ?? [
+                        { key: "Enter", label: "Write" },
+                        { key: "Esc", label: "Threads" },
+                      ])
+                    : navigationHints)),
+          ]}
         />
       )}
       {contextMenu}
