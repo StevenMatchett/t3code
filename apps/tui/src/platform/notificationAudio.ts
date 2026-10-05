@@ -12,7 +12,7 @@ import type { NotificationSound } from "../features/chat/notificationSounds.ts";
 export function notificationWave(kind: NotificationSound): Buffer {
   const notes = kind === "input" ? [659.25, 783.99] : [659.25];
   const rate = 24000;
-  const duration = 0.24;
+  const duration = 0.32;
   const noteSamples = Math.round(rate * duration);
   const samples = noteSamples * notes.length;
   const wave = Buffer.alloc(44 + samples * 2);
@@ -33,11 +33,11 @@ export function notificationWave(kind: NotificationSound): Buffer {
     const t = offset / rate;
     // A soft attack and exponential decay avoid the harsh edge of a system beep.
     const envelope =
-      Math.min(1, t / 0.012) * Math.exp(-t / 0.065) * Math.min(1, (duration - t) / 0.035);
+      Math.min(1, t / 0.012) * Math.exp(-t / 0.12) * Math.min(1, (duration - t) / 0.035);
     const frequency = notes[Math.floor(i / noteSamples)]!;
     const tone =
       Math.sin(2 * Math.PI * frequency * t) + 0.1 * Math.sin(4 * Math.PI * frequency * t);
-    wave.writeInt16LE(Math.round(tone * envelope * 7000), 44 + i * 2);
+    wave.writeInt16LE(Math.round(tone * envelope * 16000), 44 + i * 2);
   }
   return wave;
 }
