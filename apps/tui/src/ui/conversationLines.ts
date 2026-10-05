@@ -21,6 +21,7 @@ export function conversationLines(
   expanded: boolean,
   expandedGroups: ReadonlyMap<string, boolean> = new Map(),
   renderMarkdown = true,
+  unicode = true,
 ): readonly ConversationLine[] {
   const result: ConversationLine[] = [];
   let pending: TimelineRow[] = [];
@@ -28,7 +29,7 @@ export function conversationLines(
     const tools = pending.filter((row) => row.kind === "tool");
     const first = tools[0];
     if (tools.length < 2 || !first || (expanded && !expandedGroups.has(`tools:${first.id}`))) {
-      result.push(...renderRows(pending, width, expanded, renderMarkdown));
+      result.push(...renderRows(pending, width, expanded, renderMarkdown, unicode));
     } else {
       const id = `tools:${first.id}`;
       const open = expandedGroups.get(id) ?? expanded;
@@ -45,7 +46,7 @@ export function conversationLines(
           toolGroupId: id,
         })),
       );
-      if (open) result.push(...renderRows(pending, width, true, renderMarkdown));
+      if (open) result.push(...renderRows(pending, width, true, renderMarkdown, unicode));
     }
     pending = [];
   };
@@ -61,7 +62,7 @@ export function conversationLines(
       row.status !== "inProgress";
     if (!groupable || (pending.length > 0 && pending[0]?.turnId !== row.turnId)) flush();
     if (groupable) pending.push(row);
-    else result.push(...renderRows([row], width, expanded, renderMarkdown));
+    else result.push(...renderRows([row], width, expanded, renderMarkdown, unicode));
   }
   flush();
   return result;
@@ -72,11 +73,12 @@ function renderRows(
   width: number,
   expanded: boolean,
   renderMarkdown: boolean,
+  unicode: boolean,
 ): readonly ConversationLine[] {
   return rows.flatMap<ConversationLine>((row) => {
     if (row.source === "message" && row.kind === "assistant") {
       return [
-        ...markdownLines(row.text, width, renderMarkdown),
+        ...markdownLines(row.text, width, renderMarkdown, unicode),
         { text: "", spans: [], tone: "text" as const, strong: false },
       ].map((line, index) => ({ ...line, id: row.id, line: index }));
     }
@@ -125,6 +127,7 @@ function renderRows(
           [row.text, row.detail].filter(Boolean).join("\n\n"),
           Math.max(1, width - visiblePrefix.length),
           renderMarkdown,
+          unicode,
         ).map((current, index) => {
           const padding = index === 0 ? visiblePrefix : " ".repeat(visiblePrefix.length);
           return {

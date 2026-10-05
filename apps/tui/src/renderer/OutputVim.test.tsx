@@ -41,6 +41,96 @@ async function setup(text?: string) {
 }
 
 describe("Vim output navigation", () => {
+  it("renders Mermaid, toggles its source and yanks diagram lines", async () => {
+    const source = "```mermaid\nflowchart LR\nA[Start] --> B[Done]\n```";
+    const { driver, copy } = await setup(source);
+    expect(driver.captureFrame()).toContain("│Start├─►│Done│");
+    expect(driver.captureFrame()).not.toContain("flowchart LR");
+    await driver.input.typeText("ggjjyy");
+    expect(copy).toHaveBeenLastCalledWith("│Start├─►│Done│\n");
+    await driver.input.pressKey("r", { ctrl: true });
+    expect(driver.captureFrame()).toContain("```mermaid");
+    expect(driver.captureFrame()).toContain("A[Start] --> B[Done]");
+    await driver.input.typeText("ggjjyy");
+    expect(copy).toHaveBeenLastCalledWith("A[Start] --> B[Done]\n");
+    await driver.input.pressKey("r", { ctrl: true });
+    await driver.resize(20, 32);
+    expect(driver.captureFrame()).not.toContain("│Start├─►│Done│");
+    await driver.resize(100, 32);
+    expect(driver.captureFrame()).toContain("│Start├─►│Done│");
+  });
+
+  it("keeps streamed Mermaid as source until the fence closes, then renders it", async () => {
+    const source = "```mermaid\nflowchart LR\nA[Start] --> B[Done]";
+    const { driver, fixture } = await setup(source);
+    expect(driver.captureFrame()).toContain("flowchart LR");
+    expect(driver.captureFrame()).not.toContain("│Start├─►│Done│");
+    await act(async () =>
+      driver.registry.update(fixture.states[0]!, (state) => ({
+        ...state,
+        data: Option.map(state.data, (thread) => ({
+          ...thread,
+          messages: thread.messages.map((message) => ({
+            ...message,
+            text: `${source}\n\`\`\``,
+            streaming: false,
+          })),
+        })),
+      })),
+    );
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("│Start├─►│Done│");
+    expect(driver.captureFrame()).not.toContain("flowchart LR");
+  });
+
+  it("renders Mermaid in agent output with the same source toggle", async () => {
+    const { driver, fixture } = await setup();
+    const source = "```mermaid\nflowchart LR\nA[Start] --> B[Done]\n```";
+    await act(async () =>
+      driver.registry.update(fixture.states[0]!, (state) => ({
+        ...state,
+        data: Option.map(state.data, (thread) => ({
+          ...thread,
+          activities: [
+            {
+              id: EventId.make("diagram-agent-start"),
+              kind: "task.started",
+              tone: "info" as const,
+              summary: "Researcher started",
+              turnId: null,
+              createdAt: thread.createdAt,
+              payload: {
+                taskId: "diagram-agent",
+                taskType: "subagent",
+                agentKind: "agent",
+                title: "Researcher",
+              },
+            },
+            {
+              id: EventId.make("diagram-agent-progress"),
+              kind: "task.progress",
+              tone: "info" as const,
+              summary: "Workflow",
+              turnId: null,
+              createdAt: thread.createdAt,
+              payload: { taskId: "diagram-agent", detail: source },
+            },
+          ],
+        })),
+      })),
+    );
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Agent: Researcher");
+    expect(driver.captureFrame()).toContain("│Start├─►│Done│");
+    await driver.input.pressKey("r", { ctrl: true });
+    expect(driver.captureFrame()).toContain("flowchart LR");
+    expect(driver.captureFrame()).not.toContain("│Start├─►│Done│");
+    const toggle = driver.renderer.root.findDescendantById("agent-output-markdown-toggle")!;
+    await driver.mouse.click(toggle.screenX + 2, toggle.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    expect(driver.captureFrame()).toContain("│Start├─►│Done│");
+  });
   it("toggles rendered output with Ctrl+R and the view control without editing the draft", async () => {
     const source = "# Summary\n**Done** and ~~old~~\n[Docs](https://example.com/docs)";
     const { driver, fixture } = await setup(source);

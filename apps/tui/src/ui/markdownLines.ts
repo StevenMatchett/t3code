@@ -4,6 +4,7 @@ import stringWidth from "string-width";
 import { wrapTerminalSpans } from "./textLayout.ts";
 import { normalizeTerminalText } from "../features/chat/terminalText.ts";
 import type { ThemeToken } from "./theme.ts";
+import { closedMermaidFence, mermaidDiagram } from "./mermaidDiagram.ts";
 
 export interface MarkdownSpan {
   readonly text: string;
@@ -181,7 +182,7 @@ function tableLines(table: Tokens.Table, width: number): MarkdownLine[] {
   return result;
 }
 
-function blocks(tokens: readonly Token[], width: number): MarkdownLine[] {
+function blocks(tokens: readonly Token[], width: number, unicode: boolean): MarkdownLine[] {
   const result: MarkdownLine[] = [];
   let previousRaw = "";
   let taskMarker: MarkdownSpan[] = [];
@@ -210,13 +211,27 @@ function blocks(tokens: readonly Token[], width: number): MarkdownLine[] {
         taskMarker = [];
         break;
       case "code":
-        append([{ text: token.lang || "Code" }], "muted", true);
+        if (token.lang?.trim().toLowerCase() === "mermaid" && closedMermaidFence(token.raw)) {
+          const diagram = mermaidDiagram(token.text, unicode);
+          if ("lines" in diagram && diagram.columns <= width) {
+            append([{ text: "Mermaid" }], "muted", true);
+            result.push(...diagram.lines.map((text) => line([{ text }])));
+            break;
+          }
+          const reason =
+            "reason" in diagram
+              ? diagram.reason
+              : `widen to ${diagram.columns} columns to view diagram; showing source`;
+          append([{ text: `Mermaid · ${reason}` }], "muted", true);
+        } else {
+          append([{ text: token.lang || "Code" }], "muted", true);
+        }
         append(linkSpans({ text: token.text, code: true }), "text", false, false);
         break;
       case "blockquote":
         result.push(
           ...prefixLines(
-            blocks(token.tokens, Math.max(1, width - 2)),
+            blocks(token.tokens, Math.max(1, width - 2), unicode),
             width > 1 ? "│ " : "",
             undefined,
             "muted",
@@ -227,7 +242,11 @@ function blocks(tokens: readonly Token[], width: number): MarkdownLine[] {
         token.items.forEach((item, index) => {
           const prefix = token.ordered ? `${Number(token.start) + index}. ` : "• ";
           const visiblePrefix = stringWidth(prefix) < width ? prefix : "";
-          const content = blocks(item.tokens, Math.max(1, width - stringWidth(visiblePrefix)));
+          const content = blocks(
+            item.tokens,
+            Math.max(1, width - stringWidth(visiblePrefix)),
+            unicode,
+          );
           result.push(
             ...prefixLines(content, visiblePrefix, " ".repeat(stringWidth(visiblePrefix))),
           );
@@ -258,6 +277,7 @@ export function markdownLines(
   source: string,
   width: number,
   renderMarkdown = true,
+  unicode = true,
 ): MarkdownLine[] {
   const columns = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 1;
   const text = normalizeTerminalText(source);
@@ -269,7 +289,7 @@ export function markdownLines(
       );
   }
   const trailing = /\n+$/u.exec(text)?.[0].length ?? 0;
-  const result = blocks(Lexer.lex(text.replace(/\n+$/u, "")), columns);
+  const result = blocks(Lexer.lex(text.replace(/\n+$/u, "")), columns, unicode);
   if (!result.length) result.push(line([]));
   for (let index = 0; index < trailing; index++) result.push(line([]));
   return result;

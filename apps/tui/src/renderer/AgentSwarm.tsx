@@ -9,7 +9,7 @@ import { ConversationText } from "../ui/ShellCommandText.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { projectRecordedThreadTimeline } from "../features/chat/timeline.ts";
-import { useThemeColor } from "../ui/context.tsx";
+import { useThemeColor, useUi } from "../ui/context.tsx";
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -30,6 +30,7 @@ export function agentOutputLines(
   activities: readonly OrchestrationThreadActivity[],
   width: number,
   renderMarkdown = true,
+  unicode = true,
 ) {
   const attributed = activities.filter((activity) => activityBelongsToAgent(activity, agent.id));
   const lines = conversationLines(
@@ -38,6 +39,7 @@ export function agentOutputLines(
     true,
     new Map(),
     renderMarkdown,
+    unicode,
   );
   return lines.length
     ? lines
@@ -45,6 +47,7 @@ export function agentOutputLines(
         agent.error ?? agent.result ?? agent.progress ?? "No agent output yet.",
         width,
         renderMarkdown,
+        unicode,
       ).map((line, index) => ({ ...line, id: `agent:${agent.id}`, line: index }));
 }
 
@@ -189,7 +192,14 @@ export function AgentOutputOverlay({
     | ((href: string, position: { x: number; y: number }) => void)
     | undefined;
 }) {
-  const lines = agentOutputLines(agent, activities, Math.max(1, width - 4), renderMarkdown);
+  const { capabilities } = useUi();
+  const lines = agentOutputLines(
+    agent,
+    activities,
+    Math.max(1, width - 4),
+    renderMarkdown,
+    capabilities.unicode,
+  );
   const count = Math.max(1, height - 4);
   const maxStart = Math.max(0, lines.length - count);
   const resolvedStart = Math.max(0, Math.min(maxStart, start));

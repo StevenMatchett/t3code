@@ -221,6 +221,11 @@ message draft even when clipboard access is unavailable. Your terminal's usual p
 also works in the composer. The cursor appears whenever output has focus. `Esc` clears a
 selection; press it again to leave output. `End` resumes live output. Use `Tab` to focus agents.
 
+Press `Ctrl+R` in conversation or agent output to switch between rendered Markdown and source.
+Fenced `mermaid` blocks render as terminal diagrams for flowcharts, sequence, state, class, ER,
+and XY diagrams. An unfinished, unsupported, or oversized diagram stays readable as source.
+If a diagram does not fit, widen the terminal to view it. The display choice is saved per thread.
+
 The TUI remembers the selected project and thread, sidebar view, conversation scroll position,
 composer focus, tool detail visibility, and terminal tab. Reopening it reconnects to the same
 environment and restores that view, including after the TUI process is killed. State is stored

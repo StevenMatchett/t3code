@@ -26,6 +26,7 @@ import { useOutputVim } from "./useOutputVim.ts";
 import { useOutputLinkMenu } from "../ui/OutputLinkMenu.tsx";
 import { ThreadTerminal } from "./ThreadTerminal.tsx";
 import type { HotkeyHint, HotkeyState } from "../ui/HotkeyBar.tsx";
+import { useUi } from "../ui/context.tsx";
 
 export function Conversation({
   client,
@@ -57,6 +58,7 @@ export function Conversation({
   readonly onTerminalFocusChange?: (focused: boolean) => void;
 }) {
   const { height: terminalHeight } = useTerminalDimensions();
+  const { capabilities } = useUi();
   const state = useAtomValue(client.thread(threadId));
   const shell = useAtomValue(client.shell);
   const connection = useAtomValue(client.connection);
@@ -159,9 +161,10 @@ export function Conversation({
             thread?.activities ?? [],
             Math.max(1, width - 4),
             renderMarkdown,
+            capabilities.unicode,
           )
         : [],
-    [selectedAgent, thread?.activities, width, renderMarkdown],
+    [selectedAgent, thread?.activities, width, renderMarkdown, capabilities.unicode],
   );
   const requestCount = requests.approvals.length + requests.userInputs.length;
   const latestMessage = thread?.messages.at(-1);
@@ -411,8 +414,16 @@ export function Conversation({
     [thread],
   );
   const lines = useMemo(
-    () => conversationLines(timeline, width, showDetails, expandedToolGroups, renderMarkdown),
-    [timeline, width, showDetails, expandedToolGroups, renderMarkdown],
+    () =>
+      conversationLines(
+        timeline,
+        width,
+        showDetails,
+        expandedToolGroups,
+        renderMarkdown,
+        capabilities.unicode,
+      ),
+    [timeline, width, showDetails, expandedToolGroups, renderMarkdown, capabilities.unicode],
   );
   const maxStart = Math.max(0, lines.length - count);
   const searchQuery = search?.query ?? "";

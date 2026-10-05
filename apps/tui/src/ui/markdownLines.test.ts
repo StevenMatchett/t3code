@@ -3,6 +3,117 @@ import stringWidth from "string-width";
 import { markdownLines } from "./markdownLines.ts";
 
 describe("Markdown conversation layout", () => {
+  it("renders Mermaid boxes and arrows while the raw toggle preserves the complete fence", () => {
+    const source = "```mermaid\nflowchart LR; A[Start] --> B{Ready?}\nB -->|Yes| C[Done]\n```";
+    const lines = markdownLines(source, 80);
+    const rendered = lines.map((line) => line.text).join("\n");
+    expect(rendered).toContain("┌");
+    expect(rendered).toContain("►");
+    expect(rendered).toContain("Start");
+    expect(rendered).toContain("Ready?");
+    expect(rendered).toContain("Yes");
+    expect(rendered).toContain("Done");
+    expect(rendered).not.toContain("flowchart");
+    expect(rendered).not.toContain("-->");
+    expect(
+      markdownLines(source, 80, false)
+        .map((line) => line.text)
+        .join("\n"),
+    ).toBe(source);
+    expect(lines.slice(1).every((line) => !line.spans.some((span) => span.code))).toBe(true);
+  });
+
+  it.each([
+    ["sequenceDiagram\nAlice->>Bob: Hello\nBob-->>Alice: Hi", "Alice", "Hello"],
+    ["stateDiagram-v2\n[*] --> Idle\nIdle --> Done", "Idle", "Done"],
+    ["classDiagram\nAnimal <|-- Duck\nAnimal: +int age", "Animal", "Duck"],
+    ["erDiagram\nCUSTOMER ||--o{ ORDER : places", "CUSTOMER", "places"],
+    ["xychart-beta\n x-axis [Jan, Feb]\n bar [10, 20]", "Jan", "Feb"],
+  ])("renders supported Mermaid diagrams: %s", (source, first, second) => {
+    const rendered = markdownLines(`~~~mermaid\n${source}\n~~~`, 120)
+      .map((line) => line.text)
+      .join("\n");
+    expect(rendered).toContain(first);
+    expect(rendered).toContain(second);
+    expect(rendered).not.toContain("showing source");
+    expect(rendered).not.toContain("\u001b");
+  });
+
+  it("uses ASCII diagram characters when Unicode is disabled", () => {
+    const rendered = markdownLines(
+      "```mermaid\ngraph LR\nA[Start] --> B[Done]\n```",
+      80,
+      true,
+      false,
+    )
+      .map((line) => line.text)
+      .join("\n");
+    expect(rendered).toContain("+-----+");
+    expect(rendered).toContain(">|");
+    expect(rendered).not.toMatch(/[┌┐└┘─│►]/u);
+  });
+
+  it("waits for the closing fence before rendering streamed Mermaid", () => {
+    const source = "```mermaid\nflowchart LR\nA[Start] --> B[Done]";
+    const partial = markdownLines(source, 80)
+      .map((line) => line.text)
+      .join("\n");
+    expect(partial).toContain("flowchart LR");
+    expect(partial).not.toContain("┌");
+    const complete = markdownLines(`${source}\n\`\`\``, 80)
+      .map((line) => line.text)
+      .join("\n");
+    expect(complete).toContain("┌");
+    expect(complete).not.toContain("flowchart LR");
+  });
+
+  it("preserves source for unsupported, invalid, overly large and empty diagrams", () => {
+    for (const source of [
+      'pie\n"Yes" : 3',
+      "flowchart sideways\nA --> B",
+      "flowchart TD",
+      `flowchart TD\n${Array.from({ length: 90 }, () => `%% ${"x".repeat(100)}`).join("\n")}`,
+      `flowchart TD\n${Array.from({ length: 42 }, (_, index) => `N${index} --> N${index + 1}`).join("\n")}`,
+    ]) {
+      const lines = markdownLines(`\`\`\`mermaid\n${source}\n\`\`\``, 80);
+      expect(lines.map((line) => line.text).join("\n")).toContain("showing source");
+      expect(
+        lines
+          .filter((line) => line.spans.some((span) => span.code))
+          .map((line) => line.text)
+          .join(""),
+      ).toBe(source.replaceAll("\n", ""));
+    }
+  });
+
+  it("shows source on narrow viewports and restores the diagram when widened", () => {
+    const source = "```mermaid\nflowchart LR\nA[Start] --> B[Done]\n```";
+    const narrow = markdownLines(source, 10);
+    expect(narrow.every((line) => stringWidth(line.text) <= 10)).toBe(true);
+    expect(
+      narrow
+        .filter((line) => line.spans.some((span) => span.code))
+        .map((line) => line.text)
+        .join(""),
+    ).toBe("flowchart LRA[Start] --> B[Done]");
+    const wide = markdownLines(source, 80)
+      .map((line) => line.text)
+      .join("\n");
+    expect(wide).toContain("┌");
+    expect(wide).not.toContain("showing source");
+  });
+
+  it("renders diagrams inside lists and quotes without damaging their indentation", () => {
+    for (const source of [
+      "- Diagram:\n  ```mermaid\n  graph LR\n  A --> B\n  ```",
+      "> ```mermaid\n> graph LR\n> A --> B\n> ```",
+    ]) {
+      const lines = markdownLines(source, 30);
+      expect(lines.some((line) => line.text.includes("┌"))).toBe(true);
+      expect(lines.every((line) => stringWidth(line.text) <= 30)).toBe(true);
+      expect(lines.map((line) => line.text).join("\n")).not.toContain("graph LR");
+    }
+  });
   it("combines nested emphasis, strikeout, escapes and reference links", () => {
     const lines = markdownLines(
       "***nested*** ~~old~~ \\*literal\\* [**Docs**][docs]\n\n[docs]: https://example.com",
