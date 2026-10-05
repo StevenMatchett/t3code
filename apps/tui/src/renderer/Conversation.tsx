@@ -7,7 +7,7 @@ import { useMemo, useState, useContext, useEffect, useRef } from "react";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import { foldSubagentActivities } from "@t3tools/client-runtime/state/subagentRuntime";
 import { AgentOutputOverlay, AgentSwarmPanel, agentOutputLines } from "./AgentSwarm.tsx";
-import { Questions, RequestsPanel } from "./RequestsPanel.tsx";
+import { Approval, Questions } from "./RequestsPanel.tsx";
 import { ComposerControls } from "./ProviderPicker.tsx";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { projectRecordedThreadTimeline } from "../features/chat/timeline.ts";
@@ -125,8 +125,15 @@ export function Conversation({
         (reply) => reply.kind === "user-input" && reply.requestId === request.requestId,
       ),
   );
-  const focusedQuestion = useRef<string | null>(null);
-  const questionId = question?.requestId ?? null;
+  const approval = requests.approvals.find(
+    (request) =>
+      !interaction.replies.some(
+        (reply) => reply.kind === "approval" && reply.requestId === request.requestId,
+      ),
+  );
+  const focusedRequest = useRef<string | null>(null);
+  const requestId = approval?.requestId ?? question?.requestId ?? null;
+  const requestMode = approval ? "requests" : "questions";
   const agents = useMemo(
     () => foldSubagentActivities(thread?.activities ?? []),
     [thread?.activities],
@@ -134,16 +141,16 @@ export function Conversation({
   const resolvedAgentCursor = Math.max(-1, Math.min(agentCursor, agents.length - 1));
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
   useEffect(() => {
-    if (!active || terminalOpen || selectedAgent || mode === "requests") return;
-    if (questionId && focusedQuestion.current !== questionId) {
-      focusedQuestion.current = questionId;
-      setMode("questions");
-    } else if (!questionId) {
-      focusedQuestion.current = null;
-      // oxlint-disable-next-line react/set-state-in-effect -- Return keyboard focus when the server question is resolved or its response is accepted.
-      if (mode === "questions") setMode("composer");
+    if (!active || terminalOpen || selectedAgent) return;
+    if (requestId && focusedRequest.current !== requestId) {
+      focusedRequest.current = requestId;
+      setMode(requestMode);
+    } else if (!requestId) {
+      focusedRequest.current = null;
+      // oxlint-disable-next-line react/set-state-in-effect -- Return focus when a request is resolved or its response is accepted.
+      if (mode === "questions" || mode === "requests") setMode("composer");
     }
-  }, [active, terminalOpen, selectedAgent, questionId, mode]);
+  }, [active, terminalOpen, selectedAgent, requestId, requestMode, mode]);
   const selectedAgentLines = useMemo(
     () =>
       selectedAgent
@@ -181,6 +188,7 @@ export function Conversation({
       linkMenu.isOpen ||
       selectedAgent ||
       mode === "questions" ||
+      mode === "requests" ||
       terminalOpen ||
       search
     )
@@ -279,7 +287,7 @@ export function Conversation({
     if (mode === "requests")
       return [
         { key: "↑↓", label: "Select" },
-        { key: "Enter", label: "Review" },
+        { key: "Enter", label: "Submit" },
         ...terminalHint,
         { key: "PgUp/Dn", label: "Details" },
         { key: "Ctrl+K", label: "Search" },
@@ -342,7 +350,7 @@ export function Conversation({
             ? "Menu"
             : "Message"
           : mode === "requests"
-            ? "Requests"
+            ? "Approval"
             : mode === "agents"
               ? "Agents"
               : "Conversation";
@@ -369,22 +377,23 @@ export function Conversation({
   const agentPanelHeight =
     agents.length > 0 ? (agentsExpanded ? Math.min(6, agents.length + 3) : 3) : 0;
   const gap = height >= 12 ? 1 : 0;
-  const questionHeight = question
-    ? Math.max(
-        6,
-        Math.min(
-          15,
-          Math.floor(height / 2),
-          height -
-            (editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4) -
-            agentPanelHeight -
-            gap -
-            (interaction.error ? 1 : 0) -
-            (queued ? 2 : 0) -
-            3,
-        ),
-      )
-    : 0;
+  const requestHeight =
+    approval || question
+      ? Math.max(
+          6,
+          Math.min(
+            15,
+            Math.floor(height / 2),
+            height -
+              (editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4) -
+              agentPanelHeight -
+              gap -
+              (interaction.error ? 1 : 0) -
+              (queued ? 2 : 0) -
+              3,
+          ),
+        )
+      : 0;
   const count = Math.max(
     1,
     height -
@@ -392,7 +401,7 @@ export function Conversation({
       (editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4) -
       gap -
       agentPanelHeight -
-      questionHeight -
+      requestHeight -
       (search ? 1 : 0) -
       (interaction.error ? 1 : 0) -
       (queued ? 2 : 0),
@@ -645,7 +654,7 @@ export function Conversation({
         onNewThread?.();
         break;
       case "a":
-        setMode(question && requests.approvals.length === 0 ? "questions" : "requests");
+        if (approval || question) setMode(requestMode);
         break;
       case "t":
         setShowDetails((value) => !value);
@@ -752,25 +761,6 @@ export function Conversation({
         onBack={() => setTerminalOpen(false)}
       />
     );
-  if (mode === "requests")
-    return (
-      <Panel
-        title="Agent requests"
-        width="100%"
-        height="100%"
-        borderTone="warning"
-        flexDirection="column"
-      >
-        <RequestsPanel
-          client={client}
-          threadId={threadId}
-          active={active}
-          width={Math.max(1, width - 4)}
-          height={Math.max(1, height - 2)}
-          onBack={() => setMode("history")}
-        />
-      </Panel>
-    );
   return (
     <Stack
       ref={container}
@@ -850,11 +840,38 @@ export function Conversation({
         </Text>
       ) : null}
       {gap ? <Stack height={gap} flexShrink={0} /> : null}
-      {question ? (
+      {approval ? (
+        <Panel
+          id="inline-approval"
+          title={mode === "requests" ? "Agent approval" : "Agent approval · click to respond"}
+          height={requestHeight}
+          flexShrink={0}
+          width="100%"
+          flexDirection="column"
+          borderTone={mode === "requests" ? "borderFocused" : "warning"}
+          onMouseDown={(event) => {
+            if (!active || event.button !== 0 || mode === "requests") return;
+            event.preventDefault();
+            event.stopPropagation();
+            setMode("requests");
+          }}
+        >
+          <Approval
+            key={approval.requestId}
+            request={approval}
+            client={client}
+            threadId={threadId}
+            active={active && mode === "requests" && !selectedAgent}
+            width={Math.max(1, width - 2)}
+            height={requestHeight - 2}
+            onBack={() => setMode("history")}
+          />
+        </Panel>
+      ) : question ? (
         <Panel
           id="inline-question"
           title={mode === "questions" ? "Agent question" : "Agent question · click to answer"}
-          height={questionHeight}
+          height={requestHeight}
           flexShrink={0}
           width="100%"
           flexDirection="column"
@@ -873,8 +890,7 @@ export function Conversation({
             threadId={threadId}
             active={active && mode === "questions" && !selectedAgent}
             width={Math.max(1, width - 2)}
-            height={questionHeight - 2}
-            inline
+            height={requestHeight - 2}
             onBack={() => setMode("history")}
           />
         </Panel>

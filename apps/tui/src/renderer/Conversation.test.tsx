@@ -575,8 +575,10 @@ describe("conversation interaction", () => {
     expect(driver.captureFrame()).toContain("preserve this prompt");
   });
 
-  it("requires explicit review and confirmation of provider-supplied approval options", async () => {
-    const { driver, fixture } = await setup();
+  it("submits inline approvals with one Enter and preserves the draft", async () => {
+    const { driver, fixture, id } = await setup();
+    await driver.input.pressKey("i");
+    await driver.input.typeText("Keep my approval draft");
     const requestId = ApprovalRequestId.make("native-approval");
     await request(driver, fixture, "approval.requested", {
       requestId,
@@ -588,21 +590,58 @@ describe("conversation interaction", () => {
         { decision: "accept", label: "Once" },
       ],
     });
+    expect(driver.captureFrame()).toContain("APPROVAL");
+    expect(driver.captureFrame()).toContain("Keep my approval draft");
+    expect(driver.renderer.root.findDescendantById("conversation-history")).toBeDefined();
+    const panel = driver.renderer.root.findDescendantById("inline-approval")!;
+    const composer = driver.renderer.root.findDescendantById("conversation-composer")!;
+    expect(panel.screenY + panel.height).toBeLessThanOrEqual(composer.screenY);
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("CONVERSATION");
+    expect(driver.renderer.root.findDescendantById("inline-approval")).toBeDefined();
     await driver.input.pressKey("a");
-    await driver.input.pressKey("RETURN");
     await driver.input.pressKey("ARROW_DOWN");
     expect(driver.captureFrame()).toContain("Only if you trust this");
-    await driver.input.pressKey("RETURN");
     expect(fixture.commands).toHaveLength(0);
-    expect(driver.captureFrame()).toContain("Confirm Always allow?");
     await driver.input.pressKey("RETURN");
     expect(fixture.commands[0]).toMatchObject({
       type: "thread.approval.respond",
       requestId,
       decision: "acceptAlways",
     });
-    await driver.input.pressKey("RETURN");
+    expect(driver.renderer.root.findDescendantById("inline-approval")).toBeUndefined();
+    expect(driver.captureFrame()).toContain("MESSAGE");
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe(
+      "Keep my approval draft",
+    );
     expect(fixture.commands).toHaveLength(1);
+  });
+
+  it("defers approval focus until the terminal closes and removes externally resolved requests", async () => {
+    const { driver, fixture } = await setup();
+    await driver.input.pressKey("t", { ctrl: true });
+    await request(driver, fixture, "approval.requested", {
+      requestId: ApprovalRequestId.make("terminal-approval"),
+      requestKind: "file-read",
+      detail: "Read a file",
+    });
+    expect(driver.renderer.root.findDescendantById("inline-approval")).toBeUndefined();
+    await driver.input.typeText("echo test");
+    expect(fixture.terminalWrites.join("")).toContain("echo test");
+    await driver.input.pressKey("\\", { ctrl: true });
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("APPROVAL");
+    expect(driver.renderer.root.findDescendantById("inline-approval")).toBeDefined();
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({ ...fixture.details[0]!, activities: [] }),
+      }),
+    );
+    await driver.flush();
+    expect(driver.renderer.root.findDescendantById("inline-approval")).toBeUndefined();
+    expect(driver.captureFrame()).toContain("MESSAGE");
+    expect(fixture.commands).toHaveLength(0);
   });
 
   it("answers multiple questions with opaque option values and custom text", async () => {

@@ -1,13 +1,11 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useKeyboard } from "@opentui/react";
 import {
-  derivePendingRequests,
   type PendingApproval,
   type PendingUserInput,
 } from "@t3tools/client-runtime/pending-requests";
-import type { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import { useContext, useMemo, useState } from "react";
+import type { ThreadId } from "@t3tools/contracts";
+import { useContext, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import {
   approvalOptions,
@@ -28,7 +26,7 @@ interface RequestViewProps {
   readonly onBack: () => void;
 }
 
-function Approval({
+export function Approval({
   request,
   client,
   threadId,
@@ -46,12 +44,9 @@ function Approval({
       options.findIndex((option) => option.decision === "cancel" || option.decision === "decline"),
     ),
   );
-  const [confirmation, setConfirmation] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const selectedIndex = Math.min(choice, options.length - 1);
   const selected = options[selectedIndex]!;
-  const confirmationKey = JSON.stringify([request.requestId, request.detail, selected]);
-  const confirm = confirmation === confirmationKey;
   const waiting =
     state.pending !== null || state.replies.some((reply) => reply.requestId === request.requestId);
   const lines = wrapTerminalLines(
@@ -63,8 +58,7 @@ function Approval({
     if (!active || key.ctrl || key.meta || key.option) return;
     switch (key.name) {
       case "escape":
-        if (confirm) setConfirmation(null);
-        else onBack();
+        onBack();
         break;
       case "pageup":
         setOffset((value) => Math.max(0, value - count));
@@ -73,29 +67,21 @@ function Approval({
         setOffset((value) => Math.min(Math.max(0, lines.length - count), value + count));
         break;
       case "up":
-        if (!confirm) {
-          setChoice((value) => Math.max(0, value - 1));
-          setOffset(0);
-        }
+        setChoice((value) => Math.max(0, value - 1));
+        setOffset(0);
         break;
       case "down":
-        if (!confirm) {
-          setChoice((value) => Math.min(options.length - 1, value + 1));
-          setOffset(0);
-        }
+        setChoice((value) => Math.min(options.length - 1, value + 1));
+        setOffset(0);
         break;
       case "return":
       case "enter":
         if (!waiting) {
-          if (!confirm) setConfirmation(confirmationKey);
-          else {
-            void client.actions.reply(registry, threadId, {
-              kind: "approval",
-              requestId: request.requestId,
-              decision: selected.decision,
-            });
-            setConfirmation(null);
-          }
+          void client.actions.reply(registry, threadId, {
+            kind: "approval",
+            requestId: request.requestId,
+            decision: selected.decision,
+          });
         }
         break;
       default:
@@ -120,15 +106,13 @@ function Approval({
           key={option.decision}
           label={option.label}
           selected={index === selectedIndex}
-          active={!waiting}
+          active={active && !waiting}
         />
       ))}
       <Text height={1} wrapMode="none">
         {waiting
           ? "Response queued; waiting for provider."
-          : confirm
-            ? `Confirm ${inlineTerminalText(selected.label)}? Enter sends; Esc cancels.`
-            : "Up/Down choose | Enter review | Esc requests"}
+          : "Up/Down choose | Enter submit | Esc chat"}
       </Text>
       <Text height={1} wrapMode="none">
         PgUp/PgDn scroll full request details
@@ -148,8 +132,7 @@ export function Questions({
   width,
   height,
   onBack,
-  inline = false,
-}: RequestViewProps & { readonly request: PendingUserInput; readonly inline?: boolean }) {
+}: RequestViewProps & { readonly request: PendingUserInput }) {
   const registry = useContext(RegistryContext);
   const state = useAtomValue(client.actions.state(threadId));
   const [questionIndex, setQuestionIndex] = useState(0);
@@ -364,102 +347,12 @@ export function Questions({
           : editing
             ? "Enter keeps answer | Shift+Enter newline | Esc cancel"
             : canCustom
-              ? `Up/Down choose | Enter select | E type answer | Esc ${inline ? "chat" : "requests"}`
-              : `Up/Down choose | Space/Enter select | Esc ${inline ? "chat" : "requests"}`}
+              ? "Up/Down choose | Enter select | E type answer | Esc chat"
+              : "Up/Down choose | Space/Enter select | Esc chat"}
       </Text>
       <Text height={1} wrapMode="none">
         {state.error ?? "Select an answer, then Continue or Submit. PgUp/PgDn scroll details."}
       </Text>
-    </Stack>
-  );
-}
-
-export function RequestsPanel({
-  client,
-  threadId,
-  active,
-  width,
-  height,
-  onBack,
-}: RequestViewProps) {
-  const state = useAtomValue(client.thread(threadId));
-  const thread = Option.getOrNull(state.data);
-  const requests = useMemo(() => derivePendingRequests(thread?.activities ?? []), [thread]);
-  const [cursor, setCursor] = useState(0);
-  const [selected, setSelected] = useState<{
-    readonly kind: "approval" | "user-input";
-    readonly id: ApprovalRequestId;
-  } | null>(null);
-  const items = [
-    ...requests.approvals.map((request) => ({
-      kind: "approval" as const,
-      id: request.requestId,
-      label: `Approval: ${request.appName ?? request.requestKind}`,
-    })),
-    ...requests.userInputs.map((request) => ({
-      kind: "user-input" as const,
-      id: request.requestId,
-      label: `Questions: ${request.questions[0]?.header ?? "Agent input"}`,
-    })),
-  ];
-  const approval =
-    selected?.kind === "approval"
-      ? requests.approvals.find((request) => request.requestId === selected.id)
-      : undefined;
-  const question =
-    selected?.kind === "user-input"
-      ? requests.userInputs.find((request) => request.requestId === selected.id)
-      : undefined;
-  useKeyboard((key) => {
-    if (!active || key.ctrl || key.meta || key.option || approval || question) return;
-    switch (key.name) {
-      case "escape":
-        if (selected) setSelected(null);
-        else onBack();
-        break;
-      case "up":
-        setCursor((value) => Math.max(0, value - 1));
-        break;
-      case "down":
-        setCursor((value) => Math.min(Math.max(0, items.length - 1), value + 1));
-        break;
-      case "return":
-      case "enter": {
-        const item = items[Math.min(cursor, items.length - 1)];
-        if (item) setSelected(item);
-        break;
-      }
-      default:
-        return;
-    }
-    key.preventDefault();
-    key.stopPropagation();
-  });
-  const props = { client, threadId, active, width, height, onBack: () => setSelected(null) };
-  if (approval) return <Approval key={approval.requestId} {...props} request={approval} />;
-  if (question) return <Questions key={question.requestId} {...props} request={question} />;
-  const selectedIndex = Math.min(cursor, items.length - 1);
-  const count = Math.max(1, height - 3);
-  const start = Math.max(0, Math.min(selectedIndex - Math.floor(count / 2), items.length - count));
-  return (
-    <Stack flexDirection="column" height="100%">
-      <Text height={1} strong tone="warning">
-        Pending requests
-      </Text>
-      {items.length === 0 ? (
-        <Text>No pending requests. Esc returns to the conversation.</Text>
-      ) : (
-        items
-          .slice(start, start + count)
-          .map((item, index) => (
-            <SelectionRow
-              key={item.id}
-              label={item.label}
-              selected={start + index === selectedIndex}
-            />
-          ))
-      )}
-      <Text>Up/Down choose | Enter open | Esc conversation</Text>
     </Stack>
   );
 }
