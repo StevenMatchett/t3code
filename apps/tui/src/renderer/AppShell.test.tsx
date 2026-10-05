@@ -485,6 +485,136 @@ describeWithNativeFfi("connected AppShell", () => {
     expect(driver.captureFrame()).toContain("Search and commands");
   });
 
+  it("keeps the current conversation open when archiving another thread from Recent", async () => {
+    const { driver, fixture } = await renderShell({ width: 140, height: 28 });
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("b", { ctrl: true });
+    const thread = fixture.threads[1]!;
+    const row = driver.renderer.root.findDescendantById(`navigation-${thread.id}`)!;
+    await driver.mouse.click(row.screenX + 2, row.screenY, MouseButtons.RIGHT, { delayMs: 0 });
+    expect(driver.captureFrame()).toContain("Rename");
+    await driver.input.typeText("x");
+    expect(fixture.managementCommands).toHaveLength(0);
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+    expect(fixture.managementCommands.at(-1)).toMatchObject({
+      type: "thread.archive",
+      threadId: thread.id,
+    });
+    expect(driver.captureFrame()).toContain("First conversation");
+    expect(driver.captureFrame()).toContain("Message the agent");
+  });
+
+  it("cancels rename edits and saves with the floating dialog buttons", async () => {
+    const { driver, fixture } = await renderShell({ width: 120, height: 28 });
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    const thread = fixture.threads[0]!;
+    const openRename = async () => {
+      const row = driver.renderer.root.findDescendantById(`navigation-${thread.id}`)!;
+      await driver.mouse.click(row.screenX + 2, row.screenY, MouseButtons.RIGHT, { delayMs: 0 });
+      await driver.input.pressKey("RETURN");
+      expect(driver.captureFrame()).toContain("Message the agent");
+      expect(driver.captureFrame()).toContain("Rename thread");
+    };
+    const click = async (id: string) => {
+      const button = driver.renderer.root.findDescendantById(id)!;
+      await driver.mouse.click(button.screenX + 1, button.screenY);
+    };
+    await openRename();
+    await driver.input.pressKey("END");
+    await driver.input.typeText(" discarded");
+    await click("thread-rename-cancel");
+    expect(fixture.managementCommands).toHaveLength(0);
+    await openRename();
+    expect(driver.captureFrame()).not.toContain("discarded");
+    await driver.input.pressKey("ESCAPE");
+    expect(fixture.managementCommands).toHaveLength(0);
+    await openRename();
+    await driver.input.pressKey("HOME");
+    await driver.input.pressKey("k", { ctrl: true });
+    await click("thread-rename-save");
+    expect(driver.captureFrame()).toContain("Enter a thread title.");
+    expect(fixture.managementCommands).toHaveLength(0);
+    await driver.input.typeText("A new title");
+    await click("thread-rename-save");
+    expect(fixture.managementCommands.at(-1)).toMatchObject({
+      type: "thread.meta.update",
+      threadId: thread.id,
+      title: "A new title",
+    });
+    expect(driver.renderer.root.findDescendantById("thread-rename-dialog")).toBeUndefined();
+    expect(driver.captureFrame()).toContain("Message the agent");
+  });
+
+  it("opens a thread context menu, dismisses it, and manages the clicked thread", async () => {
+    const { driver, fixture } = await renderShell({ width: 96, height: 28 });
+    await driver.input.pressKey("RETURN");
+    const thread = fixture.threads[1]!;
+    const openMenu = async () => {
+      const row = driver.renderer.root.findDescendantById(`navigation-${thread.id}`)!;
+      await driver.mouse.click(row.x + 2, row.y, MouseButtons.RIGHT, { delayMs: 0 });
+      expect(driver.captureFrame()).toContain("Rename");
+      expect(driver.captureFrame()).toContain("Archive");
+      expect(driver.captureFrame()).toContain("Delete");
+    };
+    const choose = async (action: string) => {
+      const row = driver.renderer.root.findDescendantById(`thread-context-${action}`)!;
+      await driver.mouse.click(row.x + 1, row.y);
+    };
+    await openMenu();
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.renderer.root.findDescendantById("thread-context-menu")).toBeUndefined();
+    expect(fixture.managementCommands).toHaveLength(0);
+    await openMenu();
+    await driver.mouse.click(90, 25);
+    expect(driver.renderer.root.findDescendantById("thread-context-menu")).toBeUndefined();
+    await openMenu();
+    await choose("rename");
+    expect(driver.captureFrame()).toContain("Rename thread");
+    expect(driver.captureFrame()).toContain("[ Save ]");
+    expect(driver.captureFrame()).toContain("[ Cancel ]");
+    expect(driver.captureFrame()).not.toContain("Manage thread");
+    await driver.input.pressKey("END");
+    await driver.input.typeText(" renamed");
+    await driver.input.pressKey("RETURN");
+    expect(fixture.managementCommands.at(-1)).toMatchObject({
+      type: "thread.meta.update",
+      threadId: thread.id,
+      title: "Second conversation renamed",
+    });
+    expect(driver.renderer.root.findDescendantById("thread-rename-dialog")).toBeUndefined();
+    await openMenu();
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+    expect(fixture.managementCommands.at(-1)).toMatchObject({
+      type: "thread.archive",
+      threadId: thread.id,
+    });
+    await driver.input.pressKey("a", { shift: true });
+    const archivedRow = driver.renderer.root.findDescendantById(`navigation-${thread.id}`)!;
+    await driver.mouse.click(archivedRow.x + 2, archivedRow.y, MouseButtons.RIGHT, { delayMs: 0 });
+    expect(driver.captureFrame()).toContain("Restore");
+    await choose("archive");
+    expect(fixture.managementCommands.at(-1)).toMatchObject({
+      type: "thread.unarchive",
+      threadId: thread.id,
+    });
+    await driver.input.pressKey("ARROW_LEFT");
+    await openMenu();
+    await choose("delete");
+    expect(driver.captureFrame()).toContain("Confirm delete");
+    expect(fixture.managementCommands.some((command) => command.type === "thread.delete")).toBe(
+      false,
+    );
+    await driver.input.pressKey("RETURN");
+    expect(fixture.managementCommands.at(-1)).toMatchObject({
+      type: "thread.delete",
+      threadId: thread.id,
+    });
+  });
+
   it("archives, restores, and confirms deletion from thread management", async () => {
     const { driver, fixture } = await renderShell({ width: 96, height: 28 });
     const threadId = fixture.threads[0]!.id;

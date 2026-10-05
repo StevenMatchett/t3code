@@ -17,7 +17,9 @@ export function ThreadActionsForm({
   active,
   onClose,
   onRemoved,
+  initialAction = "rename",
 }: {
+  readonly initialAction?: "rename" | "delete";
   readonly client: TuiClient;
   readonly thread: OrchestrationThreadShell;
   readonly active: boolean;
@@ -25,11 +27,13 @@ export function ThreadActionsForm({
   readonly onRemoved: (action: "archive" | "unarchive" | "delete") => void;
 }) {
   const registry = useContext(RegistryContext);
-  const [target, setTarget] = useState<ActionTarget>("title");
+  const [target, setTarget] = useState<ActionTarget>(
+    initialAction === "delete" ? "delete" : "title",
+  );
   const [title, setTitle] = useState(thread.title);
   const [pending, setPending] = useState<ActionTarget | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(initialAction === "delete");
   const selectedBackground = useThemeColor("selection");
   const archived = thread.archivedAt !== null;
   const targets: readonly ActionTarget[] = ["title", "save", "archive", "delete", "cancel"];

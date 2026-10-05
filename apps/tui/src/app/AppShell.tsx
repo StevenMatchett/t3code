@@ -48,6 +48,11 @@ export interface AppShellViewProps {
   } | null;
   readonly children?: ReactNode;
   readonly onOpenProject?: (projectId: ProjectId) => void;
+  readonly contextMenu?: ReactNode;
+  readonly onThreadContextMenu?: (
+    thread: OrchestrationThreadShell,
+    position: { x: number; y: number },
+  ) => void;
   readonly onOpenThread?: (projectId: ProjectId, threadId: ThreadId) => void;
   readonly onNewProject?: () => void;
   readonly onNewThread?: () => void;
@@ -94,6 +99,7 @@ function List({
   active,
   visible,
   onActivate,
+  onContextMenu,
 }: {
   readonly items: ReadonlyArray<{
     readonly id: string;
@@ -108,6 +114,7 @@ function List({
   readonly empty: string;
   readonly active: boolean;
   readonly visible: boolean;
+  readonly onContextMenu?: (id: string, position: { x: number; y: number }) => void;
   readonly onActivate?: (id: string) => void;
 }) {
   const selected = Math.max(
@@ -133,6 +140,12 @@ function List({
             flexDirection="column"
             flexShrink={0}
             onMouseDown={(event) => {
+              if (event.button === 2 && onContextMenu) {
+                event.preventDefault();
+                event.stopPropagation();
+                onContextMenu(item.id, { x: event.x, y: event.y });
+                return;
+              }
               if (event.button !== 0) return;
               onActivate?.(item.id);
             }}
@@ -236,6 +249,8 @@ export function AppShellView({
   children,
   onOpenProject,
   onOpenThread,
+  onThreadContextMenu,
+  contextMenu,
   onNewProject,
   onNewThread,
   modalContent,
@@ -374,6 +389,11 @@ export function AppShellView({
         empty={empty}
         active={!conversation}
         visible={state.modal === null}
+        onContextMenu={(id, position) => {
+          if (browsingProjects) return;
+          const thread = visibleThreads.find((item) => item.id === id);
+          if (thread) onThreadContextMenu?.(thread, position);
+        }}
         onActivate={(id) => {
           if (browsingProjects) {
             const selected = projects.find((item) => item.id === id);
@@ -659,6 +679,7 @@ export function AppShellView({
           }
         />
       )}
+      {contextMenu}
     </Stack>
   );
 }

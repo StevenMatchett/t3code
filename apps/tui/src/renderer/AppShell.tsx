@@ -32,6 +32,9 @@ import { ThreadDiff } from "./ThreadDiff.tsx";
 import { QueuedMessages } from "./QueuedMessages.tsx";
 import { PullRequestPanel } from "./PullRequestPanel.tsx";
 
+import { RenameThreadDialog } from "./RenameThreadDialog.tsx";
+import { ThreadContextMenu, type ThreadMenuAction } from "./ThreadContextMenu.tsx";
+
 const NO_SESSION_ERROR = Atom.make<string | null>(null);
 
 type PaletteEntry = CommandPaletteItem & {
@@ -147,6 +150,7 @@ export function AppShell({
   );
   const [threadOverlay, setThreadOverlay] = useState<
     | { readonly type: "palette" }
+    | { readonly type: "rename"; readonly thread: OrchestrationThreadShell }
     | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
     | { readonly type: "diff" }
     | { readonly type: "restore" }
@@ -155,9 +159,36 @@ export function AppShell({
         readonly type: "manage";
         readonly thread: OrchestrationThreadShell;
         readonly returnToArchived: boolean;
+        readonly initialAction?: "rename" | "delete";
       }
     | null
   >(null);
+  const [threadMenu, setThreadMenu] = useState<{
+    thread: OrchestrationThreadShell;
+    x: number;
+    y: number;
+  } | null>(null);
+  const chooseThreadAction = async (action: ThreadMenuAction) => {
+    if (!threadMenu) return;
+    const thread = threadMenu.thread;
+    setThreadMenu(null);
+    if (action === "rename") {
+      setThreadOverlay({ type: "rename", thread });
+      return;
+    }
+    if (action === "delete") {
+      setThreadOverlay({ type: "manage", thread, returnToArchived: false, initialAction: action });
+      return;
+    }
+    const accepted = await (thread.archivedAt
+      ? client.threadManagement.unarchive(registry, thread.id)
+      : client.threadManagement.archive(registry, thread.id));
+    if (!accepted) {
+      setCopyNotice({ text: "The environment did not accept that change.", failed: true });
+    } else if (state.route === "conversation" && state.threadId === thread.id) {
+      dispatch({ type: "back" });
+    }
+  };
   const selectedThread = rows.threads.find((thread) => thread.id === state.threadId) ?? null;
   useEffect(() => {
     if (state.sidebarView === "archived") client.refreshArchivedThreads(registry);
@@ -340,7 +371,7 @@ export function AppShell({
     }
   };
   useKeyboard((key) => {
-    if (!active || terminalFocused) return;
+    if (!active || threadMenu || terminalFocused) return;
     if (key.ctrl && key.name === "b" && !state.modal && !threadOverlay) {
       key.preventDefault();
       key.stopPropagation();
@@ -454,6 +485,32 @@ export function AppShell({
     <ActivityClockProvider>
       <QueuedMessages client={client} />
       <AppShellView
+        onThreadContextMenu={(thread, position) => {
+          if (!active || state.modal || threadOverlay) return;
+          renderer.clearSelection();
+          setThreadMenu({ thread, ...position });
+        }}
+        contextMenu={
+          active && threadOverlay?.type === "rename" ? (
+            <RenameThreadDialog
+              key={threadOverlay.thread.id}
+              client={client}
+              thread={threadOverlay.thread}
+              onClose={() => setThreadOverlay(null)}
+            />
+          ) : active && threadMenu ? (
+            <ThreadContextMenu
+              key={threadMenu.thread.id}
+              x={threadMenu.x}
+              y={threadMenu.y}
+              width={width}
+              height={height}
+              archived={threadMenu.thread.archivedAt !== null}
+              onChoose={(action) => void chooseThreadAction(action)}
+              onClose={() => setThreadMenu(null)}
+            />
+          ) : null
+        }
         onToggleSidebarView={() => dispatch({ type: "toggle-sidebar-view" })}
         environmentId={client.environmentId}
         live={
@@ -594,6 +651,7 @@ export function AppShell({
                           content: (
                             <ThreadActionsForm
                               client={client}
+                              initialAction={threadOverlay.initialAction ?? "rename"}
                               thread={threadOverlay.thread}
                               active={active}
                               onClose={() =>
@@ -606,7 +664,11 @@ export function AppShell({
                                   setThreadOverlay({ type: "archived" });
                                 } else {
                                   setThreadOverlay(null);
-                                  if (state.route === "conversation") dispatch({ type: "back" });
+                                  if (
+                                    state.route === "conversation" &&
+                                    state.threadId === threadOverlay.thread.id
+                                  )
+                                    dispatch({ type: "back" });
                                 }
                               }}
                             />
@@ -664,7 +726,7 @@ export function AppShell({
             width={layout.contentWidth}
             height={layout.contentHeight}
             onHintsChange={setHotkeys}
-            active={active && state.modal === null && threadOverlay === null}
+            active={active && state.modal === null && threadOverlay === null && threadMenu === null}
             onBack={() => dispatch({ type: "back" })}
             onHelp={() => dispatch({ type: "toggle-help" })}
             onNewThread={() => dispatch({ type: "new-thread" })}
