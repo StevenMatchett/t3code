@@ -37,7 +37,7 @@ export type ShellCommand =
   | { readonly type: "back" }
   | { readonly type: "toggle-help" }
   | { readonly type: "new-project" }
-  | { readonly type: "new-thread" }
+  | { readonly type: "new-thread"; readonly projectId?: ProjectId }
   | { readonly type: "close-modal" }
   | { readonly type: "open-project"; readonly projectId: ProjectId }
   | { readonly type: "open-thread"; readonly projectId: ProjectId; readonly threadId: ThreadId }
@@ -171,8 +171,12 @@ export function dispatchShellCommand(
   if (command.type === "reconcile") return state;
   if (command.type === "close-modal") return { ...state, modal: null };
   if (command.type === "new-project") return { ...state, modal: "new-project" };
-  if (command.type === "new-thread")
-    return state.projectId ? { ...state, modal: "new-thread" } : state;
+  if (command.type === "new-thread") {
+    const projectId = command.projectId ?? state.projectId;
+    return projectId && rows.projects.some((project) => project.id === projectId)
+      ? reconcile({ ...state, projectId, modal: "new-thread" }, rows)
+      : state;
+  }
   if (command.type === "open-project")
     return rows.projects.some((project) => project.id === command.projectId)
       ? reconcile(

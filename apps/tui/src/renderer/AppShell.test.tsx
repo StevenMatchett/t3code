@@ -485,6 +485,41 @@ describeWithNativeFfi("connected AppShell", () => {
     expect(driver.captureFrame()).toContain("Search and commands");
   });
 
+  it.each([44, 120])(
+    "opens a new thread in the right-clicked project at width %i",
+    async (width) => {
+      const { driver } = await renderShell({ width, height: 28 });
+      const openMenu = async () => {
+        const row = driver.renderer.root.findDescendantById("navigation-beta")!;
+        await driver.mouse.click(row.screenX + 2, row.screenY, MouseButtons.RIGHT, { delayMs: 0 });
+        expect(driver.renderer.root.findDescendantById("project-context-new-thread")).toBeDefined();
+      };
+      await openMenu();
+      await driver.input.pressKey("ESCAPE");
+      expect(driver.renderer.root.findDescendantById("project-context-menu")).toBeUndefined();
+      await driver.input.pressKey("n");
+      expect(driver.captureFrame()).toContain("New thread in Alpha");
+      await driver.input.pressKey("ESCAPE");
+      await openMenu();
+      await driver.mouse.click(width - 2, 25);
+      expect(driver.renderer.root.findDescendantById("project-context-menu")).toBeUndefined();
+      await openMenu();
+      const action = driver.renderer.root.findDescendantById("project-context-new-thread")!;
+      await driver.mouse.click(action.screenX + 1, action.screenY);
+      expect(driver.captureFrame()).toContain("New thread in Beta");
+      expect(driver.captureFrame()).toContain("/workspace/beta");
+      expect(driver.renderer.root.findDescendantById("project-context-menu")).toBeUndefined();
+      await driver.input.pressKey("ESCAPE");
+      expect(driver.captureFrame()).toContain("Projects (2)");
+      await driver.input.pressKey("n");
+      expect(driver.captureFrame()).toContain("New thread in Beta");
+      await driver.input.pressKey("ESCAPE");
+      await openMenu();
+      await driver.input.pressKey("RETURN");
+      expect(driver.captureFrame()).toContain("New thread in Beta");
+    },
+  );
+
   it("keeps the current conversation open when archiving another thread from Recent", async () => {
     const { driver, fixture } = await renderShell({ width: 140, height: 28 });
     await driver.input.pressKey("RETURN");

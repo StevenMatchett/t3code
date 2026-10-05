@@ -33,7 +33,11 @@ import { QueuedMessages } from "./QueuedMessages.tsx";
 import { PullRequestPanel } from "./PullRequestPanel.tsx";
 
 import { RenameThreadDialog } from "./RenameThreadDialog.tsx";
-import { ThreadContextMenu, type ThreadMenuAction } from "./ThreadContextMenu.tsx";
+import {
+  ThreadContextMenu,
+  ProjectContextMenu,
+  type ThreadMenuAction,
+} from "./ThreadContextMenu.tsx";
 
 const NO_SESSION_ERROR = Atom.make<string | null>(null);
 
@@ -163,15 +167,17 @@ export function AppShell({
       }
     | null
   >(null);
-  const [threadMenu, setThreadMenu] = useState<{
-    thread: OrchestrationThreadShell;
-    x: number;
-    y: number;
-  } | null>(null);
+  const [navigationMenu, setNavigationMenu] = useState<
+    | ((
+        | { type: "thread"; thread: OrchestrationThreadShell }
+        | { type: "project"; projectId: OrchestrationThreadShell["projectId"] }
+      ) & { x: number; y: number })
+    | null
+  >(null);
   const chooseThreadAction = async (action: ThreadMenuAction) => {
-    if (!threadMenu) return;
-    const thread = threadMenu.thread;
-    setThreadMenu(null);
+    if (navigationMenu?.type !== "thread") return;
+    const thread = navigationMenu.thread;
+    setNavigationMenu(null);
     if (action === "rename") {
       setThreadOverlay({ type: "rename", thread });
       return;
@@ -371,7 +377,7 @@ export function AppShell({
     }
   };
   useKeyboard((key) => {
-    if (!active || threadMenu || terminalFocused) return;
+    if (!active || navigationMenu || terminalFocused) return;
     if (key.ctrl && key.name === "b" && !state.modal && !threadOverlay) {
       key.preventDefault();
       key.stopPropagation();
@@ -485,10 +491,15 @@ export function AppShell({
     <ActivityClockProvider>
       <QueuedMessages client={client} />
       <AppShellView
+        onProjectContextMenu={(projectId, position) => {
+          if (!active || state.modal || threadOverlay) return;
+          renderer.clearSelection();
+          setNavigationMenu({ type: "project", projectId, ...position });
+        }}
         onThreadContextMenu={(thread, position) => {
           if (!active || state.modal || threadOverlay) return;
           renderer.clearSelection();
-          setThreadMenu({ thread, ...position });
+          setNavigationMenu({ type: "thread", thread, ...position });
         }}
         contextMenu={
           active && threadOverlay?.type === "rename" ? (
@@ -498,16 +509,29 @@ export function AppShell({
               thread={threadOverlay.thread}
               onClose={() => setThreadOverlay(null)}
             />
-          ) : active && threadMenu ? (
-            <ThreadContextMenu
-              key={threadMenu.thread.id}
-              x={threadMenu.x}
-              y={threadMenu.y}
+          ) : active && navigationMenu?.type === "project" ? (
+            <ProjectContextMenu
+              key={navigationMenu.projectId}
+              x={navigationMenu.x}
+              y={navigationMenu.y}
               width={width}
               height={height}
-              archived={threadMenu.thread.archivedAt !== null}
+              onChoose={() => {
+                dispatch({ type: "new-thread", projectId: navigationMenu.projectId });
+                setNavigationMenu(null);
+              }}
+              onClose={() => setNavigationMenu(null)}
+            />
+          ) : active && navigationMenu?.type === "thread" ? (
+            <ThreadContextMenu
+              key={navigationMenu.thread.id}
+              x={navigationMenu.x}
+              y={navigationMenu.y}
+              width={width}
+              height={height}
+              archived={navigationMenu.thread.archivedAt !== null}
               onChoose={(action) => void chooseThreadAction(action)}
-              onClose={() => setThreadMenu(null)}
+              onClose={() => setNavigationMenu(null)}
             />
           ) : null
         }
@@ -726,7 +750,9 @@ export function AppShell({
             width={layout.contentWidth}
             height={layout.contentHeight}
             onHintsChange={setHotkeys}
-            active={active && state.modal === null && threadOverlay === null && threadMenu === null}
+            active={
+              active && state.modal === null && threadOverlay === null && navigationMenu === null
+            }
             onBack={() => dispatch({ type: "back" })}
             onHelp={() => dispatch({ type: "toggle-help" })}
             onNewThread={() => dispatch({ type: "new-thread" })}

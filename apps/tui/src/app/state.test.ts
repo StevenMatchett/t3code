@@ -171,6 +171,25 @@ describe("shell coordination", () => {
     expect(dispatchShellCommand(help, { type: "activate" }, rows)).toEqual(state);
   });
 
+  it("opens thread creation for an explicit project just like selecting it and pressing N", () => {
+    const selected = dispatchShellCommand(
+      initial(),
+      { type: "move", offset: 1, wrap: false },
+      rows,
+    );
+    const keyboard = dispatchShellCommand(selected, shellCommandFromKey({ name: "n" })!, rows);
+    expect(dispatchShellCommand(initial(), { type: "new-thread", projectId: p2 }, rows)).toEqual(
+      keyboard,
+    );
+    expect(
+      dispatchShellCommand(
+        initial(),
+        { type: "new-thread", projectId: ProjectId.make("missing") },
+        rows,
+      ),
+    ).toEqual(initial());
+  });
+
   it("opens project creation without requiring an existing project", () => {
     const empty = { projects: [], threads: [] };
     const modal = dispatchShellCommand(createInitialShellState(), { type: "new-project" }, empty);

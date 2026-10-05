@@ -49,6 +49,10 @@ export interface AppShellViewProps {
   readonly children?: ReactNode;
   readonly onOpenProject?: (projectId: ProjectId) => void;
   readonly contextMenu?: ReactNode;
+  readonly onProjectContextMenu?: (
+    projectId: ProjectId,
+    position: { x: number; y: number },
+  ) => void;
   readonly onThreadContextMenu?: (
     thread: OrchestrationThreadShell,
     position: { x: number; y: number },
@@ -250,6 +254,7 @@ export function AppShellView({
   onOpenProject,
   onOpenThread,
   onThreadContextMenu,
+  onProjectContextMenu,
   contextMenu,
   onNewProject,
   onNewThread,
@@ -390,7 +395,11 @@ export function AppShellView({
         active={!conversation}
         visible={state.modal === null}
         onContextMenu={(id, position) => {
-          if (browsingProjects) return;
+          if (browsingProjects) {
+            const project = projects.find((item) => item.id === id);
+            if (project) onProjectContextMenu?.(project.id, position);
+            return;
+          }
           const thread = visibleThreads.find((item) => item.id === id);
           if (thread) onThreadContextMenu?.(thread, position);
         }}

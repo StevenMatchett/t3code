@@ -6,29 +6,64 @@ import { Stack } from "../ui/primitives.tsx";
 
 export type ThreadMenuAction = "rename" | "archive" | "delete";
 
-export function ThreadContextMenu({
-  x,
-  y,
-  width,
-  height,
-  archived,
-  onChoose,
-  onClose,
-}: {
+interface MenuPositionProps {
   readonly x: number;
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  readonly onClose: () => void;
+}
+
+export function ThreadContextMenu({
+  archived,
+  ...props
+}: MenuPositionProps & {
   readonly archived: boolean;
   readonly onChoose: (action: ThreadMenuAction) => void;
-  readonly onClose: () => void;
+}) {
+  return (
+    <NavigationContextMenu
+      {...props}
+      id="thread-context"
+      actions={[
+        { action: "rename", label: "Rename" },
+        { action: "archive", label: archived ? "Restore" : "Archive" },
+        { action: "delete", label: "Delete" },
+      ]}
+    />
+  );
+}
+
+export function ProjectContextMenu(
+  props: MenuPositionProps & {
+    readonly onChoose: (action: "new-thread") => void;
+  },
+) {
+  return (
+    <NavigationContextMenu
+      {...props}
+      id="project-context"
+      actions={[{ action: "new-thread", label: "New thread" }]}
+    />
+  );
+}
+
+function NavigationContextMenu<Action extends string>({
+  x,
+  y,
+  width,
+  height,
+  id,
+  actions,
+  onChoose,
+  onClose,
+}: MenuPositionProps & {
+  readonly id: string;
+  readonly actions: readonly { readonly action: Action; readonly label: string }[];
+  readonly onChoose: (action: Action) => void;
 }) {
   const [selected, setSelected] = useState(0);
-  const actions = [
-    { action: "rename", label: "Rename" },
-    { action: "archive", label: archived ? "Restore" : "Archive" },
-    { action: "delete", label: "Delete" },
-  ] as const;
+  const menuHeight = actions.length + 2;
   useKeyboard((key) => {
     key.preventDefault();
     key.stopPropagation();
@@ -43,7 +78,7 @@ export function ThreadContextMenu({
   const menuWidth = Math.min(20, width);
   return (
     <Stack
-      id="thread-context-backdrop"
+      id={`${id}-backdrop`}
       position="absolute"
       top={0}
       left={0}
@@ -57,12 +92,12 @@ export function ThreadContextMenu({
       }}
     >
       <Panel
-        id="thread-context-menu"
+        id={`${id}-menu`}
         position="absolute"
         left={Math.max(0, Math.min(x, width - menuWidth))}
-        top={Math.max(0, Math.min(y, height - 5))}
+        top={Math.max(0, Math.min(y, height - menuHeight))}
         width={menuWidth}
-        height={5}
+        height={menuHeight}
         flexDirection="column"
         borderTone="borderFocused"
         onMouseDown={(event) => {
@@ -73,7 +108,7 @@ export function ThreadContextMenu({
         {actions.map(({ action, label }, index) => (
           <Stack
             key={action}
-            id={`thread-context-${action}`}
+            id={`${id}-${action}`}
             height={1}
             width="100%"
             onMouseOver={() => setSelected(index)}
