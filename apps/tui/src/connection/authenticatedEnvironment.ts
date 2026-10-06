@@ -3,6 +3,7 @@ import {
   orchestrationProtocolCompatibilityError,
 } from "@t3tools/client-runtime/connection";
 import {
+  ORCHESTRATION_PROTOCOL_VERSION,
   AuthOrchestrationReadScope,
   AuthStandardClientScopes,
   type AuthSessionState,
@@ -182,12 +183,21 @@ export interface StartedAuthenticatedTuiEnvironment extends AuthenticatedTuiEnvi
   readonly readiness: TuiEnvironmentReadiness;
 }
 
-export const TuiEnvironmentReattachFailure = Schema.Literals(["missing", "rejected", "unsafe"]);
+export const TuiEnvironmentReattachFailure = Schema.Literals([
+  "missing",
+  "rejected",
+  "unsafe",
+  "protocol",
+]);
 export type TuiEnvironmentReattachFailure = typeof TuiEnvironmentReattachFailure.Type;
 
 export class TuiEnvironmentReattachError extends Schema.TaggedError<TuiEnvironmentReattachError>()(
   "TuiEnvironmentReattachError",
-  { failure: TuiEnvironmentReattachFailure },
+  {
+    failure: TuiEnvironmentReattachFailure,
+    serverVersion: Schema.optional(Schema.String),
+    serverProtocolVersion: Schema.optional(Schema.Number),
+  },
 ) {
   override get message(): string {
     switch (this.failure) {
@@ -195,6 +205,8 @@ export class TuiEnvironmentReattachError extends Schema.TaggedError<TuiEnvironme
         return "No saved T3 connection exists. Pair with your existing T3 environment using --connect <origin> --pair-stdin. Use --new-environment only for a separate environment.";
       case "rejected":
         return "The saved T3 connection was rejected or is unavailable. Check the existing server and pair again if needed. No server was started or stopped.";
+      case "protocol":
+        return `The running T3 server (${this.serverVersion ?? "unknown version"}) uses orchestration protocol ${this.serverProtocolVersion ?? 1}, but this TUI requires protocol ${ORCHESTRATION_PROTOCOL_VERSION}. Run a server build compatible with this checkout (see UPSTREAM_BASE), then reconnect. Re-pairing cannot fix a protocol mismatch. No server was started or stopped.`;
       case "unsafe":
         return "The saved T3 credential has unsafe ownership or permissions. Repair the credential file before attaching. No server was started or stopped.";
     }
@@ -523,7 +535,11 @@ export const reattachAuthenticatedTuiEnvironment = Effect.fn(
     Effect.mapError(() => new TuiEnvironmentReattachError({ failure: "rejected" })),
   );
   if (orchestrationProtocolCompatibilityError(descriptor))
-    return yield* new TuiEnvironmentReattachError({ failure: "rejected" });
+    return yield* new TuiEnvironmentReattachError({
+      failure: "protocol",
+      serverVersion: descriptor.serverVersion,
+      serverProtocolVersion: descriptor.orchestrationProtocolVersion ?? 1,
+    });
   if (descriptor.environmentId !== stored.environmentId) {
     return yield* new TuiEnvironmentReattachError({ failure: "rejected" });
   }

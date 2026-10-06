@@ -83,7 +83,10 @@ npx t3@latest
 ```
 
 This checkout requires the orchestration V2 server protocol from the upstream revision in
-[UPSTREAM_BASE](./UPSTREAM_BASE). Update older servers before pairing.
+[UPSTREAM_BASE](./UPSTREAM_BASE). Stable 0.0.45 and earlier still use V1 and cannot
+connect to this TUI. Use a V2-compatible nightly or a server built from the recorded
+revision. Updating files on disk does not update an already-running server; restart
+the desktop app when active work is finished. Re-pairing does not resolve a protocol mismatch.
 
 Keep the desktop app or server running while using the TUI. The TUI shares its projects, threads,
 and agents; it does not copy the database or start a second server against that data.

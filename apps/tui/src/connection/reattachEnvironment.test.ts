@@ -218,6 +218,36 @@ const prepareStore = Effect.fn(function* () {
 });
 
 describe("authenticated TUI environment reattachment", () => {
+  it.effect.each([undefined, 1, ORCHESTRATION_PROTOCOL_VERSION + 1])(
+    "explains incompatible protocol %s before using saved credentials",
+    (protocol) =>
+      Effect.gen(function* () {
+        const store = yield* prepareStore();
+        const requests: string[] = [];
+        const error = yield* Effect.flip(
+          reattachAuthenticatedTuiEnvironment({
+            credentialStore: store,
+            fetch: async (input, init) => {
+              const request = new Request(input, init);
+              requests.push(new URL(request.url).pathname);
+              assert.isNull(request.headers.get("authorization"));
+              return jsonResponse({
+                ...SERVER_CONFIG.environment,
+                serverVersion: "0.0.45",
+                orchestrationProtocolVersion: protocol,
+              });
+            },
+          }),
+        );
+        assert.equal(error.failure, "protocol");
+        assert.include(error.message, "0.0.45");
+        assert.include(error.message, `requires protocol ${ORCHESTRATION_PROTOCOL_VERSION}`);
+        assert.include(error.message, "Re-pairing cannot fix");
+        assert.deepEqual(requests, ["/.well-known/t3/environment"]);
+        assert.equal((yield* store.read()).bearerToken, BEARER);
+      }),
+  );
+
   it.effect(
     "pairs to the existing environment and reattaches with only its derived credential",
     () =>
