@@ -6,7 +6,7 @@ import {
   type CliRendererErrorEvent,
 } from "@opentui/core";
 import { createRoot, type Root } from "@opentui/react";
-import type * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry";
+import type * as AtomRegistry from "effect/reactivity/AtomRegistry";
 import { Component, type ErrorInfo, type ReactNode, useEffect } from "react";
 
 export interface RendererRuntimeOptions {

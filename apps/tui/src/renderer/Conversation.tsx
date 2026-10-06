@@ -4,8 +4,7 @@ import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useMemo, useState, useContext, useEffect, useRef } from "react";
-import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
-import { foldSubagentActivities } from "@t3tools/client-runtime/state/subagentRuntime";
+
 import { AgentOutputOverlay, AgentSwarmPanel, agentOutputLines } from "./AgentSwarm.tsx";
 import { Approval, Questions } from "./RequestsPanel.tsx";
 import { ComposerControls } from "./ProviderPicker.tsx";
@@ -120,7 +119,7 @@ export function Conversation({
     selectedAgentId,
     expandedToolGroups,
   ]);
-  const requests = useMemo(() => derivePendingRequests(thread?.activities ?? []), [thread]);
+  const requests = useMemo(() => thread?.requests ?? { approvals: [], userInputs: [] }, [thread]);
   const question = requests.userInputs.find(
     (request) =>
       !interaction.replies.some(
@@ -136,10 +135,7 @@ export function Conversation({
   const focusedRequest = useRef<string | null>(null);
   const requestId = approval?.requestId ?? question?.requestId ?? null;
   const requestMode = approval ? "requests" : "questions";
-  const agents = useMemo(
-    () => foldSubagentActivities(thread?.activities ?? []),
-    [thread?.activities],
-  );
+  const agents = useMemo(() => thread?.agents ?? [], [thread?.agents]);
   const resolvedAgentCursor = Math.max(-1, Math.min(agentCursor, agents.length - 1));
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
   useEffect(() => {
@@ -453,15 +449,15 @@ export function Conversation({
               anchorIndex < 0 ? lines.findIndex((line) => line.id === anchor.id) : anchorIndex,
             ),
           );
-  const page = Option.getOrNull(state.page);
+  const page = state.history;
   useEffect(() => {
     if (
       anchor &&
       !lines.some((line) => line.id === anchor.id) &&
-      page?.hasMore &&
-      !page.loadingOlder
+      page?.hasMoreHistory &&
+      !page.loading
     )
-      client.loadOlder(threadId);
+      client.loadOlder(registry, threadId);
   }, [client, threadId, anchor, lines, page]);
   const scrollTo = (next: number) => {
     const target = Math.max(0, Math.min(maxStart, next));
@@ -706,7 +702,7 @@ export function Conversation({
         break;
       case "home":
         scrollTo(0);
-        if (page?.hasMore && !page.loadingOlder) client.loadOlder(threadId);
+        if (page?.hasMoreHistory && !page.loading) client.loadOlder(registry, threadId);
         break;
       case "end":
         setAnchor(null);

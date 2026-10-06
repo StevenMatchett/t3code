@@ -1,5 +1,4 @@
 import {
-  ClientOrchestrationCommand,
   ProjectId,
   RuntimeMode,
   ProviderInteractionMode,
@@ -7,13 +6,11 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import type { Atom } from "effect/unstable/reactivity";
+import type { Atom } from "effect/reactivity";
 import type { ShellState } from "../app/state.ts";
 import type { ThreadInteractionState } from "../features/chat/interactions.ts";
 
-const PromptCommand = ClientOrchestrationCommand.pipe(Schema.toTaggedUnion("type")).cases[
-  "thread.turn.start"
-];
+import { PromptCommand } from "../connection/commands.ts";
 export const SavedInteraction = Schema.Struct({
   draft: Schema.String,
   runtimeMode: Schema.optionalKey(Schema.NullOr(RuntimeMode)),

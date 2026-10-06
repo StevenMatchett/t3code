@@ -1,17 +1,18 @@
-import type { MessageId, OrchestrationThread } from "@t3tools/contracts";
-import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+import type { TuiThread, TuiThreadState } from "../../connection/models.ts";
+import type { MessageId } from "@t3tools/contracts";
+
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
-import type { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import type { Atom, AtomRegistry } from "effect/reactivity";
 
 /** Match the GUI's Edit from here targets: the user prompt preceding a checkpointed reply. */
-export function checkpointRestoreTargets(thread: OrchestrationThread) {
+export function checkpointRestoreTargets(thread: TuiThread) {
   const checkpoints = new Map(
     thread.checkpoints.map((checkpoint) => [checkpoint.assistantMessageId, checkpoint]),
   );
-  const targets: { message: OrchestrationThread["messages"][number]; turnCount: number }[] = [];
-  let prompt: OrchestrationThread["messages"][number] | undefined;
+  const targets: { message: TuiThread["messages"][number]; turnCount: number }[] = [];
+  let prompt: TuiThread["messages"][number] | undefined;
   for (const message of thread.messages) {
     if (message.role === "user") prompt = message;
     else if (prompt) {
@@ -27,15 +28,12 @@ export function checkpointRestoreTargets(thread: OrchestrationThread) {
 /** Dispatch acknowledgement precedes the asynchronous rewind; observe its projected result. */
 export function waitForCheckpointRestore(
   registry: AtomRegistry.AtomRegistry,
-  atom: Atom.Atom<EnvironmentThreadState>,
+  atom: Atom.Atom<TuiThreadState>,
   messageId: MessageId,
   turnCount: number,
   dispatch: () => Promise<boolean>,
 ): Promise<void> {
   const initial = Option.getOrThrow(registry.get(atom).data);
-  const previousFailures = new Set(
-    initial.activities.filter((a) => a.kind === "checkpoint.revert.failed").map((a) => a.id),
-  );
   return new Promise((resolve, reject) => {
     let accepted = false;
     let settled = false;
@@ -51,22 +49,14 @@ export function waitForCheckpointRestore(
     const inspect = () => {
       const thread = Option.getOrNull(registry.get(atom).data);
       if (!thread) return;
-      const failure = thread.activities.findLast(
-        (a) => a.kind === "checkpoint.revert.failed" && !previousFailures.has(a.id),
-      );
-      if (failure) {
-        const payload = failure.payload;
-        finish(
-          new Error(
-            typeof payload === "object" &&
-              payload !== null &&
-              "detail" in payload &&
-              typeof payload.detail === "string"
-              ? payload.detail
-              : failure.summary,
-          ),
-        );
-      } else if (
+      if (
+        thread.rollbackFailure &&
+        thread.rollbackFailure.requestId !== initial.rollbackFailure?.requestId
+      ) {
+        finish(new Error(thread.rollbackFailure.message));
+        return;
+      }
+      if (
         accepted &&
         !thread.messages.some((m) => m.id === messageId) &&
         thread.checkpoints.every((c) => c.checkpointTurnCount <= turnCount) &&

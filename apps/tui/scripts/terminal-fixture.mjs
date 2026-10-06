@@ -1,16 +1,17 @@
+import { appendOrchestrationProtocol } from "@t3tools/client-runtime/connection";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { Effect, Exit, Layer, Option, Schedule, Scope, Stream, SubscriptionRef } from "effect";
-import * as RpcClient from "effect/unstable/rpc/RpcClient";
-import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as RpcClient from "effect/rpc/RpcClient";
+import * as RpcSerialization from "effect/rpc/RpcSerialization";
+import * as Socket from "effect/socket/Socket";
 import { WS_METHODS } from "@t3tools/contracts";
 import { resolveRemoteWebSocketConnectionUrl } from "@t3tools/client-runtime/authorization";
 import { deriveWsBaseUrl } from "@t3tools/client-runtime/environment";
-import { makeWsRpcProtocolClient, remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
+import { makeWsRpcProtocolClient, layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
 import {
   applyTerminalAttachStreamEvent,
   nextTerminalAttachSeedState,
@@ -105,8 +106,10 @@ export const openTerminalFixtureConnection = Effect.fn("tui.testing.terminalConn
           bearerToken,
         }),
       )
-      .pipe(Effect.provide(remoteHttpClientLayer(globalThis.fetch)));
-    const socketLayer = Socket.layerWebSocket(socketUrl, { openTimeout: "10 seconds" }).pipe(
+      .pipe(Effect.provide(layerRemoteHttpClient(globalThis.fetch)));
+    const socketLayer = Socket.layerWebSocket(appendOrchestrationProtocol(socketUrl), {
+      openTimeout: "10 seconds",
+    }).pipe(
       Layer.provide(
         Layer.succeed(Socket.WebSocketConstructor, (url) => new globalThis.WebSocket(url)),
       ),

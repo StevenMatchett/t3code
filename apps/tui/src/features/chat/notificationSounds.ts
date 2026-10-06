@@ -1,8 +1,8 @@
-import type { OrchestrationThreadShell } from "@t3tools/contracts";
+import type { TuiThreadShell } from "../../connection/models.ts";
 
 export type NotificationSound = "input" | "completion";
 type Thread = Pick<
-  OrchestrationThreadShell,
+  TuiThreadShell,
   "id" | "archivedAt" | "hasPendingApprovals" | "hasPendingUserInput" | "latestTurn" | "session"
 >;
 

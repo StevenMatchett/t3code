@@ -1,12 +1,13 @@
-import type { EnvironmentId, OrchestrationThreadShell } from "@t3tools/contracts";
-import { projectThreadAwareness, type AgentAwarenessPhase } from "@t3tools/shared/agentAwareness";
+import type { TuiThreadShell } from "../../connection/models.ts";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { type AgentAwarenessPhase } from "@t3tools/shared/agentAwareness";
 
 export type ThreadActivityPhase = AgentAwarenessPhase | "idle";
 
 export function threadActivityPhase(
-  environmentId: EnvironmentId,
+  _environmentId: EnvironmentId,
   thread: Pick<
-    OrchestrationThreadShell,
+    TuiThreadShell,
     | "id"
     | "title"
     | "modelSelection"
@@ -19,7 +20,13 @@ export function threadActivityPhase(
   live: boolean,
 ): ThreadActivityPhase {
   if (!live) return "stale";
-  return projectThreadAwareness({ environmentId, project: { title: "" }, thread })?.phase ?? "idle";
+  if (thread.hasPendingUserInput) return "waiting_for_input";
+  if (thread.hasPendingApprovals) return "waiting_for_approval";
+  if (thread.session?.status === "starting") return "starting";
+  if (thread.latestTurn?.state === "running") return "running";
+  if (thread.latestTurn?.state === "error") return "failed";
+  if (thread.latestTurn?.state === "completed") return "completed";
+  return "idle";
 }
 
 export function isThreadWorking(phase: ThreadActivityPhase) {

@@ -2,16 +2,17 @@ import * as NodeAssert from "node:assert/strict";
 import * as NodePath from "node:path";
 import { it } from "@effect/vitest";
 import { Effect, Option, Stream } from "effect";
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { AtomRegistry } from "effect/reactivity";
 import { createElement } from "react";
 import { AppShell } from "../dist/renderer/AppShell.js";
 import { createTuiTestDriver } from "../dist/testing/driver.js";
 import {
   CommandId,
+  WS_METHODS,
   ProjectId,
   ThreadId,
   ProviderInstanceId,
-  ORCHESTRATION_WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
 } from "@t3tools/contracts";
 import { createTuiClient } from "../dist/connection/clientRuntime.js";
 import {
@@ -27,11 +28,11 @@ it.live(
         serverEntryPath: process.env.TUI_TEST_SERVER_ENTRY,
       });
       const seed = yield* openTerminalFixtureConnection(fixture);
-      const command = seed.client[ORCHESTRATION_WS_METHODS.dispatchCommand];
+      const command = seed.client[ORCHESTRATION_V2_WS_METHODS.dispatchCommand];
       const projectId = ProjectId.make("live-client-project");
       const threadId = ThreadId.make("live-client-thread");
       const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
-      yield* command({
+      yield* seed.client[WS_METHODS.projectsMutate]({
         type: "project.create",
         commandId: CommandId.make("live-create-project"),
         projectId,
@@ -43,6 +44,8 @@ it.live(
       });
       yield* command({
         type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
         commandId: CommandId.make("live-create-thread"),
         threadId,
         projectId,
@@ -90,7 +93,7 @@ it.live(
       NodeAssert.equal(details[0].data.value.title, "Shared conversation");
       NodeAssert.equal(details[0].data.value.id, threadId);
       yield* command({
-        type: "thread.meta.update",
+        type: "thread.model-selection.set",
         commandId: CommandId.make("remote-model-change"),
         threadId,
         modelSelection: { ...modelSelection, model: "remote-selected-model" },
@@ -106,8 +109,8 @@ it.live(
         Effect.timeout("15 seconds"),
       );
       NodeAssert.equal(modelChanged.length, 1);
-      yield* command({
-        type: "project.meta.update",
+      yield* seed.client[WS_METHODS.projectsMutate]({
+        type: "project.update",
         commandId: CommandId.make("live-rename-project"),
         projectId,
         title: "Renamed in another client",

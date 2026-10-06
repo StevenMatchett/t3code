@@ -5,8 +5,10 @@
  * elements live in the renderer; we only attach listeners and forward state
  * here). Single layer-scoped browser session partition.
  */
-import * as NodeCrypto from "node:crypto";
-import { DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER } from "@t3tools/contracts";
+import {
+  DesktopPreviewRecordingInputSchema,
+  DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER,
+} from "@t3tools/contracts";
 import type {
   DesktopPreviewAnnotationTheme,
   DesktopPreviewAutomationStatus,
@@ -18,6 +20,7 @@ import type {
   PreviewAnnotationSubmissionResult,
   DesktopPreviewRecordingArtifact,
   DesktopPreviewRecordingFrame,
+  DesktopPreviewRecordingInputEvent,
   DesktopPreviewScreenshotArtifact,
   DesktopPreviewTabDefaults,
   PreviewAutomationClickInput,
@@ -45,6 +48,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -54,6 +58,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -62,6 +67,7 @@ import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import { PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import {
@@ -71,6 +77,11 @@ import {
   ELEMENT_PICKED_CHANNEL,
   HUMAN_INPUT_CHANNEL,
   MOUSE_NAVIGATE_CHANNEL,
+  RECORDING_CURSOR_CHANNEL,
+  RECORDING_POINTER_CHANNEL,
+  RECORDING_KEY_CHANNEL,
+  RECORDING_INPUT_CHANNEL,
+  RECORDING_CONTROLLER_CHANNEL,
   START_PICK_CHANNEL,
 } from "./GuestProtocol.ts";
 import { isPreviewAnnotationPayload } from "./PickedElementPayload.ts";
@@ -81,6 +92,7 @@ import {
   previewAutomationEditingCommandExpression,
 } from "./PreviewKeyboard.ts";
 import { captureFavicon, safeHttpOrigin, selectFaviconCandidates } from "./FaviconCapture.ts";
+import { DEFAULT_RECORDING_INPUT_OPTIONS, type RecordingInputOptions } from "./RecordingInput.ts";
 
 export type PreviewNavStatus =
   | { kind: "Idle" }
@@ -437,6 +449,7 @@ interface ManagedListeners {
 type FrameCaptureConsumer = "picture-in-picture" | "recording";
 
 interface FrameCaptureSession {
+  readonly recordingInputOptions?: RecordingInputOptions;
   readonly scope: Scope.Closeable | null;
   readonly consumers: ReadonlySet<FrameCaptureConsumer>;
   readonly unthrottledWebContentsIds: ReadonlySet<number>;
@@ -485,6 +498,10 @@ interface BrowserDiagnostics {
   readonly requests: ReadonlyMap<string, { url: string; method: string }>;
 }
 
+const isRecordingInput = Schema.is(DesktopPreviewRecordingInputSchema);
+
+type RecordingInputListener = (event: DesktopPreviewRecordingInputEvent) => Effect.Effect<void>;
+
 type PointerEventListener = (event: DesktopPreviewPointerEvent) => Effect.Effect<void>;
 
 interface ExpectedAgentInput {
@@ -504,6 +521,9 @@ interface ExpectedAgentInput {
  * and not in a window spawned by a third-party page in the preview.
  */
 const POPUP_PROTOCOLS = new Set(["http:", "https:"]);
+
+/** Control actions that only read the page, so they do not make it agent-driven. */
+const READ_ONLY_CONTROL_ACTIONS = new Set(["snapshot", "waitFor"]);
 
 const isPopupUrl = (rawUrl: string): boolean => {
   try {
@@ -620,8 +640,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   pictureInPicturePreloadPath: string,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
+  const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
   const hostPlatform = yield* HostProcessPlatform;
   const path = yield* Path.Path;
+  const crypto = yield* Crypto.Crypto;
   const parentScope = yield* Scope.Scope;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
@@ -636,6 +658,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const attachedRef = yield* Ref.make<ReadonlyMap<number, ManagedListeners>>(new Map());
   const listenersRef = yield* Ref.make<ReadonlySet<Listener>>(new Set());
   const pointerEventListenersRef = yield* Ref.make<ReadonlySet<PointerEventListener>>(new Set());
+  const recordingInputListenersRef = yield* Ref.make<ReadonlySet<RecordingInputListener>>(
+    new Set(),
+  );
   const recordingFrameListenersRef = yield* Ref.make<ReadonlySet<RecordingFrameListener>>(
     new Set(),
   );
@@ -667,6 +692,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   // (electron#44618) and now always rejects with NotAllowedError.
   let pendingRecording: PendingRecording | null = null;
   const displayMediaHandlerSessions = new WeakSet<Session>();
+  const downloadHandlerSessions = new WeakSet<Session>();
+  let downloadCount = 0;
+  // Preview pages whose latest input came from an agent action, not the human.
+  const agentDrivenWebContents = new WeakSet<Electron.WebContents>();
   let frameCaptureWindowOpen = true;
   let currentMainWindow: BrowserWindow | undefined;
   let mainWindowCleanupFiber: Fiber.Fiber<void, never> | undefined;
@@ -821,6 +850,20 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         return Effect.succeed([undefined, sessions] as const);
       }
       return setFrameCaptureWebContentsBackgroundThrottling(wc, false).pipe(
+        Effect.tap(() =>
+          Effect.gen(function* () {
+            if (!current.consumers.has("recording")) return;
+            const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+            yield* attempt({ operation: "recording.cursor", tabId, webContentsId: wc.id }, () =>
+              wc.send(
+                RECORDING_CURSOR_CHANNEL,
+                true,
+                current.recordingInputOptions,
+                tab?.controller,
+              ),
+            );
+          }),
+        ),
         Effect.map(
           () =>
             [
@@ -845,6 +888,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         const current = sessions.get(tabId);
         if (!current || !current.consumers.has(consumer)) {
           return [undefined, sessions] as const;
+        }
+        if (consumer === "recording") {
+          yield* Effect.forEach(current.unthrottledWebContentsIds, (id) =>
+            attempt({ operation: "recording.cursor", tabId, webContentsId: id }, () => {
+              const contents = webContents.fromId(id);
+              if (contents && !contents.isDestroyed())
+                contents.send(RECORDING_CURSOR_CHANNEL, false);
+            }).pipe(Effect.ignore),
+          );
         }
         const consumers = new Set(current.consumers);
         consumers.delete(consumer);
@@ -896,19 +948,19 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   });
 
   const deliverEvent = (
-    eventKind: "state-change" | "recording-frame" | "pointer-event",
+    eventKind: "state-change" | "recording-frame" | "recording-input" | "pointer-event",
     tabId: string,
     delivery: () => Effect.Effect<void>,
   ) =>
     Effect.suspend(delivery).pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterrupts(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("Desktop preview event listener failed.", {
-              eventKind,
-              tabId,
-              cause,
-            }),
+      Effect.catchCauseIf(
+        (cause) => !Cause.hasInterrupts(cause),
+        (cause) =>
+          Effect.logWarning("Desktop preview event listener failed.", {
+            eventKind,
+            tabId,
+            cause,
+          }),
       ),
     );
 
@@ -933,6 +985,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const update = Effect.fn("PreviewManager.update")(function* (
     tabId: string,
     patch: Partial<PreviewTabState>,
+    humanPoint?: { readonly x: number; readonly y: number },
   ) {
     const updatedAt = yield* currentIso;
     const next = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
@@ -950,7 +1003,20 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     // can commit between the modify above and here, and republishing this
     // snapshot would roll the UI back to a value that writer will not send
     // again because it suppresses unchanged audibility.
-    if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
+    if (Option.isSome(next)) {
+      if (patch.controller !== undefined && next.value.webContentsId != null) {
+        const capture = (yield* SynchronizedRef.get(frameCaptureSessionsRef)).get(tabId);
+        const webContentsId = next.value.webContentsId;
+        if (capture?.consumers.has("recording")) {
+          yield* attempt({ operation: "recording.controller", tabId }, () => {
+            const contents = webContents.fromId(webContentsId);
+            if (contents && !contents.isDestroyed())
+              contents.send(RECORDING_CONTROLLER_CHANNEL, patch.controller, humanPoint);
+          }).pipe(Effect.ignore);
+        }
+      }
+      yield* emitIfCurrent(tabId, next.value);
+    }
   });
 
   /**
@@ -1060,15 +1126,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       }
       return resolvedPath;
     }).pipe(
-      Effect.flatMap((resolvedPath) =>
-        resolvedPath === null
-          ? Effect.fail(
-              new PreviewArtifactPathOutsideDirectoryError({
-                artifactPath,
-                artifactDirectory: resolvedArtifactDirectory,
-              }),
-            )
-          : Effect.succeed(resolvedPath),
+      Effect.filterOrFail(
+        (resolvedPath) => resolvedPath !== null,
+        () =>
+          new PreviewArtifactPathOutsideDirectoryError({
+            artifactPath,
+            artifactDirectory: resolvedArtifactDirectory,
+          }),
       ),
     );
 
@@ -1243,6 +1307,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       > => {
         const existing = sessions.get(wc.id);
         if (existing) return Effect.succeed([existing, sessions] as const);
+        // A guest can be destroyed while it waits for this lock, and its native
+        // methods throw once it is.
+        if (wc.isDestroyed()) {
+          return Effect.fail(
+            new PreviewOperationError({
+              operation: "ensureControlSession",
+              webContentsId: wc.id,
+              cause: new Error("WebContents was destroyed"),
+            }),
+          );
+        }
         if (wc.isDevToolsOpened()) {
           return Effect.fail(
             new PreviewAutomationDevToolsOpenError({
@@ -1261,6 +1336,25 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           const semaphore = yield* Semaphore.make(1);
           const scope = yield* Scope.fork(parentScope, "sequential");
           const wcDebugger = wc.debugger;
+          const consoleReleases = yield* Queue.sliding<void>(1);
+          // Console message eviction does not release the debugger's strong
+          // object handles. We keep text only, so release the whole group,
+          // including its object-id bookkeeping. Coalesce bursts behind one
+          // command rather than queueing a command for every logged object.
+          yield* Effect.forkIn(
+            Effect.forever(
+              Queue.take(consoleReleases).pipe(
+                Effect.andThen(
+                  attemptPromise({ operation: "releaseConsoleObjects", webContentsId: wc.id }, () =>
+                    wcDebugger.sendCommand("Runtime.releaseObjectGroup", {
+                      objectGroup: "console",
+                    }),
+                  ).pipe(Effect.ignore),
+                ),
+              ),
+            ),
+            scope,
+          );
           const handleDebuggerMessage = Effect.fnUntraced(function* (
             method: string,
             params: Record<string, unknown>,
@@ -1307,6 +1401,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               }
             }
             yield* captureDiagnosticMessage(wc.id, method, params);
+            if (method === "Runtime.consoleAPICalled" || method === "Runtime.exceptionThrown") {
+              yield* Queue.offer(consoleReleases, undefined);
+            }
           });
           const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
             runFork(handleDebuggerMessage(method, params));
@@ -1349,14 +1446,28 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               wcDebugger.on("message", onMessage);
               wcDebugger.attach("1.3");
             });
-            yield* Effect.all(
-              ["Runtime.enable", "Accessibility.enable", "Network.enable", "Log.enable"].map(
-                (method) =>
-                  attemptPromise(
-                    { operation: `initializeDebugger.${method}`, webContentsId: wc.id },
-                    () => wcDebugger.sendCommand(method),
-                  ),
-              ),
+            // Electron gives `<webview>` guests a transparent base background, and
+            // Chromium only paints a dark canvas for dark color-scheme pages over an
+            // opaque base. Without this, dark-scheme pages with no background of
+            // their own (text/plain, e.g. .md files) render white text on white.
+            // White matches the webview's existing white backing, so light pages look
+            // the same; Chromium still swaps in its dark canvas for dark-scheme pages.
+            // Sent first because a document that paints before it arrives keeps the
+            // transparent base until its next load.
+            yield* attemptPromise(
+              { operation: "initializeDebugger.defaultBackground", webContentsId: wc.id },
+              () =>
+                wcDebugger.sendCommand("Emulation.setDefaultBackgroundColorOverride", {
+                  color: { r: 255, g: 255, b: 255, a: 1 },
+                }),
+            );
+            yield* Effect.forEach(
+              ["Runtime.enable", "Accessibility.enable", "Network.enable", "Log.enable"],
+              (method) =>
+                attemptPromise(
+                  { operation: `initializeDebugger.${method}`, webContentsId: wc.id },
+                  () => wcDebugger.sendCommand(method),
+                ),
               { concurrency: "unbounded", discard: true },
             );
             return [
@@ -1435,7 +1546,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const epoch = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0;
     const control = yield* ensureControlSession(wc);
     const execute = Effect.fn("PreviewManager.executeControlAction")(function* () {
-      yield* update(tabId, { controller: "agent" });
       const checkControl = Effect.gen(function* () {
         const currentEpoch = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0;
         if (currentEpoch !== epoch) {
@@ -1446,15 +1556,41 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           });
         }
       });
+      // A human who took over while this action waited for the permit owns
+      // the page; marking it agent-driven would hide their Save dialog.
+      yield* checkControl;
+      if (!READ_ONLY_CONTROL_ACTIONS.has(action)) agentDrivenWebContents.add(wc);
+      yield* update(tabId, { controller: "agent" });
       const send: SendCommand = Effect.fn("PreviewManager.sendCommand")(
         function* (method, commandParams, sessionId) {
           yield* checkControl;
           const result = yield* attemptPromise(
             { operation: `${action}.${method}`, tabId, webContentsId: wc.id },
-            () =>
-              sessionId === undefined
-                ? control.debugger.sendCommand(method, commandParams)
-                : control.debugger.sendCommand(method, commandParams, sessionId),
+            async () => {
+              try {
+                return await (sessionId === undefined
+                  ? control.debugger.sendCommand(method, commandParams)
+                  : control.debugger.sendCommand(method, commandParams, sessionId));
+              } finally {
+                const objectGroup =
+                  method === "Runtime.evaluate" ? commandParams?.["objectGroup"] : undefined;
+                // Cancelling an Effect does not cancel the CDP promise. Release
+                // after it settles, even if the caller has already left, so a
+                // late result cannot recreate handles after an early cleanup.
+                if (typeof objectGroup === "string" && objectGroup.startsWith("t3-evaluation-")) {
+                  const params = { objectGroup };
+                  await (
+                    sessionId === undefined
+                      ? control.debugger.sendCommand("Runtime.releaseObjectGroup", params)
+                      : control.debugger.sendCommand(
+                          "Runtime.releaseObjectGroup",
+                          params,
+                          sessionId,
+                        )
+                  ).catch(() => undefined);
+                }
+              }
+            },
           );
           yield* checkControl;
           return result;
@@ -1522,28 +1658,32 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     returnByValue: boolean,
     awaitPromise = true,
   ): Effect.Effect<A, PreviewManagerError> =>
-    send("Runtime.evaluate", {
-      expression,
-      awaitPromise,
-      returnByValue,
-      userGesture: true,
-    }).pipe(
-      Effect.flatMap((rawResponse) => {
-        const response = rawResponse as CdpEvaluationResult;
-        if (!response.exceptionDetails) {
-          return Effect.succeed(response.result?.value as A);
-        }
-        const detail = previewAutomationEvaluationDetail(response.exceptionDetails);
-        return Effect.fail(
-          new PreviewAutomationEvaluationError({
-            tabId,
-            detailKind: detail.detailKind,
-            detailLength: detail.detail?.length ?? 0,
-            cause: response.exceptionDetails,
-          }),
-        );
-      }),
-    );
+    Effect.gen(function* () {
+      const objectGroup = `t3-evaluation-${yield* crypto.randomUUIDv4.pipe(Effect.orDie)}`;
+      return yield* send("Runtime.evaluate", {
+        expression,
+        awaitPromise,
+        returnByValue,
+        userGesture: true,
+        objectGroup,
+      }).pipe(
+        Effect.flatMap((rawResponse) => {
+          const response = rawResponse as CdpEvaluationResult;
+          if (!response.exceptionDetails) {
+            return Effect.succeed(response.result?.value as A);
+          }
+          const detail = previewAutomationEvaluationDetail(response.exceptionDetails);
+          return Effect.fail(
+            new PreviewAutomationEvaluationError({
+              tabId,
+              detailKind: detail.detailKind,
+              detailLength: detail.detail?.length ?? 0,
+              cause: response.exceptionDetails,
+            }),
+          );
+        }),
+      );
+    });
 
   const automationLocator = (input: {
     readonly selector?: string | undefined;
@@ -1728,6 +1868,21 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const sync = () => runFork(syncState(true));
     const syncNavigation = () => runFork(syncState(false, true));
     const syncInPageNavigation = () => runFork(syncState(false));
+    const restoreRecordingCursor = () =>
+      runFork(
+        Effect.gen(function* () {
+          const session = (yield* SynchronizedRef.get(frameCaptureSessionsRef)).get(tabId);
+          if (!wc.isDestroyed()) {
+            const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+            wc.send(
+              RECORDING_CURSOR_CHANNEL,
+              session?.consumers.has("recording") ?? false,
+              session?.recordingInputOptions,
+              tab?.controller,
+            );
+          }
+        }),
+      );
     const navigationStarted = (
       event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
     ) => {
@@ -1855,18 +2010,43 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       if (isPreviewInputSignal(rawSignal) && (yield* consumeExpectedAgentInput(tabId, rawSignal))) {
         return;
       }
+      agentDrivenWebContents.delete(wc);
       yield* Ref.update(controlEpochRef, (epochs) =>
         replaceMap(epochs, (copy) => {
           copy.set(tabId, (epochs.get(tabId) ?? 0) + 1);
         }),
       );
-      yield* update(tabId, { controller: "human" });
+      yield* update(
+        tabId,
+        { controller: "human" },
+        isPreviewInputSignal(rawSignal) && rawSignal.kind === "pointer"
+          ? { x: rawSignal.x, y: rawSignal.y }
+          : undefined,
+      );
       yield* Effect.sleep(750);
       const tabs = yield* SynchronizedRef.get(tabsRef);
       if (tabs.get(tabId)?.controller === "human") {
         yield* update(tabId, { controller: "none" });
       }
     });
+    const recordingInput = (_event: unknown, input: unknown) => {
+      if (!isRecordingInput(input)) return;
+      return runFork(
+        Effect.gen(function* () {
+          const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+          const capture = (yield* SynchronizedRef.get(frameCaptureSessionsRef)).get(tabId);
+          if (tab?.webContentsId !== wc.id || !capture?.consumers.has("recording")) return;
+          if (input.type === "key" && !capture.recordingInputOptions?.showKeyPresses) return;
+          if (input.type === "pointer" && !capture.recordingInputOptions?.showMousePresses) return;
+          const listeners = yield* Ref.get(recordingInputListenersRef);
+          yield* Effect.forEach(
+            listeners,
+            (listener) => deliverEvent("recording-input", tabId, () => listener({ tabId, input })),
+            { discard: true },
+          );
+        }),
+      );
+    };
     const humanInput = (_event: unknown, rawSignal?: unknown): void => {
       runFork(handleHumanInput(rawSignal));
     };
@@ -1928,11 +2108,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.off("page-favicon-updated", faviconUpdated as never);
         wc.off("did-start-loading", sync);
         wc.off("did-stop-loading", sync);
+        wc.off("dom-ready", restoreRecordingCursor);
         wc.off("did-fail-load", failed as never);
         wc.off("audio-state-changed", audioStateChanged);
         wc.off("did-create-window", windowCreated);
         wc.off("before-input-event", beforeInput);
         wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput);
+        wc.ipc.off(RECORDING_INPUT_CHANNEL, recordingInput);
         wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate);
       }).pipe(Effect.ignore),
     );
@@ -1948,9 +2130,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.on("page-favicon-updated", faviconUpdated as never);
         wc.on("did-start-loading", sync);
         wc.on("did-stop-loading", sync);
+        wc.on("dom-ready", restoreRecordingCursor);
         wc.on("did-fail-load", failed as never);
         wc.on("audio-state-changed", audioStateChanged);
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput);
+        wc.ipc.on(RECORDING_INPUT_CHANNEL, recordingInput);
         wc.ipc.on(MOUSE_NAVIGATE_CHANNEL, mouseNavigate);
         wc.setWindowOpenHandler((details) => {
           if (previewWindowOpenAction(details) === "popup") {
@@ -2148,6 +2332,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     ) {
       return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId });
     }
+    yield* rendererHistory.register(wc, { surface: "preview", tabId });
     const attached = yield* Ref.get(attachedRef);
     const annotationTheme = yield* Ref.get(annotationThemeRef);
     const currentAttachment = attached.get(webContentsId);
@@ -2295,6 +2480,31 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
+  // Called when a guest attaches to the window, before its first document
+  // paints. A tab opened straight to a URL often paints before the renderer
+  // gets to registerWebview, which would leave that page on the transparent
+  // base. registerWebview reuses the session opened here.
+  const prepareWebview = Effect.fn("PreviewManager.prepareWebview")(function* (
+    wc: Electron.WebContents,
+  ) {
+    yield* rendererHistory.register(wc, { surface: "preview" });
+    const webContentsId = wc.id;
+    // A guest destroyed before any tab claims it has no other cleanup path.
+    wc.once("destroyed", () => {
+      runFork(detachControlSession(webContentsId));
+    });
+    // Runs detached from the attach event, so nothing may escape. registerWebview
+    // opens the session again if this one did not.
+    yield* ensureControlSession(wc).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logDebug("Preview webview control session was not opened on attach.", {
+          webContentsId,
+          cause,
+        }),
+      ),
+    );
+  });
+
   const navigate = Effect.fn("PreviewManager.navigate")(function* (tabId: string, rawUrl: string) {
     const url = yield* attempt({ operation: "navigate.normalizeUrl", tabId }, () =>
       normalizePreviewUrl(rawUrl),
@@ -2381,6 +2591,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       );
       return;
     }
+    // URL-bar navigation hands the page back to the human. The agent's own
+    // navigation shares this path; its next action marks the page again.
+    agentDrivenWebContents.delete(wc);
     if (wc.getURL() === url) {
       yield* attempt({ operation: "navigate.reload", tabId, webContentsId: wc.id }, () =>
         wc.reload(),
@@ -2566,12 +2779,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         };
         const onDestroyed = () => settle(null);
         const onNavigated = (
-          _event: Electron.Event,
-          _url: string,
-          _isInPlace: boolean,
-          isMainFrame: boolean,
+          event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
         ) => {
-          if (isMainFrame) settle(null);
+          if (event.isMainFrame) settle(null);
         };
         const registerPickElement = Effect.fn("PreviewManager.registerPickElement")(function* () {
           // Two picks on one tab can overlap. Swap this session in and cancel
@@ -2592,7 +2802,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           yield* attempt({ operation: "pickElement.register", tabId, webContentsId: wc.id }, () => {
             wc.ipc.on(ELEMENT_PICKED_CHANNEL, onMessage);
             wc.once("destroyed", onDestroyed);
-            wc.once("did-start-navigation", onNavigated);
+            wc.on("did-start-navigation", onNavigated);
             if (!wc.isFocused()) wc.focus();
             wc.send(START_PICK_CHANNEL, annotationTheme);
           });
@@ -2764,7 +2974,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc,
       ),
     ]);
-    const id = `browser-screenshot-${artifactSiteSlug(wc.getURL())}-${millis.toString(36)}`;
+    const uuid = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+    const id = `browser-screenshot-${artifactSiteSlug(wc.getURL())}-${millis.toString(36)}-${uuid.slice(0, 8)}`;
     const artifactPath = path.join(resolvedArtifactDirectory, `${id}.png`);
     const data = image.toPNG();
     yield* fileSystem.makeDirectory(resolvedArtifactDirectory, { recursive: true }).pipe(
@@ -3157,6 +3368,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               },
             }),
         );
+        yield* rendererHistory.register(pictureInPictureWindow.webContents, {
+          surface: "picture-in-picture",
+          tabId,
+        });
         const initializationScope = yield* Scope.fork(parentScope, "sequential");
         const ready = yield* Deferred.make<void, PreviewManagerError>();
         const session: PictureInPictureSession = {
@@ -3408,7 +3623,28 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     });
   };
 
-  const startRecording = Effect.fn("PreviewManager.startRecording")(function* (tabId: string) {
+  // Installed once per session. Electron opens a native Save dialog for a
+  // download with no save path, so every export an agent clicked while testing
+  // a page put a modal over the whole app. Downloads from a page the agent drove
+  // last go to the artifact directory instead. Downloads the human starts keep
+  // the Save dialog.
+  const installDownloadHandler = (session: Session) => {
+    if (downloadHandlerSessions.has(session)) return;
+    downloadHandlerSessions.add(session);
+    session.on("will-download", (_event, item, source) => {
+      if (!agentDrivenWebContents.has(source)) return;
+      // The start time keeps names unique across restarts; the count keeps two
+      // same-name downloads in one millisecond from overwriting each other.
+      const id = `${Math.round(item.getStartTime() * 1000).toString(36)}-${(downloadCount++).toString(36)}`;
+      const fileName = `browser-download-${id}-${path.basename(item.getFilename())}`;
+      item.setSavePath(path.join(resolvedArtifactDirectory, fileName));
+    });
+  };
+
+  const startRecording = Effect.fn("PreviewManager.startRecording")(function* (
+    tabId: string,
+    options: RecordingInputOptions = DEFAULT_RECORDING_INPUT_OPTIONS,
+  ) {
     if ((yield* Ref.get(closingTabIdsRef)).has(tabId)) {
       return yield* new PreviewTabNotFoundError({ tabId });
     }
@@ -3416,11 +3652,21 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       tabId,
       Effect.gen(function* () {
         yield* startFrameCapture(tabId, "recording");
+        yield* SynchronizedRef.update(frameCaptureSessionsRef, (sessions) =>
+          replaceMap(sessions, (copy) => {
+            const current = copy.get(tabId);
+            if (current) copy.set(tabId, { ...current, recordingInputOptions: options });
+          }),
+        );
         const wc = yield* requireWebContents(tabId);
         const requestWebContents = wc.hostWebContents;
         if (requestWebContents === null) {
           return yield* new PreviewMainWindowClosedError({ tabId });
         }
+        const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+        yield* attempt({ operation: "recording.cursor", tabId, webContentsId: wc.id }, () =>
+          wc.send(RECORDING_CURSOR_CHANNEL, true, options, tab?.controller),
+        );
         yield* attemptPromise(
           {
             operation: "recording.warmSource",
@@ -3723,6 +3969,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const emitPointerEvent = Effect.fn("PreviewManager.emitPointerEvent")(function* (
     event: DesktopPreviewPointerEvent,
   ) {
+    const recording = (yield* SynchronizedRef.get(frameCaptureSessionsRef)).get(event.tabId);
+    const tab = (yield* SynchronizedRef.get(tabsRef)).get(event.tabId);
+    const webContentsId = tab?.webContentsId;
+    if (recording?.consumers.has("recording") && webContentsId != null) {
+      yield* attempt({ operation: "recording.pointer", tabId: event.tabId }, () => {
+        const contents = webContents.fromId(webContentsId);
+        if (contents && !contents.isDestroyed()) contents.send(RECORDING_POINTER_CHANNEL, event);
+      });
+    }
     const listeners = yield* Ref.get(pointerEventListenersRef);
     yield* Effect.forEach(
       listeners,
@@ -3933,19 +4188,20 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const context = { operation: "automationPress.awaitNativeKey", tabId, webContentsId: wc.id };
     const evaluate = (frame: Electron.WebFrameMain, expression: string) =>
       attemptPromise(context, () => frame.executeJavaScript(expression));
+    const receiptId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
     const { frames, receiptKey } = yield* Effect.acquireRelease(
       attempt(context, () => ({
         frames: wc.mainFrame.framesInSubtree,
-        receiptKey: JSON.stringify(`__t3NativeKey_${NodeCrypto.randomUUID()}`),
+        receiptKey: JSON.stringify(`__t3NativeKey_${receiptId}`),
       })),
       ({ frames, receiptKey }) =>
-        Effect.all(
-          frames.map((frame) =>
+        Effect.forEach(
+          frames,
+          (frame) =>
             evaluate(frame, `globalThis[${receiptKey}]?.dispose()`).pipe(
               Effect.timeoutOption(1_000),
               Effect.ignore,
             ),
-          ),
           { concurrency: "unbounded", discard: true },
         ),
     );
@@ -4113,6 +4369,18 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const keySequence = makePreviewAutomationNativeKeySequence(input, {
       isMac: hostPlatform === "darwin",
     });
+    const recording = (yield* SynchronizedRef.get(frameCaptureSessionsRef)).get(tabId);
+    if (recording?.consumers.has("recording") && recording.recordingInputOptions?.showKeyPresses) {
+      yield* attempt({ operation: "recording.key", tabId, webContentsId: wc.id }, () =>
+        wc.send(RECORDING_KEY_CHANNEL, {
+          key: keySequence.signal.key || input.key,
+          metaKey: input.modifiers?.includes("Meta") ?? false,
+          ctrlKey: input.modifiers?.includes("Control") ?? false,
+          altKey: input.modifiers?.includes("Alt") ?? false,
+          shiftKey: input.modifiers?.includes("Shift") ?? false,
+        }),
+      );
+    }
     // CDP keyboard dispatch follows the embedder's focused renderer, and
     // WebContents.focus() is a no-op for webview guests. Native input targets
     // this guest's widget directly, so Enter cannot submit the host composer.
@@ -4180,10 +4448,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           keySequence,
           clipboardData,
         );
-        const selectionKey = yield* encodeJson(
-          context,
-          `__t3EditingSelection_${NodeCrypto.randomUUID()}`,
-        );
+        const selectionId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
+        const selectionKey = yield* encodeJson(context, `__t3EditingSelection_${selectionId}`);
         // Editing requires an active document. Preserve the target
         // and selection across focus handlers without focusing the desktop.
         yield* Effect.acquireUseRelease(
@@ -4473,6 +4739,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         Ref.set(expectedAgentInputsRef, new Map()),
         Ref.set(pointerEventListenersRef, new Set()),
         Ref.set(recordingFrameListenersRef, new Set()),
+        Ref.set(recordingInputListenersRef, new Set()),
       ],
       { discard: true },
     );
@@ -4497,10 +4764,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     goBack,
     goForward,
     hardReload,
+    installDownloadHandler,
     navigate,
     openPictureInPicture,
     openDevTools,
     pickElement,
+    prepareWebview,
     reapplyZoom,
     refresh,
     registerWebview,
@@ -4516,6 +4785,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     stopRecording,
     subscribePointerEvents: (listener: PointerEventListener) =>
       subscribe(pointerEventListenersRef, listener),
+    subscribeRecordingInputs: (listener: RecordingInputListener) =>
+      subscribe(recordingInputListenersRef, listener),
     subscribeRecordingFrames: (listener: RecordingFrameListener) =>
       subscribe(recordingFrameListenersRef, listener),
     subscribeStateChanges: (listener: Listener) => subscribe(listenersRef, listener),
@@ -4835,6 +5106,7 @@ export class PreviewManager extends Context.Service<
       tabId: string,
       webContentsId: number,
     ) => Effect.Effect<void, PreviewManagerError>;
+    readonly prepareWebview: (webContents: Electron.WebContents) => Effect.Effect<void>;
     readonly navigate: (tabId: string, url: string) => Effect.Effect<void, PreviewManagerError>;
     readonly goBack: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly goForward: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
@@ -4880,7 +5152,10 @@ export class PreviewManager extends Context.Service<
     readonly copyArtifactToClipboard: (path: string) => Effect.Effect<void, PreviewManagerError>;
     readonly openPictureInPicture: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly closePictureInPicture: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
-    readonly startRecording: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
+    readonly startRecording: (
+      tabId: string,
+      options?: RecordingInputOptions,
+    ) => Effect.Effect<void, PreviewManagerError>;
     readonly stopRecording: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly saveRecording: (
       tabId: string,
@@ -4921,6 +5196,9 @@ export class PreviewManager extends Context.Service<
     readonly subscribePointerEvents: (
       listener: PointerEventListener,
     ) => Effect.Effect<void, never, Scope.Scope>;
+    readonly subscribeRecordingInputs: (
+      listener: RecordingInputListener,
+    ) => Effect.Effect<void, never, Scope.Scope>;
     readonly subscribeRecordingFrames: (
       listener: RecordingFrameListener,
     ) => Effect.Effect<void, never, Scope.Scope>;
@@ -4940,19 +5218,22 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     setMainWindow: operations.setMainWindow,
     getBrowserSession: Effect.fn("PreviewManager.getBrowserSession")(
       function* (scope, persistent, namespace) {
-        return yield* browserSession
+        const session = yield* browserSession
           .getSession(scope, persistent, namespace)
           .pipe(
             Effect.mapError(
               (cause) => new PreviewOperationError({ operation: "getBrowserSession", cause }),
             ),
           );
+        operations.installDownloadHandler(session);
+        return session;
       },
     ),
     isBrowserPartition: browserSession.isPartition,
     createTab: operations.createTab,
     closeTab: operations.closeTab,
     registerWebview: operations.registerWebview,
+    prepareWebview: operations.prepareWebview,
     navigate: operations.navigate,
     goBack: operations.goBack,
     goForward: operations.goForward,
@@ -5014,6 +5295,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     subscribeStateChanges: operations.subscribeStateChanges,
     subscribePointerEvents: operations.subscribePointerEvents,
     subscribeRecordingFrames: operations.subscribeRecordingFrames,
+    subscribeRecordingInputs: operations.subscribeRecordingInputs,
   });
 }).pipe(Effect.withSpan("PreviewManager.make"));
 

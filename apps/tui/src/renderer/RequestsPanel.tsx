@@ -1,9 +1,9 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useKeyboard } from "@opentui/react";
 import {
-  type PendingApproval,
-  type PendingUserInput,
-} from "@t3tools/client-runtime/pending-requests";
+  type ThreadPendingApproval as PendingApproval,
+  type ThreadPendingUserInput as PendingUserInput,
+} from "@t3tools/client-runtime/state/thread-requests";
 import type { ThreadId } from "@t3tools/contracts";
 import { useContext, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";

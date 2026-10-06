@@ -1,9 +1,6 @@
-import type { OrchestrationLatestTurn } from "@t3tools/contracts";
+import type { TuiLatestTurn } from "../connection/models.ts";
 
-type TurnTiming = Pick<
-  OrchestrationLatestTurn,
-  "state" | "requestedAt" | "startedAt" | "completedAt"
->;
+type TurnTiming = Pick<TuiLatestTurn, "state" | "requestedAt" | "startedAt" | "completedAt">;
 
 function timestamp(value: string | null): number | null {
   if (value === null) return null;

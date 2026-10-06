@@ -1,11 +1,10 @@
+import type { TuiLatestTurn, TuiThreadShell } from "../connection/models.ts";
 /** @jsxImportSource react */
 import { useEffect, useReducer, useCallback, type ReactNode } from "react";
 import { TextAttributes } from "@opentui/core";
 import type {
   EnvironmentId,
   OrchestrationProjectShell,
-  OrchestrationLatestTurn,
-  OrchestrationThreadShell,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -35,7 +34,7 @@ export interface AppShellViewProps {
   readonly label: string;
   readonly status: string;
   readonly projects: readonly OrchestrationProjectShell[];
-  readonly threads: readonly OrchestrationThreadShell[];
+  readonly threads: readonly TuiThreadShell[];
   readonly archivedStatus?: "loading" | "live" | "error";
   readonly loaded: boolean;
   readonly error: boolean;
@@ -55,7 +54,7 @@ export interface AppShellViewProps {
     position: { x: number; y: number },
   ) => void;
   readonly onThreadContextMenu?: (
-    thread: OrchestrationThreadShell,
+    thread: TuiThreadShell,
     position: { x: number; y: number },
   ) => void;
   readonly onOpenThread?: (projectId: ProjectId, threadId: ThreadId) => void;
@@ -111,7 +110,7 @@ function List({
     readonly text: string;
     readonly subline?: string;
     readonly phase?: ThreadActivityPhase;
-    readonly latestTurn?: OrchestrationLatestTurn | null;
+    readonly latestTurn?: TuiLatestTurn | null;
     readonly runningSince?: string | null;
   }>;
   readonly selectedId: string | null;

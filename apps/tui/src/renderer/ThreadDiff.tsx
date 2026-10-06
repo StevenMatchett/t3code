@@ -2,7 +2,7 @@ import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useKeyboard } from "@opentui/react";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useContext, useMemo, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { Stack, Text } from "../ui/primitives.tsx";

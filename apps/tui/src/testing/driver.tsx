@@ -6,7 +6,7 @@ import {
   type MockMouse,
   type TestRendererSetup,
 } from "@opentui/core/testing";
-import * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry";
+import * as AtomRegistry from "effect/reactivity/AtomRegistry";
 import { act, type ErrorInfo, type ReactNode } from "react";
 
 import { startRendererRuntime } from "../renderer/runtime.tsx";

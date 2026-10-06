@@ -6,8 +6,8 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeOS from "node:os";
 import { it } from "@effect/vitest";
 import { Effect, Option, Stream } from "effect";
-import { AtomRegistry } from "effect/unstable/reactivity";
-import { CommandId, ProjectId, ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
+import { AtomRegistry } from "effect/reactivity";
+import { CommandId, ProjectId, WS_METHODS } from "@t3tools/contracts";
 import { createTuiClient } from "../dist/connection/clientRuntime.js";
 import {
   makeTerminalEnvironmentFixture,
@@ -48,7 +48,7 @@ async function prepare(root) {
   let source = await NodeFSP.readFile(NodePath.join(peerSource, "codexCollabMockPeer.mjs"), "utf8");
   source = source.replace(
     'if (method === "turn/start") {',
-    'if (method === "turn/start") {\n    NodeFS.appendFileSync(`${process.env.T3_CODEX_COLLAB_SCRIPT}.turns`, `${JSON.stringify({ cwd: process.cwd(), input: message.params.input })}\\n`);',
+    'if (method === "turn/start") {\n    NodeFS.appendFileSync(`${process.env.T3_CODEX_COLLAB_SCRIPT}.turns`, `${JSON.stringify({ cwd: message.params.cwd, input: message.params.input })}\\n`);',
   );
   source = source.replace(
     "write({ id, result: { data: [] } });",
@@ -122,7 +122,7 @@ it.live(
       const seed = yield* openTerminalFixtureConnection(fixture);
       const workspace = NodePath.join(fixture.root, "workspace");
       const projectId = ProjectId.make("new-thread-project");
-      yield* seed.client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+      yield* seed.client[WS_METHODS.projectsMutate]({
         type: "project.create",
         commandId: CommandId.make("new-thread-project-create"),
         projectId,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "@effect/vitest";
 import { ProviderDriverKind, TurnId } from "@t3tools/contracts";
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { AtomRegistry } from "effect/reactivity";
 import * as Option from "effect/Option";
 import { makeClientFixture } from "../../testing/clientFixture.ts";
 import {

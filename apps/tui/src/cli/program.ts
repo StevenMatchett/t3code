@@ -3,7 +3,7 @@
 
 import { createElement } from "react";
 import * as Effect from "effect/Effect";
-import * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry";
+import * as AtomRegistry from "effect/reactivity/AtomRegistry";
 import * as NodeProcess from "node:process";
 import * as NodePath from "node:path";
 

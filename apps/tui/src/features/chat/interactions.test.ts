@@ -1,13 +1,14 @@
+import { requestFixture } from "../../testing/requestFixture.ts";
+import type { TuiThread } from "../../connection/models.ts";
 import { describe, expect, it } from "@effect/vitest";
 import {
-  ApprovalRequestId,
+  RuntimeRequestId,
   EventId,
   TurnId,
   type UploadChatImageAttachment,
-  type OrchestrationThread,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { AtomRegistry } from "effect/reactivity";
 import { makeClientFixture } from "../../testing/clientFixture.ts";
 import {
   answersAreComplete,
@@ -31,7 +32,7 @@ function fixture(
   return { ...data, registry, actions, id };
 }
 
-function changeThread(f: ReturnType<typeof fixture>, patch: Partial<OrchestrationThread>) {
+function changeThread(f: ReturnType<typeof fixture>, patch: Partial<TuiThread>) {
   f.registry.update(f.states[0]!, (value) => ({
     ...value,
     data: Option.some({ ...Option.getOrThrow(value.data), ...patch }),
@@ -116,7 +117,10 @@ describe("queued prompts", () => {
       changeThread(f, { latestTurn: runningTurn });
       f.actions.setDraft(f.registry, f.id, "retry queued");
       await f.actions.send(f.registry, f.id);
-      changeThread(f, { activities: [completedTool(1)] });
+      changeThread(f, {
+        activities: [completedTool(1)],
+        requests: { approvals: [], userInputs: [] },
+      });
       const sending = f.actions.flushQueue(f.registry, f.id);
       expect(f.registry.get(f.actions.state(f.id)).queue[0]?.status).toBe("sending");
       expect(await f.actions.flushQueue(f.registry, f.id)).toBe(false);
@@ -198,15 +202,25 @@ describe("queued prompts", () => {
     const approval = {
       ...completedTool(2),
       kind: "approval.requested",
-      payload: { requestId: ApprovalRequestId.make("queue-approval"), requestKind: "file-read" },
+      payload: { requestId: RuntimeRequestId.make("queue-approval"), requestKind: "file-read" },
     };
     try {
-      changeThread(f, { latestTurn: runningTurn, activities: [approval] });
+      changeThread(f, {
+        latestTurn: runningTurn,
+        activities: [approval],
+        requests: requestFixture(approval.kind, approval.payload),
+      });
       f.actions.setDraft(f.registry, f.id, "after approval");
       expect(await f.actions.send(f.registry, f.id)).toBe(true);
-      changeThread(f, { activities: [completedTool(1), approval] });
+      changeThread(f, {
+        activities: [completedTool(1), approval],
+        requests: requestFixture(approval.kind, approval.payload),
+      });
       expect(await f.actions.flushQueue(f.registry, f.id, true)).toBe(false);
-      changeThread(f, { activities: [completedTool(1)] });
+      changeThread(f, {
+        activities: [completedTool(1)],
+        requests: { approvals: [], userInputs: [] },
+      });
       expect(await f.actions.flushQueue(f.registry, f.id)).toBe(true);
     } finally {
       f.registry.dispose();
@@ -402,7 +416,7 @@ describe("thread interactions", () => {
       commands.push(command);
       return true;
     });
-    const requestId = ApprovalRequestId.make("native-request");
+    const requestId = RuntimeRequestId.make("native-request");
     const activity = {
       id: EventId.make("approval-event"),
       kind: "approval.requested",
@@ -422,7 +436,11 @@ describe("thread interactions", () => {
     try {
       f.registry.set(f.states[0]!, {
         ...f.registry.get(f.states[0]!),
-        data: Option.some({ ...f.details[0]!, activities: [activity] }),
+        data: Option.some({
+          ...f.details[0]!,
+          activities: [activity],
+          requests: requestFixture(activity.kind, activity.payload),
+        }),
       });
       expect(
         await f.actions.reply(f.registry, f.id, {
@@ -464,9 +482,10 @@ describe("thread interactions", () => {
 
   it("preserves opaque question option values rather than submitting display labels", () => {
     const request = {
-      requestId: ApprovalRequestId.make("input"),
+      requestId: RuntimeRequestId.make("input"),
       createdAt: "2026-01-01T00:00:00Z",
       dismissible: false,
+      responseCapability: "live" as const,
       questions: [
         {
           id: " native id ",

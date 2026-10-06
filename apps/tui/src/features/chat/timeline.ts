@@ -1,16 +1,8 @@
+import type { TuiMessage, TuiCheckpoint, TuiActivity } from "../../connection/models.ts";
 import {
   extractCommandOutputText,
-  extractWorkLogToolLifecycleStatus,
-  workLogEntryIsToolLike,
-  type WorkLogPresentationEntry,
   type WorkLogToolLifecycleStatus,
 } from "@t3tools/client-runtime/work-log/presentation";
-import {
-  isToolLifecycleItemType,
-  type OrchestrationMessage,
-  type OrchestrationCheckpointSummary,
-  type OrchestrationThreadActivity,
-} from "@t3tools/contracts";
 
 import { normalizeTerminalText, type TerminalTextOptions } from "./terminalText.ts";
 import { toolActivityDetails } from "./activityDetails.ts";
@@ -28,15 +20,15 @@ interface TimelineRowBase<K extends string> {
 
 export interface TimelineMessageRow extends TimelineRowBase<TimelineMessageKind> {
   readonly source: "message";
-  readonly sourceId: OrchestrationMessage["id"];
+  readonly sourceId: TuiMessage["id"];
   readonly streaming: boolean;
 }
 
 export interface TimelineActivityRow extends TimelineRowBase<TimelineActivityKind> {
   readonly source: "activity";
-  readonly sourceId: OrchestrationThreadActivity["id"];
+  readonly sourceId: TuiActivity["id"];
   readonly activityKind: string;
-  readonly activityTone: OrchestrationThreadActivity["tone"];
+  readonly activityTone: TuiActivity["tone"];
   readonly sequence?: number;
   readonly detail?: string;
   readonly toolCallId?: string;
@@ -48,16 +40,16 @@ export interface TimelineActivityRow extends TimelineRowBase<TimelineActivityKin
 
 export interface TimelineChangesRow extends TimelineRowBase<"changes"> {
   readonly source: "checkpoint";
-  readonly status: OrchestrationCheckpointSummary["status"];
-  readonly files: OrchestrationCheckpointSummary["files"];
+  readonly status: TuiCheckpoint["status"];
+  readonly files: TuiCheckpoint["files"];
 }
 
 export type TimelineRow = TimelineMessageRow | TimelineActivityRow | TimelineChangesRow;
 
 export interface RecordedThreadTimeline {
-  readonly messages: ReadonlyArray<OrchestrationMessage>;
-  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
-  readonly checkpoints?: ReadonlyArray<OrchestrationCheckpointSummary>;
+  readonly messages: ReadonlyArray<TuiMessage>;
+  readonly activities: ReadonlyArray<TuiActivity>;
+  readonly checkpoints?: ReadonlyArray<TuiCheckpoint>;
 }
 
 export interface TimelineProjectionOptions extends TerminalTextOptions {}
@@ -96,7 +88,7 @@ function toolRowId(turnId: string | null, toolCallId: string): string {
   return `activity:tool:${encodeRowIdPart(turnId ?? "-")}:${encodeRowIdPart(toolCallId)}`;
 }
 
-function compareMessageVersions(left: OrchestrationMessage, right: OrchestrationMessage): number {
+function compareMessageVersions(left: TuiMessage, right: TuiMessage): number {
   const updatedAt = left.updatedAt.localeCompare(right.updatedAt);
   if (updatedAt !== 0) return updatedAt;
   if (left.streaming !== right.streaming) return left.streaming ? -1 : 1;
@@ -105,10 +97,8 @@ function compareMessageVersions(left: OrchestrationMessage, right: Orchestration
   return left.text.localeCompare(right.text);
 }
 
-function deduplicateMessages(
-  messages: ReadonlyArray<OrchestrationMessage>,
-): ReadonlyArray<OrchestrationMessage> {
-  const byId = new Map<OrchestrationMessage["id"], OrchestrationMessage>();
+function deduplicateMessages(messages: ReadonlyArray<TuiMessage>): ReadonlyArray<TuiMessage> {
+  const byId = new Map<TuiMessage["id"], TuiMessage>();
   for (const message of messages) {
     const previous = byId.get(message.id);
     if (previous === undefined || compareMessageVersions(previous, message) <= 0) {
@@ -118,17 +108,32 @@ function deduplicateMessages(
   return [...byId.values()];
 }
 
-function deduplicateActivities(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-): ReadonlyArray<OrchestrationThreadActivity> {
-  const byId = new Map<OrchestrationThreadActivity["id"], OrchestrationThreadActivity>();
+function deduplicateActivities(activities: ReadonlyArray<TuiActivity>): ReadonlyArray<TuiActivity> {
+  const byId = new Map<TuiActivity["id"], TuiActivity>();
   for (const activity of activities) byId.set(activity.id, activity);
   return [...byId.values()];
 }
 
-function extractItemType(payload: Record<string, unknown> | null) {
-  const itemType = payload?.itemType;
-  return typeof itemType === "string" && isToolLifecycleItemType(itemType) ? itemType : undefined;
+function extractWorkLogToolLifecycleStatus(
+  payload: Record<string, unknown> | null,
+): WorkLogToolLifecycleStatus | undefined {
+  switch (payload?.status) {
+    case "pending":
+    case "running":
+    case "waiting":
+      return "inProgress";
+    case "cancelled":
+    case "interrupted":
+      return "stopped";
+    case "inProgress":
+    case "completed":
+    case "failed":
+    case "declined":
+    case "stopped":
+      return payload.status;
+    default:
+      return undefined;
+  }
 }
 
 function extractToolCallId(payload: Record<string, unknown> | null): string | null {
@@ -136,7 +141,7 @@ function extractToolCallId(payload: Record<string, unknown> | null): string | nu
 }
 
 function activityKind(
-  activity: OrchestrationThreadActivity,
+  activity: TuiActivity,
   payload: Record<string, unknown> | null,
 ): TimelineActivityKind {
   if (
@@ -156,17 +161,19 @@ function activityKind(
     return "reasoning";
   }
 
-  const itemType = extractItemType(payload);
-  const status = extractWorkLogToolLifecycleStatus(payload);
-  const entry: WorkLogPresentationEntry = {
-    label: activity.summary,
-    tone: activity.tone === "approval" ? "info" : activity.tone,
-    sourceActivityKind: activity.kind,
-    turnId: activity.turnId,
-    ...(itemType === undefined ? {} : { itemType }),
-    ...(status === undefined ? {} : { toolLifecycleStatus: status }),
-  };
-  return activity.kind.startsWith("tool.") || workLogEntryIsToolLike(entry) ? "tool" : "activity";
+  return activity.kind.startsWith("tool.") ||
+    activity.tone === "tool" ||
+    [
+      "command_execution",
+      "commandExecution",
+      "file_change",
+      "fileChange",
+      "web_search",
+      "file_search",
+      "tool_call",
+    ].includes(String(payload?.itemType))
+    ? "tool"
+    : "activity";
 }
 
 function activityDetail(
@@ -187,10 +194,7 @@ function activityDetail(
   return detail.length > 0 && detail !== text ? detail : undefined;
 }
 
-function messageRow(
-  message: OrchestrationMessage,
-  options: TerminalTextOptions,
-): TimelineMessageRow {
+function messageRow(message: TuiMessage, options: TerminalTextOptions): TimelineMessageRow {
   const images = (message.attachments ?? []).filter((attachment) => attachment.type === "image");
   const normalized = normalizeTerminalText(message.text, options);
   const characters = Array.from(normalized);
@@ -213,10 +217,7 @@ function messageRow(
   };
 }
 
-function activityRow(
-  activity: OrchestrationThreadActivity,
-  options: TerminalTextOptions,
-): TimelineActivityRow {
+function activityRow(activity: TuiActivity, options: TerminalTextOptions): TimelineActivityRow {
   const payload = asRecord(activity.payload);
   const kind = activityKind(activity, payload);
   const rawToolCallId = extractToolCallId(payload);
@@ -258,10 +259,7 @@ function activityRow(
   };
 }
 
-function activityOrder(
-  left: OrchestrationThreadActivity,
-  right: OrchestrationThreadActivity,
-): number {
+function activityOrder(left: TuiActivity, right: TuiActivity): number {
   if (left.sequence !== undefined && right.sequence !== undefined) {
     const sequence = left.sequence - right.sequence;
     if (sequence !== 0) return sequence;
@@ -351,7 +349,7 @@ export function projectRecordedThreadTimeline(
   const activities = collapseToolLifecycle(
     orderedActivities.map((activity) => activityRow(activity, options)),
   );
-  const byTurn = new Map<string, OrchestrationCheckpointSummary>();
+  const byTurn = new Map<string, TuiCheckpoint>();
   for (const checkpoint of thread.checkpoints ?? []) {
     const previous = byTurn.get(checkpoint.turnId);
     if (!previous || checkpoint.completedAt.localeCompare(previous.completedAt) >= 0)

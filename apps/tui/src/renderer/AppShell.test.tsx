@@ -1,15 +1,12 @@
+import { agentFixture } from "../testing/agentFixture.ts";
+import type { TuiActivity } from "../connection/models.ts";
 import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import { CliRenderEvents, type Selection } from "@opentui/core";
 import { MouseButtons } from "@opentui/core/testing";
 import { EMPTY_TERMINAL_BUFFER_STATE } from "@t3tools/client-runtime/state/terminal";
-import {
-  CheckpointRef,
-  ThreadId,
-  TurnId,
-  type OrchestrationThreadActivity,
-} from "@t3tools/contracts";
+import { CheckpointRef, ThreadId, TurnId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { act } from "react";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
@@ -23,7 +20,7 @@ function agentActivity(
   kind: string,
   summary: string,
   payload: Record<string, unknown>,
-): OrchestrationThreadActivity {
+): TuiActivity {
   agentActivitySequence += 1;
   return {
     id: `agent-activity-${agentActivitySequence}`,
@@ -33,7 +30,7 @@ function agentActivity(
     payload,
     turnId: null,
     createdAt: `2026-01-01T00:00:${String(agentActivitySequence).padStart(2, "0")}.000Z`,
-  } as unknown as OrchestrationThreadActivity;
+  } as unknown as TuiActivity;
 }
 async function renderShell(
   options?: Parameters<typeof createTuiTestDriver>[1],
@@ -844,7 +841,14 @@ describeWithNativeFfi("connected AppShell", () => {
     await act(async () => {
       driver.registry.set(fixture.states[0]!, {
         ...driver.registry.get(fixture.states[0]!),
-        data: Option.some({ ...thread, activities }),
+        data: Option.some({
+          ...thread,
+          activities,
+          agents: [
+            agentFixture("agent-one", "Researcher", "gpt-5.6-sol"),
+            agentFixture("agent-two", "Reviewer"),
+          ],
+        }),
       });
     });
     await driver.flush();

@@ -9,7 +9,7 @@ import { MouseButtons } from "@opentui/core/testing";
 import { WS_METHODS } from "@t3tools/contracts";
 import { terminalOutputText } from "@t3tools/client-runtime/state/terminal";
 import { Effect, SubscriptionRef } from "effect";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { act, createElement, createRef, useLayoutEffect, useState } from "react";
 
 import { EmbeddedTerminalSurface } from "../dist/renderer/embedded-terminal/EmbeddedTerminalSurface.js";

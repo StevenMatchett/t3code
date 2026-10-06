@@ -1,6 +1,5 @@
+import type { TuiActivity } from "../connection/models.ts";
 import type { RuntimeSubagent } from "@t3tools/client-runtime/state/subagentRuntime";
-import { formatSubagentModelLabel } from "@t3tools/client-runtime/state/subagentRuntime";
-import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 
 import { conversationLines } from "../ui/conversationLines.ts";
 import { markdownLines } from "../ui/markdownLines.ts";
@@ -17,17 +16,14 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-export function activityBelongsToAgent(
-  activity: OrchestrationThreadActivity,
-  agentId: string,
-): boolean {
+export function activityBelongsToAgent(activity: TuiActivity, agentId: string): boolean {
   const payload = record(activity.payload);
   return payload?.agentId === agentId || payload?.taskId === agentId;
 }
 
 export function agentOutputLines(
   agent: RuntimeSubagent,
-  activities: readonly OrchestrationThreadActivity[],
+  activities: readonly TuiActivity[],
   width: number,
   renderMarkdown = true,
   unicode = true,
@@ -121,7 +117,7 @@ export function AgentSwarmPanel({
         ? agents.slice(start, start + visibleCount).map((agent, offset) => {
             const index = start + offset;
             const selected = active && index === cursor;
-            const model = formatSubagentModelLabel(agent.model, agent.effort);
+            const model = [agent.model, agent.effort].filter(Boolean).join(" · ");
             return (
               <Stack
                 key={agent.id}
@@ -178,7 +174,7 @@ export function AgentOutputOverlay({
   onToggleMarkdown,
 }: {
   readonly agent: RuntimeSubagent;
-  readonly activities: readonly OrchestrationThreadActivity[];
+  readonly activities: readonly TuiActivity[];
   readonly width: number;
   readonly height: number;
   readonly start: number;

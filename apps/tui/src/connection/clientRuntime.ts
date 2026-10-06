@@ -1,4 +1,7 @@
+import type { TuiShellState, TuiThreadState, TuiThreadShell } from "./models.ts";
 import {
+  orchestrationProtocolCompatibilityError,
+  appendOrchestrationProtocol,
   Connection,
   ConnectionBlockedError,
   Connectivity,
@@ -15,40 +18,38 @@ import {
 } from "@t3tools/client-runtime/connection";
 import {
   ConnectionPersistenceError,
-  ConnectionRegistrationStore,
-  ConnectionTargetStore,
-  EnvironmentCacheStore,
-  SshEnvironmentGateway,
+  Persistence,
+  ClientCapabilities,
 } from "@t3tools/client-runtime/platform";
+const { ConnectionRegistrationStore, ConnectionTargetStore, EnvironmentCacheStore } = Persistence;
+const { SshEnvironmentGateway } = ClientCapabilities;
 import { resolveRemoteWebSocketConnectionUrl } from "@t3tools/client-runtime/authorization";
 import {
   deriveWsBaseUrl,
   fetchRemoteEnvironmentDescriptor,
 } from "@t3tools/client-runtime/environment";
-import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
+import { layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
 import { createEnvironmentCatalogAtoms } from "@t3tools/client-runtime/state/connections";
 import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
 import { createEnvironmentSessionAtoms } from "@t3tools/client-runtime/state/session";
 import { createTerminalEnvironmentAtoms } from "@t3tools/client-runtime/state/terminal";
 import { createOrchestrationEnvironmentAtoms } from "@t3tools/client-runtime/state/orchestration";
 import { createReviewEnvironmentAtoms } from "@t3tools/client-runtime/state/review";
-import { mergeEnvironmentThread } from "@t3tools/client-runtime/state/threads";
-import { scopeThread, scopeThreadShell } from "@t3tools/client-runtime/state/models";
+
+import { presentShell, presentShellState, presentThreadState } from "./presentation.ts";
+import { executeTuiCommand, type TuiCommand } from "./commands.ts";
 import type { ProviderCatalog } from "../features/chat/providerChoices.ts";
 import {
   createEnvironmentShellAtoms,
-  shellSnapshotLoaderLayer,
-  type EnvironmentShellState,
+  ShellSnapshotLoader,
 } from "@t3tools/client-runtime/state/shell";
 import {
   createEnvironmentThreadStateAtoms,
   EMPTY_ENVIRONMENT_THREAD_STATE,
-  requestOlderThreadTurns,
-  threadSnapshotLoaderLayer,
-  type EnvironmentThreadState,
+  ThreadHistoryController,
+  BoundedThreadSnapshotLoader,
 } from "@t3tools/client-runtime/state/threads";
 import {
-  ORCHESTRATION_WS_METHODS,
   WS_METHODS,
   type ServerSettings,
   type UploadChatImageAttachment,
@@ -56,30 +57,33 @@ import {
   type EnvironmentId,
   type FilesystemBrowseResult,
   type OrchestrationThreadSearchMatch,
-  type OrchestrationThreadShell,
   type ThreadId,
   type GitResolvedPullRequest,
 } from "@t3tools/contracts";
 import { makeNewThreadActions, type NewThreadActions } from "../features/chat/newThread.ts";
 import { makeNewProjectActions, type NewProjectActions } from "../features/projects/newProject.ts";
-import { createEnvironmentRpcCommand } from "@t3tools/client-runtime/state/runtime";
+import {
+  createEnvironmentCommand,
+  createEnvironmentRpcCommand,
+} from "@t3tools/client-runtime/state/runtime";
 import { makeThreadInteractions, type ThreadInteractions } from "../features/chat/interactions.ts";
 import {
   makeThreadManagementActions,
   type ThreadManagementActions,
 } from "../features/threads/management.ts";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
-import * as HttpBody from "effect/unstable/http/HttpBody";
+import * as Hex from "effect/encoding/Hex";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as HttpBody from "effect/http/HttpBody";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity";
-import * as Socket from "effect/unstable/socket/Socket";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
+import * as Socket from "effect/socket/Socket";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
 import type { TuiSessionState } from "../persistence/sessionState.ts";
 import type { ReattachedAuthenticatedTuiEnvironment } from "./authenticatedEnvironment.ts";
@@ -98,18 +102,18 @@ export interface TuiClient {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly httpOrigin: string;
-  readonly shell: Atom.Atom<EnvironmentShellState>;
+  readonly shell: Atom.Atom<TuiShellState>;
   readonly connection: Atom.Atom<SupervisorConnectionState>;
-  readonly thread: (threadId: ThreadId) => Atom.Atom<EnvironmentThreadState>;
+  readonly thread: (threadId: ThreadId) => Atom.Atom<TuiThreadState>;
   readonly retry: (registry: AtomRegistry.AtomRegistry) => Promise<void>;
-  readonly loadOlder: (threadId: ThreadId) => boolean;
+  readonly loadOlder: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => boolean;
   readonly actions: ThreadInteractions;
   readonly newThreads: NewThreadActions;
   readonly newProjects: NewProjectActions;
   readonly threadManagement: ThreadManagementActions;
   readonly archivedThreads: Atom.Atom<{
     readonly status: "loading" | "live" | "error";
-    readonly threads: readonly OrchestrationThreadShell[];
+    readonly threads: readonly TuiThreadShell[];
   }>;
   readonly refreshArchivedThreads: (registry: AtomRegistry.AtomRegistry) => void;
   readonly threadSearch: (query: string) => Atom.Atom<{
@@ -146,12 +150,26 @@ const readOnlyCatalog = (
 
 function platformLayer() {
   return Layer.mergeAll(
+    Layer.succeed(
+      Crypto.Crypto,
+      Crypto.make({
+        randomBytes: (size) => globalThis.crypto.getRandomValues(new Uint8Array(size)),
+        digest: (algorithm, data) =>
+          Effect.promise(
+            async () =>
+              new Uint8Array(
+                await globalThis.crypto.subtle.digest(algorithm, new Uint8Array(data)),
+              ),
+          ),
+      }),
+    ),
     Layer.succeed(ConnectionTargetStore, {
       list: Effect.succeed([]),
       listDisabled: Effect.succeed([]),
     }),
     Layer.succeed(ConnectionRegistrationStore, {
       register: () => readOnlyCatalog("register-connection"),
+      setRoutes: () => readOnlyCatalog("register-connection"),
       remove: () => readOnlyCatalog("remove-connection"),
       setEnabled: () => readOnlyCatalog("set-connection-enabled"),
     }),
@@ -201,10 +219,11 @@ export function createTuiClient(
     httpBaseUrl,
     wsBaseUrl: deriveWsBaseUrl(httpBaseUrl),
   });
-  const http = remoteHttpClientLayer(globalThis.fetch).pipe(
+  const http = layerRemoteHttpClient(globalThis.fetch).pipe(
     Layer.provideMerge(Layer.succeed(FetchHttpClient.RequestInit, { redirect: "error" })),
   );
   const connections = Connection.layerWithResolver({
+    prepareForUpdate: unsupported,
     prepare: Effect.fn("tui.client.prepare")(function* (entry) {
       if (entry.target.environmentId !== environmentId)
         return yield* environmentMismatchError({
@@ -214,6 +233,8 @@ export function createTuiClient(
       const current = yield* fetchRemoteEnvironmentDescriptor({ httpBaseUrl }).pipe(
         Effect.mapError(mapRemoteEnvironmentError),
       );
+      const incompatible = orchestrationProtocolCompatibilityError(current);
+      if (incompatible) return yield* incompatible;
       if (current.environmentId !== environmentId)
         return yield* environmentMismatchError({
           expected: environmentId,
@@ -233,33 +254,39 @@ export function createTuiClient(
               environmentId,
               label: current.label,
               httpBaseUrl,
-              socketUrl,
+              socketUrl: appendOrchestrationProtocol(socketUrl),
               httpAuthorization: { _tag: "Bearer" as const, token },
               target,
             };
           }),
         )
         .pipe(
-          Effect.catchTag("TuiBearerSessionClearedError", () =>
-            Effect.fail(
-              new ConnectionBlockedError({
-                reason: "authentication",
-                detail: "The saved credential is unavailable. Pair again through the command line.",
-              }),
-            ),
-          ),
+          Effect.catchTags({
+            TuiBearerSessionClearedError: () =>
+              Effect.fail(
+                new ConnectionBlockedError({
+                  reason: "authentication",
+                  detail:
+                    "The saved credential is unavailable. Pair again through the command line.",
+                }),
+              ),
+          }),
         );
     }, Effect.provide(http)),
   });
   const started = Layer.effectDiscard(
     Effect.gen(function* () {
-      const registry = yield* EnvironmentRegistry;
+      const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
       yield* registry.start;
       yield* registry.registerPlatform(new PrimaryConnectionRegistration({ target }));
     }),
   ).pipe(Layer.provideMerge(connections));
   const runtime = Atom.runtime(
-    Layer.mergeAll(shellSnapshotLoaderLayer, threadSnapshotLoaderLayer).pipe(
+    Layer.mergeAll(
+      ShellSnapshotLoader.layer,
+      BoundedThreadSnapshotLoader.layer,
+      ThreadHistoryController.layer,
+    ).pipe(
       Layer.provideMerge(started),
       Layer.provideMerge(platformLayer()),
       Layer.provideMerge(http),
@@ -271,6 +298,9 @@ export function createTuiClient(
   );
   const catalog = createEnvironmentCatalogAtoms(runtime);
   const shell = createEnvironmentShellAtoms(runtime);
+  const shellValue = Atom.make((get) =>
+    presentShellState(get(shell.stateValueAtom(environmentId))),
+  );
   const sessions = createEnvironmentSessionAtoms(runtime);
   const server = createServerEnvironmentAtoms(runtime, {
     initialConfigValueAtom: sessions.initialConfigValueAtom,
@@ -300,7 +330,7 @@ export function createTuiClient(
         : AsyncResult.isSuccess(result)
           ? ("live" as const)
           : ("loading" as const),
-      threads: Option.getOrNull(AsyncResult.value(result))?.threads ?? [],
+      threads: Option.getOrNull(AsyncResult.value(result))?.threads.map(presentShell) ?? [],
     };
   }).pipe(Atom.keepAlive);
   const emptyThreadSearch = Atom.make({
@@ -324,36 +354,13 @@ export function createTuiClient(
       };
     });
   });
-  const shellStatus = Atom.make((get) => get(shell.stateValueAtom(environmentId)).status);
-  const threadMetadata = Atom.family((threadId: ThreadId) =>
-    Atom.make(
-      (get) =>
-        Option.getOrNull(get(shell.stateValueAtom(environmentId)).snapshot)?.threads.find(
-          (item) => item.id === threadId,
-        ) ?? null,
-    ),
-  );
   const thread = Atom.family((threadId: ThreadId) =>
     Atom.make((get) => {
       const result = get(threads.stateAtom(environmentId, threadId));
       const detail = AsyncResult.isFailure(result)
         ? { ...EMPTY_ENVIRONMENT_THREAD_STATE, error: Option.some("Could not load this thread.") }
         : Option.getOrElse(AsyncResult.value(result), () => EMPTY_ENVIRONMENT_THREAD_STATE);
-      const sharedStatus = get(shellStatus);
-      const metadata = get(threadMetadata(threadId));
-      const merged = mergeEnvironmentThread(
-        Option.match(detail.data, {
-          onNone: () => null,
-          onSome: (value) => scopeThread(environmentId, value),
-        }),
-        metadata ? scopeThreadShell(environmentId, metadata) : null,
-      );
-      return {
-        ...detail,
-        status:
-          detail.status === "live" && sharedStatus !== "live" ? ("cached" as const) : detail.status,
-        data: Option.fromNullishOr(merged),
-      };
+      return presentThreadState(detail);
     }),
   );
   const connection = Atom.make((get) => {
@@ -362,9 +369,16 @@ export function createTuiClient(
       ? { ...AVAILABLE_CONNECTION_STATE, phase: "blocked" as const }
       : Option.getOrElse(AsyncResult.value(result), () => AVAILABLE_CONNECTION_STATE);
   });
-  const command = createEnvironmentRpcCommand(runtime, {
+  const command = createEnvironmentCommand(runtime, {
     label: "tui.thread.command",
-    tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+    execute: (input: TuiCommand) => Effect.asVoid(executeTuiCommand(input)),
+  });
+  const loadHistory = createEnvironmentCommand(runtime, {
+    label: "tui.load-history",
+    execute: (threadId: ThreadId) =>
+      Effect.flatMap(ThreadHistoryController.ThreadHistoryController, (controller) =>
+        controller.loadEarlier(environmentId, threadId),
+      ),
   });
   const createWorktree = createEnvironmentRpcCommand(runtime, {
     label: "tui.create-worktree",
@@ -400,7 +414,7 @@ export function createTuiClient(
       true,
   );
   const newThreads = makeNewThreadActions({
-    shell: shell.stateValueAtom(environmentId),
+    shell: shellValue,
     connection,
     providers,
     dispatch: async (registry, input) =>
@@ -481,7 +495,7 @@ export function createTuiClient(
         if (attachment.type === "image") {
           restored.push({
             type: "image",
-            id: `tui-${Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16)))}`,
+            id: `tui-${Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16)))}`,
             name: attachment.name,
             mimeType: attachment.mimeType,
             sizeBytes: bytes.byteLength,
@@ -516,7 +530,7 @@ export function createTuiClient(
     connection,
     thread,
     providers,
-    shell: shell.stateValueAtom(environmentId),
+    shell: shellValue,
     dispatch: async (registry, input) =>
       AsyncResult.isSuccess(await command.run(registry, { environmentId, input })),
   });
@@ -529,7 +543,7 @@ export function createTuiClient(
     refreshArchived: refreshArchivedThreads,
   });
   const newProjects = makeNewProjectActions({
-    shell: shell.stateValueAtom(environmentId),
+    shell: shellValue,
     connection,
     projectCloneTracking,
     dispatch: async (registry, input) =>
@@ -554,7 +568,7 @@ export function createTuiClient(
     environmentId,
     label: descriptor.label,
     httpOrigin: httpBaseUrl,
-    shell: shell.stateValueAtom(environmentId),
+    shell: shellValue,
     connection,
     actions,
     newThreads,
@@ -615,6 +629,9 @@ export function createTuiClient(
     retry: async (registry) => {
       await catalog.retryNow.run(registry, environmentId);
     },
-    loadOlder: (threadId) => requestOlderThreadTurns(environmentId, threadId),
+    loadOlder: (registry, threadId) => {
+      void loadHistory.run(registry, { environmentId, input: threadId });
+      return true;
+    },
   };
 }

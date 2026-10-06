@@ -1,8 +1,9 @@
-import { CommandId, type ClientOrchestrationCommand, type ThreadId } from "@t3tools/contracts";
-import type { AtomRegistry } from "effect/unstable/reactivity";
+import type { TuiCommand } from "../../connection/commands.ts";
+import { CommandId, type ThreadId } from "@t3tools/contracts";
+import type { AtomRegistry } from "effect/reactivity";
 
 export type ThreadManagementCommand = Extract<
-  ClientOrchestrationCommand,
+  TuiCommand,
   {
     readonly type: "thread.meta.update" | "thread.archive" | "thread.unarchive" | "thread.delete";
   }

@@ -1,7 +1,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import { useAtomValue } from "@effect/atom-react";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { useKeyboard } from "@opentui/react";
 import { createElement, useEffect, useState } from "react";
 

@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { SyntaxStyle } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { memo, useEffect, useState } from "react";
 
 export function makeStreamingSpikeFixture() {

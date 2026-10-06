@@ -1,10 +1,5 @@
-import {
-  EventId,
-  MessageId,
-  TurnId,
-  type OrchestrationMessage,
-  type OrchestrationThreadActivity,
-} from "@t3tools/contracts";
+import type { TuiMessage, TuiActivity } from "../../connection/models.ts";
+import { EventId, MessageId, TurnId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
 import { projectRecordedThreadTimeline, type TimelineActivityRow } from "./timeline.ts";
@@ -13,9 +8,9 @@ const baseTime = "2026-09-15T12:00:00.000Z";
 
 function message(
   id: string,
-  role: OrchestrationMessage["role"],
-  overrides: Partial<Omit<OrchestrationMessage, "id" | "role">> = {},
-): OrchestrationMessage {
+  role: TuiMessage["role"],
+  overrides: Partial<Omit<TuiMessage, "id" | "role">> = {},
+): TuiMessage {
   return {
     id: MessageId.make(id),
     role,
@@ -31,8 +26,8 @@ function message(
 function activity(
   id: string,
   kind: string,
-  overrides: Partial<Omit<OrchestrationThreadActivity, "id" | "kind">> = {},
-): OrchestrationThreadActivity {
+  overrides: Partial<Omit<TuiActivity, "id" | "kind">> = {},
+): TuiActivity {
   return {
     id: EventId.make(id),
     kind,

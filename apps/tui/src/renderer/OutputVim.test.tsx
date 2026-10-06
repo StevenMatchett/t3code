@@ -1,3 +1,4 @@
+import { agentFixture } from "../testing/agentFixture.ts";
 import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import { EventId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -91,6 +92,7 @@ describe("Vim output navigation", () => {
         ...state,
         data: Option.map(state.data, (thread) => ({
           ...thread,
+          agents: [agentFixture("diagram-agent")],
           activities: [
             {
               id: EventId.make("diagram-agent-start"),
@@ -546,6 +548,7 @@ describe("Vim output navigation", () => {
         ...driver.registry.get(fixture.states[0]!),
         data: Option.some({
           ...thread,
+          agents: [agentFixture("agent-one")],
           activities: [
             {
               id: EventId.make("agent-start"),
@@ -600,6 +603,7 @@ describe("Vim output navigation", () => {
         ...thread,
         data: Option.map(thread.data, (detail) => ({
           ...detail,
+          agents: [agentFixture("markdown-agent")],
           activities: [
             {
               id: EventId.make("agent-markdown"),

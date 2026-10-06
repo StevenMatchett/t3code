@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { AtomRegistry } from "effect/reactivity";
 import { makeClientFixture } from "../../testing/clientFixture.ts";
 import {
   makeNewThreadActions,

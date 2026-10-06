@@ -6,7 +6,7 @@ import {
   type TerminalBufferState,
 } from "@t3tools/client-runtime/state/terminal";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useContext, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { Stack, Text } from "../ui/primitives.tsx";

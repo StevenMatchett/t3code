@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 import {
   ComposerView,
   ConversationView,

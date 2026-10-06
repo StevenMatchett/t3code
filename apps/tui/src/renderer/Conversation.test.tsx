@@ -1,9 +1,10 @@
+import { requestFixture } from "../testing/requestFixture.ts";
+import type { TuiActivity } from "../connection/models.ts";
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import {
-  ApprovalRequestId,
+  RuntimeRequestId,
   EventId,
   TurnId,
-  type OrchestrationThreadActivity,
   type UploadChatImageAttachment,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -41,7 +42,7 @@ async function request(
   kind: string,
   payload: Record<string, unknown>,
 ) {
-  const activity: OrchestrationThreadActivity = {
+  const activity: TuiActivity = {
     id: EventId.make("pending-request"),
     kind,
     tone: "approval",
@@ -53,7 +54,11 @@ async function request(
   await act(async () =>
     driver.registry.set(fixture.states[0]!, {
       ...driver.registry.get(fixture.states[0]!),
-      data: Option.some({ ...fixture.details[0]!, activities: [activity] }),
+      data: Option.some({
+        ...fixture.details[0]!,
+        activities: [activity],
+        requests: requestFixture(kind, payload),
+      }),
     }),
   );
   await driver.flush();
@@ -169,7 +174,7 @@ describe("conversation interaction", () => {
 
   it("expands grouped tools by mouse and toggles all details with T", async () => {
     const { driver, fixture } = await setup();
-    const activities: OrchestrationThreadActivity[] = ["first", "second", "third"].map((name) => ({
+    const activities: TuiActivity[] = ["first", "second", "third"].map((name) => ({
       id: EventId.make(name),
       kind: "tool.completed",
       tone: "tool",
@@ -240,7 +245,7 @@ describe("conversation interaction", () => {
     const { driver, fixture, id } = await setup();
     await driver.input.pressKey("i");
     await driver.input.typeText("Keep this draft");
-    const requestId = ApprovalRequestId.make("inline-choice");
+    const requestId = RuntimeRequestId.make("inline-choice");
     await request(driver, fixture, "user-input.requested", {
       requestId,
       questions: [
@@ -281,7 +286,7 @@ describe("conversation interaction", () => {
   it("routes long pasted answers into the inline question rather than the chat draft", async () => {
     const { driver, fixture, id } = await setup();
     await driver.resize(44, 24);
-    const requestId = ApprovalRequestId.make("inline-text");
+    const requestId = RuntimeRequestId.make("inline-text");
     await request(driver, fixture, "user-input.requested", {
       requestId,
       questions: [
@@ -311,7 +316,7 @@ describe("conversation interaction", () => {
     const { driver, fixture } = await setup();
     await driver.input.pressKey("t", { ctrl: true });
     await request(driver, fixture, "user-input.requested", {
-      requestId: ApprovalRequestId.make("terminal-question"),
+      requestId: RuntimeRequestId.make("terminal-question"),
       questions: [
         {
           id: "choice",
@@ -579,7 +584,7 @@ describe("conversation interaction", () => {
     const { driver, fixture, id } = await setup();
     await driver.input.pressKey("i");
     await driver.input.typeText("Keep my approval draft");
-    const requestId = ApprovalRequestId.make("native-approval");
+    const requestId = RuntimeRequestId.make("native-approval");
     await request(driver, fixture, "approval.requested", {
       requestId,
       requestKind: "file-read",
@@ -621,7 +626,7 @@ describe("conversation interaction", () => {
     const { driver, fixture } = await setup();
     await driver.input.pressKey("t", { ctrl: true });
     await request(driver, fixture, "approval.requested", {
-      requestId: ApprovalRequestId.make("terminal-approval"),
+      requestId: RuntimeRequestId.make("terminal-approval"),
       requestKind: "file-read",
       detail: "Read a file",
     });
@@ -646,12 +651,12 @@ describe("conversation interaction", () => {
 
   it("answers multiple questions with opaque option values and custom text", async () => {
     const { driver, fixture } = await setup();
-    const requestId = ApprovalRequestId.make("native-questions");
+    const requestId = RuntimeRequestId.make("native-questions");
     await request(driver, fixture, "user-input.requested", {
       requestId,
       questions: [
         {
-          id: " ids ",
+          id: "ids",
           header: "Choose",
           question: "Select both",
           multiSelect: true,
@@ -687,13 +692,13 @@ describe("conversation interaction", () => {
     expect(fixture.commands[0]).toMatchObject({
       type: "thread.user-input.respond",
       requestId,
-      answers: { " ids ": [" opaque-1 ", "opaque-2"], explanation: "Use both, please." },
+      answers: { ids: [" opaque-1 ", "opaque-2"], explanation: "Use both, please." },
     });
   });
 
   it("opens a fill-in answer directly from an option question with E", async () => {
     const { driver, fixture } = await setup();
-    const requestId = ApprovalRequestId.make("option-or-custom");
+    const requestId = RuntimeRequestId.make("option-or-custom");
     await request(driver, fixture, "user-input.requested", {
       requestId,
       questions: [

@@ -1,4 +1,5 @@
-import type { OrchestrationLatestTurn } from "@t3tools/contracts";
+import type { TuiLatestTurn } from "../connection/models.ts";
+
 import { useActivityClock, useLocalDay } from "./ThreadActivityIndicator.tsx";
 import { Text } from "./primitives.tsx";
 import { turnTimingLabel } from "./turnTimingFormat.ts";
@@ -8,7 +9,7 @@ function RunningTiming({
   compact,
   runningSince,
 }: {
-  readonly turn: OrchestrationLatestTurn | null;
+  readonly turn: TuiLatestTurn | null;
   readonly compact: boolean;
   readonly runningSince: string | null;
 }) {
@@ -21,7 +22,7 @@ function RunningTiming({
   );
 }
 
-function CompletedTiming({ turn }: { readonly turn: OrchestrationLatestTurn }) {
+function CompletedTiming({ turn }: { readonly turn: TuiLatestTurn }) {
   const today = useLocalDay();
   const label = turnTimingLabel(turn, today);
   return label === null ? null : (
@@ -36,7 +37,7 @@ export function TurnTiming({
   compact = false,
   runningSince = null,
 }: {
-  readonly turn: OrchestrationLatestTurn | null;
+  readonly turn: TuiLatestTurn | null;
   readonly compact?: boolean;
   readonly runningSince?: string | null;
 }) {

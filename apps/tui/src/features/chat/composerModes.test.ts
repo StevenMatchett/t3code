@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { TurnId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { AtomRegistry } from "effect/reactivity";
 import { makeClientFixture } from "../../testing/clientFixture.ts";
 import { permissionChoices } from "./composerModes.ts";
 

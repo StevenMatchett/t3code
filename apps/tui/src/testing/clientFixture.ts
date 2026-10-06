@@ -1,3 +1,9 @@
+import type {
+  TuiThread,
+  TuiThreadShell,
+  TuiShellState,
+  TuiThreadState,
+} from "../connection/models.ts";
 import {
   DEFAULT_SERVER_SETTINGS,
   type ServerSettings,
@@ -12,22 +18,17 @@ import {
   type ServerProvider,
   ThreadId,
   type OrchestrationProjectShell,
-  type OrchestrationThread,
-  type OrchestrationThreadShell,
   type UploadChatImageAttachment,
 } from "@t3tools/contracts";
 import {
   AVAILABLE_CONNECTION_STATE,
   type SupervisorConnectionState,
 } from "@t3tools/client-runtime/connection";
-import type { EnvironmentShellState } from "@t3tools/client-runtime/state/shell";
-import {
-  EMPTY_ENVIRONMENT_THREAD_STATE,
-  type EnvironmentThreadState,
-} from "@t3tools/client-runtime/state/threads";
+
+import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 import * as Option from "effect/Option";
 import * as DateTime from "effect/DateTime";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import {
   EMPTY_TERMINAL_BUFFER_STATE,
   type TerminalBufferState,
@@ -60,7 +61,7 @@ export function makeClientFixture(
     createdAt: time,
     updatedAt: time,
   }));
-  const details: OrchestrationThread[] = [
+  const details: TuiThread[] = [
     "First conversation",
     "Second conversation",
     "Other project conversation",
@@ -81,7 +82,8 @@ export function makeClientFixture(
     settledAt: null,
     deletedAt: null,
     pullRequests: [],
-    proposedPlans: [],
+    requests: { approvals: [], userInputs: [] },
+    agents: [],
     activities: [],
     checkpoints: [],
     session: null,
@@ -100,26 +102,29 @@ export function makeClientFixture(
       },
     ],
   }));
-  const threads: OrchestrationThreadShell[] = details.map((thread) => ({
+  const threads: TuiThreadShell[] = details.map((thread) => ({
     ...thread,
     latestUserMessageAt: null,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
   }));
-  const shell = Atom.make<EnvironmentShellState>({
+  const shell = Atom.make<TuiShellState>({
     snapshot: Option.some({ projects, threads, snapshotSequence: 1, updatedAt: time }),
     status: "live",
     error: Option.none(),
   });
   const states = details.map((thread) =>
-    Atom.make<EnvironmentThreadState>({
+    Atom.make<TuiThreadState>({
       ...EMPTY_ENVIRONMENT_THREAD_STATE,
       status: "live",
       data: Option.some(thread),
     }),
   );
-  const empty = Atom.make(EMPTY_ENVIRONMENT_THREAD_STATE);
+  const empty = Atom.make<TuiThreadState>({
+    ...EMPTY_ENVIRONMENT_THREAD_STATE,
+    data: Option.none(),
+  });
   const connection = Atom.make<SupervisorConnectionState>({
     ...AVAILABLE_CONNECTION_STATE,
     desired: true,
@@ -289,7 +294,7 @@ export function makeClientFixture(
     recoverWorktree: async () => null,
     dispatch: async (registry, command) => {
       creationCommands.push(command);
-      const created: OrchestrationThread = {
+      const created: TuiThread = {
         ...details[0]!,
         id: command.threadId,
         projectId: command.projectId,
@@ -301,10 +306,10 @@ export function makeClientFixture(
         worktreePath: command.worktreePath,
         messages: [],
         activities: [],
-        createdAt: command.createdAt,
-        updatedAt: command.createdAt,
+        createdAt: command.createdAt ?? time,
+        updatedAt: command.createdAt ?? time,
       };
-      const entry: OrchestrationThreadShell = {
+      const entry: TuiThreadShell = {
         ...created,
         latestUserMessageAt: null,
         hasPendingApprovals: false,
@@ -313,7 +318,7 @@ export function makeClientFixture(
       };
       details.push(created);
       states.push(
-        Atom.make<EnvironmentThreadState>({
+        Atom.make<TuiThreadState>({
           ...EMPTY_ENVIRONMENT_THREAD_STATE,
           status: "live",
           data: Option.some(created),
@@ -367,8 +372,8 @@ export function makeClientFixture(
         workspaceRoot: command.workspaceRoot,
         defaultModelSelection: modelSelection,
         scripts: [],
-        createdAt: command.createdAt,
-        updatedAt: command.createdAt,
+        createdAt: command.createdAt ?? time,
+        updatedAt: command.createdAt ?? time,
       });
       return true;
     },
@@ -391,10 +396,10 @@ export function makeClientFixture(
       repository: null,
     }),
   });
-  const archivedRows: OrchestrationThreadShell[] = [];
+  const archivedRows: TuiThreadShell[] = [];
   const archivedThreads = Atom.make<{
     readonly status: "loading" | "live" | "error";
-    readonly threads: readonly OrchestrationThreadShell[];
+    readonly threads: readonly TuiThreadShell[];
   }>({ status: "live", threads: archivedRows });
   const threadSearch = Atom.family((query: string) =>
     Atom.make(() => {

@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { AtomRegistry } from "effect/reactivity";
 import * as Option from "effect/Option";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -313,7 +313,7 @@ describe("TUI session persistence", () => {
     const path = directory();
     const script = `
       import { openTuiSessionState } from ${JSON.stringify(new URL("./sessionStore.ts", import.meta.url).href)};
-      import { AtomRegistry } from 'effect/unstable/reactivity';
+      import { AtomRegistry } from 'effect/reactivity';
       const session = openTuiSessionState({ stateDirectory: process.argv[1], environmentId: 'test-env', httpOrigin: 'http://localhost:3773', registry: AtomRegistry.make() });
       session.saveShell({ route: 'conversation', sidebarView: 'recent', projectId: 'alpha', threadId: 'thread-0', modal: null });
       session.saveInteraction('thread-0', { draft: 'Saved before kill', pastes: [], attachments: [], skill: null, queue: [], attempt: null, attemptDraft: null });

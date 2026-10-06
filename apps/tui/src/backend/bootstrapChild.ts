@@ -6,16 +6,11 @@ import {
   type DesktopBackendBootstrap,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Hex from "effect/encoding/Hex";
 import * as Schema from "effect/Schema";
-import {
-  spawn as spawnNodeChild,
-  type ChildProcess,
-  type SpawnOptions,
-  type StdioOptions,
-} from "node:child_process";
-import { randomFillSync } from "node:crypto";
-import type { Readable, Writable } from "node:stream";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
+import type * as NodeStream from "node:stream";
 
 const BOOTSTRAP_SECRET_BYTES = 24;
 
@@ -94,7 +89,7 @@ class BootstrapSecret {
   }
 
   encode(): string {
-    return Encoding.encodeHex(this.#bytes);
+    return Hex.encode(this.#bytes);
   }
 
   clear(): void {
@@ -110,10 +105,14 @@ class BootstrapSecret {
 export class OwnedBootstrapChild {
   readonly pid: number;
   readonly bootstrapFd: 0 | 3;
-  readonly #child: ChildProcess;
+  readonly #child: NodeChildProcess.ChildProcess;
   readonly #bootstrapSecret: BootstrapSecret;
 
-  constructor(child: ChildProcess, delivery: BootstrapDelivery, bootstrapSecret: BootstrapSecret) {
+  constructor(
+    child: NodeChildProcess.ChildProcess,
+    delivery: BootstrapDelivery,
+    bootstrapSecret: BootstrapSecret,
+  ) {
     if (child.pid === undefined) {
       throw new Error("A spawned bootstrap child must have a PID.");
     }
@@ -123,14 +122,14 @@ export class OwnedBootstrapChild {
     this.#bootstrapSecret = bootstrapSecret;
   }
 
-  get stdout(): Readable {
+  get stdout(): NodeStream.Readable {
     if (this.#child.stdout === null) {
       throw new Error("The bootstrap child stdout pipe is unavailable.");
     }
     return this.#child.stdout;
   }
 
-  get stderr(): Readable {
+  get stderr(): NodeStream.Readable {
     if (this.#child.stderr === null) {
       throw new Error("The bootstrap child stderr pipe is unavailable.");
     }
@@ -202,11 +201,13 @@ function systemCode(error: unknown): string | undefined {
   return undefined;
 }
 
-function isWritable(value: Readable | Writable | null | undefined): value is Writable {
+function isWritable(
+  value: NodeStream.Readable | NodeStream.Writable | null | undefined,
+): value is NodeStream.Writable {
   return value !== null && value !== undefined && "end" in value && typeof value.end === "function";
 }
 
-function childStdio(delivery: BootstrapDelivery): StdioOptions {
+function childStdio(delivery: BootstrapDelivery): NodeChildProcess.StdioOptions {
   return delivery === "fd3" ? ["ignore", "pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe"];
 }
 
@@ -218,15 +219,15 @@ const spawnAndWriteBootstrap = Effect.fn("tui.backend.spawnAndWriteBootstrap")(f
   return yield* Effect.callback<OwnedBootstrapChild, BootstrapChildStartError>((resume) => {
     const fd = bootstrapFd(input.options.delivery);
     const args = [...input.options.args, "--bootstrap-fd", String(fd)];
-    const spawnOptions: SpawnOptions = {
+    const spawnOptions: NodeChildProcess.SpawnOptions = {
       stdio: childStdio(input.options.delivery),
       detached: false,
       windowsHide: true,
       ...(input.options.cwd === undefined ? {} : { cwd: input.options.cwd }),
       ...(input.options.env === undefined ? {} : { env: { ...input.options.env } }),
     };
-    let child: ChildProcess;
-    let bootstrapInput: Writable | undefined;
+    let child: NodeChildProcess.ChildProcess;
+    let bootstrapInput: NodeStream.Writable | undefined;
     let settled = false;
 
     const stopSpawnedChild = () => {
@@ -311,7 +312,7 @@ const spawnAndWriteBootstrap = Effect.fn("tui.backend.spawnAndWriteBootstrap")(f
     };
 
     try {
-      child = spawnNodeChild(input.options.executable, args, spawnOptions);
+      child = NodeChildProcess.spawn(input.options.executable, args, spawnOptions);
     } catch (error) {
       const code = systemCode(error);
       resume(
@@ -341,7 +342,7 @@ export const startBootstrapChild = Effect.fn("tui.backend.startBootstrapChild")(
   options: StartBootstrapChildOptions,
 ): Effect.fn.Return<OwnedBootstrapChild, BootstrapChildStartError> {
   const secretBytes = yield* Effect.try({
-    try: () => randomFillSync(new Uint8Array(BOOTSTRAP_SECRET_BYTES)),
+    try: () => NodeCrypto.randomFillSync(new Uint8Array(BOOTSTRAP_SECRET_BYTES)),
     catch: () => new BootstrapChildStartError({ phase: "secret-generation" }),
   });
   const secret = new BootstrapSecret(secretBytes);

@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
-import { AsyncResult, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, AtomRegistry } from "effect/reactivity";
 import { EMPTY_TERMINAL_BUFFER_STATE } from "@t3tools/client-runtime/state/terminal";
 import * as Option from "effect/Option";
 import * as NodeFS from "node:fs";
@@ -167,8 +167,9 @@ describe("restoring the TUI session", () => {
     expect(second.session.terminal(id)).toEqual({ terminalId: "term-2", focused: false });
   });
 
-  for (const end of ["exit", "close"] as const) {
-    it(`opens a new shell after ${end} with a saved terminal tab`, async () => {
+  it.each(["exit", "close"] as const)(
+    "opens a new shell after %s with a saved terminal tab",
+    async (end) => {
       const app = setup(directory());
       const driver = await app.render();
       await driver.input.pressKey("RETURN");
@@ -209,8 +210,8 @@ describe("restoring the TUI session", () => {
       await driver.input.pressKey("t", { ctrl: true });
       expect(driver.captureFrame()).toContain("[term-3]");
       expect(app.fixture.terminalAttachInputs.at(-1)).toMatchObject({ terminalId: "term-3" });
-    });
-  }
+    },
+  );
 
   it("restores the conversation scroll anchor and tool detail preference", async () => {
     const path = directory();

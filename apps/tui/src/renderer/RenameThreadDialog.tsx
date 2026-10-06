@@ -1,6 +1,7 @@
+import type { TuiThreadShell } from "../connection/models.ts";
 import { RegistryContext } from "@effect/atom-react";
 import { useKeyboard } from "@opentui/react";
-import type { OrchestrationThreadShell } from "@t3tools/contracts";
+
 import { useContext, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { Panel } from "../ui/Panel.tsx";
@@ -13,7 +14,7 @@ export function RenameThreadDialog({
   onClose,
 }: {
   readonly client: TuiClient;
-  readonly thread: OrchestrationThreadShell;
+  readonly thread: TuiThreadShell;
   readonly onClose: () => void;
 }) {
   const registry = useContext(RegistryContext);

@@ -1,3 +1,4 @@
+import type { TuiThreadShell } from "../connection/models.ts";
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
 import {
   useKeyboard,
@@ -8,7 +9,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useMemo, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { AppShellView, useAppShellState } from "../app/AppShell.tsx";
@@ -24,7 +25,7 @@ import { NewThreadForm } from "./NewThreadForm.tsx";
 import { NewProjectForm } from "./NewProjectForm.tsx";
 import { ActivityClockProvider } from "../ui/ThreadActivityIndicator.tsx";
 import { ArchivedThreadsPanel, ThreadActionsForm } from "./ThreadManagement.tsx";
-import type { OrchestrationThreadShell } from "@t3tools/contracts";
+
 import type { HotkeyState } from "../ui/HotkeyBar.tsx";
 import { CommandPalette, type CommandPaletteItem } from "./CommandPalette.tsx";
 import { CheckpointRestore } from "./CheckpointRestore.tsx";
@@ -54,12 +55,12 @@ type PaletteEntry = CommandPaletteItem & {
     | { readonly type: "diff" }
     | { readonly type: "restore" }
     | { readonly type: "pull-request" }
-    | { readonly type: "manage"; readonly thread: OrchestrationThreadShell }
-    | { readonly type: "project"; readonly projectId: OrchestrationThreadShell["projectId"] }
+    | { readonly type: "manage"; readonly thread: TuiThreadShell }
+    | { readonly type: "project"; readonly projectId: TuiThreadShell["projectId"] }
     | {
         readonly type: "thread";
-        readonly projectId: OrchestrationThreadShell["projectId"];
-        readonly threadId: OrchestrationThreadShell["id"];
+        readonly projectId: TuiThreadShell["projectId"];
+        readonly threadId: TuiThreadShell["id"];
       };
 };
 
@@ -174,14 +175,14 @@ export function AppShell({
   );
   const [threadOverlay, setThreadOverlay] = useState<
     | { readonly type: "palette" }
-    | { readonly type: "rename"; readonly thread: OrchestrationThreadShell }
+    | { readonly type: "rename"; readonly thread: TuiThreadShell }
     | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
     | { readonly type: "diff" }
     | { readonly type: "restore" }
     | { readonly type: "archived" }
     | {
         readonly type: "manage";
-        readonly thread: OrchestrationThreadShell;
+        readonly thread: TuiThreadShell;
         readonly returnToArchived: boolean;
         readonly initialAction?: "rename" | "delete";
       }
@@ -189,8 +190,8 @@ export function AppShell({
   >(null);
   const [navigationMenu, setNavigationMenu] = useState<
     | ((
-        | { type: "thread"; thread: OrchestrationThreadShell }
-        | { type: "project"; projectId: OrchestrationThreadShell["projectId"] }
+        | { type: "thread"; thread: TuiThreadShell }
+        | { type: "project"; projectId: TuiThreadShell["projectId"] }
       ) & { x: number; y: number })
     | null
   >(null);

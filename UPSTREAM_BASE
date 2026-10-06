@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/pingdotgg/t3code.git",
   "branch": "main",
-  "commit": "3efdcc5296f1754e0f3bf7fee5fc2ada510e0438",
-  "recordedAt": "2026-09-15",
-  "sourceCommittedAt": "2026-09-15T11:08:06-07:00",
+  "commit": "9bd1d8009a6b7c50f9dd9458e2bf27d481ff3b43",
+  "recordedAt": "2026-10-06",
+  "sourceCommittedAt": "2026-10-06T04:38:02-05:00",
   "forkIntegrationBranch": "tui-main",
   "license": "MIT"
 }

@@ -1,6 +1,7 @@
+import type { TuiThreadShell } from "../connection/models.ts";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useKeyboard } from "@opentui/react";
-import type { OrchestrationThreadShell } from "@t3tools/contracts";
+
 import { useContext, useEffect, useMemo, useState } from "react";
 
 import type { TuiClient } from "../connection/clientRuntime.ts";
@@ -21,7 +22,7 @@ export function ThreadActionsForm({
 }: {
   readonly initialAction?: "rename" | "delete";
   readonly client: TuiClient;
-  readonly thread: OrchestrationThreadShell;
+  readonly thread: TuiThreadShell;
   readonly active: boolean;
   readonly onClose: () => void;
   readonly onRemoved: (action: "archive" | "unarchive" | "delete") => void;
@@ -185,7 +186,7 @@ export function ArchivedThreadsPanel({
   readonly client: TuiClient;
   readonly active: boolean;
   readonly onClose: () => void;
-  readonly onManage: (thread: OrchestrationThreadShell) => void;
+  readonly onManage: (thread: TuiThreadShell) => void;
 }) {
   const registry = useContext(RegistryContext);
   const state = useAtomValue(client.archivedThreads);

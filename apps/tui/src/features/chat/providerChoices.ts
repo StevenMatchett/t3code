@@ -1,9 +1,5 @@
-import type {
-  ModelSelection,
-  OrchestrationThread,
-  ServerProvider,
-  ServerProviderSkill,
-} from "@t3tools/contracts";
+import type { TuiThread } from "../../connection/models.ts";
+import type { ModelSelection, ServerProvider, ServerProviderSkill } from "@t3tools/contracts";
 import {
   getProviderSkillsForSlashMenu,
   resolveProviderSkillSourceKind,
@@ -39,7 +35,7 @@ export function skillPrefix(provider: ServerProvider, skill: ServerProviderSkill
 }
 
 export function modelChangeProblem(
-  thread: OrchestrationThread,
+  thread: TuiThread,
   provider: ServerProvider | undefined,
   next: ModelSelection,
 ): string | null {

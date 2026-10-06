@@ -1,3 +1,5 @@
+import type { TuiThread, TuiThreadState, TuiShellState } from "../../connection/models.ts";
+import type { TuiCommand } from "../../connection/commands.ts";
 import {
   CommandId,
   MessageId,
@@ -5,9 +7,7 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type RuntimeMode,
   type ProviderInteractionMode,
-  type ApprovalRequestId,
-  type ClientOrchestrationCommand,
-  type OrchestrationThread,
+  type RuntimeRequestId,
   type ModelSelection,
   type ProviderInstanceId,
   type ServerProviderSkill,
@@ -17,16 +17,15 @@ import {
   type ChatAttachment,
 } from "@t3tools/contracts";
 import {
-  derivePendingRequests,
-  type PendingApproval,
-  type PendingUserInput,
-} from "@t3tools/client-runtime/pending-requests";
-import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
+  type ThreadPendingApproval as PendingApproval,
+  type ThreadPendingUserInput as PendingUserInput,
+} from "@t3tools/client-runtime/state/thread-requests";
+
 import { planModeProblem } from "./composerModes.ts";
 import { recallableComposerPrompt } from "./restoredPrompt.ts";
 import { checkpointRestoreTargets, waitForCheckpointRestore } from "./checkpointRestore.ts";
 import { completeSkillDraft, type SkillCompletion } from "./skillCompletion.ts";
-import type { EnvironmentShellState } from "@t3tools/client-runtime/state/shell";
+
 import {
   modelChangeProblem,
   modelOptionsAreValid,
@@ -36,15 +35,15 @@ import {
 } from "./providerChoices.ts";
 import type { SupervisorConnectionState } from "@t3tools/client-runtime/connection";
 import * as DateTime from "effect/DateTime";
-import * as Encoding from "effect/Encoding";
+import * as Hex from "effect/encoding/Hex";
 import * as Predicate from "effect/Predicate";
 import * as Option from "effect/Option";
-import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 import type { TuiSessionState } from "../../persistence/sessionState.ts";
 import { loadImageAttachment as loadImageAttachmentFromDisk } from "./imageAttachments.ts";
 
 export type TuiThreadCommand = Extract<
-  ClientOrchestrationCommand,
+  TuiCommand,
   {
     readonly type:
       | "thread.checkpoint.revert"
@@ -68,7 +67,7 @@ interface QueuedPrompt {
   readonly attempted: boolean;
 }
 
-function toolBoundary(thread: OrchestrationThread): string | null {
+function toolBoundary(thread: TuiThread): string | null {
   const completed = thread.activities.filter((activity) => activity.kind === "tool.completed");
   return (
     completed.reduce<(typeof completed)[number] | null>(
@@ -84,11 +83,11 @@ function toolBoundary(thread: OrchestrationThread): string | null {
   );
 }
 
-const turnBoundary = (thread: OrchestrationThread) =>
+const turnBoundary = (thread: TuiThread) =>
   `${thread.latestTurn?.turnId ?? ""}:${thread.latestTurn?.state ?? ""}`;
 export type QuestionAnswers = Readonly<Record<string, string | readonly string[]>>;
 interface ReplyReceipt {
-  readonly requestId: ApprovalRequestId;
+  readonly requestId: RuntimeRequestId;
   readonly kind: "approval" | "user-input";
   readonly failureId: string | null;
 }
@@ -169,8 +168,8 @@ export function answersAreComplete(request: PendingUserInput, answers: QuestionA
 }
 
 function failureId(
-  thread: OrchestrationThread,
-  requestId: ApprovalRequestId,
+  thread: TuiThread,
+  requestId: RuntimeRequestId,
   kind: ReplyReceipt["kind"],
 ): string | null {
   return (
@@ -185,10 +184,10 @@ function failureId(
 
 export function makeThreadInteractions(options: {
   readonly session?: TuiSessionState;
-  readonly thread: (threadId: ThreadId) => Atom.Atom<EnvironmentThreadState>;
+  readonly thread: (threadId: ThreadId) => Atom.Atom<TuiThreadState>;
   readonly connection: Atom.Atom<SupervisorConnectionState>;
   readonly providers?: Atom.Atom<ProviderCatalog>;
-  readonly shell?: Atom.Atom<EnvironmentShellState>;
+  readonly shell?: Atom.Atom<TuiShellState>;
   readonly dispatch: (
     registry: AtomRegistry.AtomRegistry,
     command: TuiThreadCommand,
@@ -282,7 +281,7 @@ export function makeThreadInteractions(options: {
     }
     return thread;
   };
-  const providerContext = (registry: AtomRegistry.AtomRegistry, thread: OrchestrationThread) => {
+  const providerContext = (registry: AtomRegistry.AtomRegistry, thread: TuiThread) => {
     const catalog = options.providers ? registry.get(options.providers) : null;
     const snapshot = options.shell ? Option.getOrNull(registry.get(options.shell).snapshot) : null;
     return {
@@ -299,16 +298,14 @@ export function makeThreadInteractions(options: {
     };
   };
   const metadata = () => ({
-    commandId: CommandId.make(
-      Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16))),
-    ),
+    commandId: CommandId.make(Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16)))),
     createdAt: DateTime.formatIso(DateTime.nowUnsafe()),
   });
   const observe = (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => {
     const thread = Option.getOrNull(registry.get(options.thread(threadId)).data);
     if (!thread) return;
     const current = registry.get(state(threadId));
-    const requests = derivePendingRequests(thread.activities);
+    const requests = thread.requests;
     const failed = current.replies.some(
       (receipt) => failureId(thread, receipt.requestId, receipt.kind) !== receipt.failureId,
     );
@@ -361,7 +358,7 @@ export function makeThreadInteractions(options: {
           : {}),
       });
   };
-  const planProblem = (registry: AtomRegistry.AtomRegistry, thread: OrchestrationThread) =>
+  const planProblem = (registry: AtomRegistry.AtomRegistry, thread: TuiThread) =>
     planModeProblem(providerContext(registry, thread).provider);
   const run = async (
     registry: AtomRegistry.AtomRegistry,
@@ -467,7 +464,7 @@ export function makeThreadInteractions(options: {
       });
       return false;
     }
-    const requests = derivePendingRequests(thread.activities);
+    const requests = thread.requests;
     if (
       requests.approvals.length ||
       requests.userInputs.length ||
@@ -689,7 +686,7 @@ export function makeThreadInteractions(options: {
       if (characters <= 200) return false;
       const current = registry.get(state(threadId));
       const marker = `[paste ${characters} characters]`;
-      const id = Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16)));
+      const id = Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16)));
       update(registry, threadId, {
         draft: `${current.draft}${marker}`,
         pastes: [...current.pastes, { id, marker, text }],
@@ -900,7 +897,7 @@ export function makeThreadInteractions(options: {
           threadId,
           "The unconfirmed message keeps its original mode and permissions. Restore those selections to retry, or edit the message to send a new prompt.",
         );
-      const requests = derivePendingRequests(thread.activities);
+      const requests = thread.requests;
       const shouldQueue =
         !retry && (thread.latestTurn?.state === "running" || current.queue.length > 0);
       if (!retry && !shouldQueue && (requests.approvals.length || requests.userInputs.length))
@@ -915,7 +912,7 @@ export function makeThreadInteractions(options: {
         threadId,
         message: {
           messageId: MessageId.make(
-            Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16))),
+            Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16))),
           ),
           role: "user",
           text: messageText,
@@ -1002,12 +999,12 @@ export function makeThreadInteractions(options: {
       reply:
         | {
             readonly kind: "approval";
-            readonly requestId: ApprovalRequestId;
+            readonly requestId: RuntimeRequestId;
             readonly decision: ProviderApprovalDecision;
           }
         | {
             readonly kind: "user-input";
-            readonly requestId: ApprovalRequestId;
+            readonly requestId: RuntimeRequestId;
             readonly answers: QuestionAnswers;
           },
     ) => {
@@ -1021,12 +1018,13 @@ export function makeThreadInteractions(options: {
         return false;
       const thread = currentThread(registry, threadId);
       if (!thread) return false;
-      const requests = derivePendingRequests(thread.activities);
+      const requests = thread.requests;
       let command: TuiThreadCommand;
       if (reply.kind === "approval") {
         const request = requests.approvals.find((item) => item.requestId === reply.requestId);
         if (
           !request ||
+          request.responseCapability === "not_resumable" ||
           !approvalOptions(request).some((option) => option.decision === reply.decision)
         )
           return error(registry, threadId, "That approval option is no longer available.");
@@ -1039,7 +1037,11 @@ export function makeThreadInteractions(options: {
         };
       } else {
         const request = requests.userInputs.find((item) => item.requestId === reply.requestId);
-        if (!request || !answersAreComplete(request, reply.answers))
+        if (
+          !request ||
+          request.responseCapability === "not_resumable" ||
+          !answersAreComplete(request, reply.answers)
+        )
           return error(
             registry,
             threadId,

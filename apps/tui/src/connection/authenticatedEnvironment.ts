@@ -1,4 +1,8 @@
 import {
+  appendOrchestrationProtocol,
+  orchestrationProtocolCompatibilityError,
+} from "@t3tools/client-runtime/connection";
+import {
   AuthOrchestrationReadScope,
   AuthStandardClientScopes,
   type AuthSessionState,
@@ -16,7 +20,7 @@ import {
   deriveWsBaseUrl,
   fetchRemoteEnvironmentDescriptor,
 } from "@t3tools/client-runtime/environment";
-import { makeWsRpcProtocolClient, remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
+import { makeWsRpcProtocolClient, layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -24,9 +28,9 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
-import * as RpcClient from "effect/unstable/rpc/RpcClient";
-import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as RpcClient from "effect/rpc/RpcClient";
+import * as RpcSerialization from "effect/rpc/RpcSerialization";
+import * as Socket from "effect/socket/Socket";
 
 import {
   startBootstrapChild,
@@ -45,6 +49,7 @@ const SOCKET_OPEN_TIMEOUT = "15 seconds";
 
 export const TuiEnvironmentConnectionPhase = Schema.Literals([
   "readiness",
+  "protocol-validation",
   "bearer-exchange",
   "session-validation",
   "websocket-ticket",
@@ -62,6 +67,8 @@ export class TuiEnvironmentConnectionError extends Schema.TaggedError<TuiEnviron
     switch (this.phase) {
       case "readiness":
         return "The local environment did not become ready.";
+      case "protocol-validation":
+        return "This TUI and server use incompatible orchestration protocols. Update them to matching versions.";
       case "bearer-exchange":
         return "Failed to exchange the local bootstrap credential.";
       case "session-validation":
@@ -210,7 +217,10 @@ export interface ReattachedAuthenticatedTuiEnvironment extends AuthenticatedTuiE
 const nodeWebSocketConstructor: WebSocketConstructor = (url, protocols) =>
   (protocols === undefined
     ? new globalThis.WebSocket(url)
-    : new globalThis.WebSocket(url, protocols)) as globalThis.WebSocket;
+    : new globalThis.WebSocket(
+        url,
+        typeof protocols === "string" || Array.isArray(protocols) ? protocols : undefined,
+      )) as globalThis.WebSocket;
 
 export function normalizeTuiHttpOrigin(httpBaseUrl: string): string {
   const url = new URL(httpBaseUrl);
@@ -238,7 +248,7 @@ export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEn
       try: () => normalizeTuiHttpOrigin(options.httpBaseUrl),
       catch: () => new TuiEnvironmentConnectionError({ phase: "readiness" }),
     });
-    const httpClientLayer = remoteHttpClientLayer(
+    const httpClientLayer = layerRemoteHttpClient(
       withoutRedirects(options.fetch ?? globalThis.fetch),
     );
     const probe = fetchRemoteEnvironmentDescriptor({
@@ -252,6 +262,8 @@ export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEn
       }),
       Effect.provide(httpClientLayer),
     );
+    if (orchestrationProtocolCompatibilityError(descriptor))
+      return yield* new TuiEnvironmentConnectionError({ phase: "protocol-validation" });
     return {
       descriptor,
       httpBaseUrl,
@@ -264,7 +276,7 @@ const readServerConfig = Effect.fn("tui.connection.readServerConfig")(function* 
   readonly socketUrl: string;
   readonly webSocketConstructor: WebSocketConstructor;
 }) {
-  const socketLayer = Socket.layerWebSocket(input.socketUrl, {
+  const socketLayer = Socket.layerWebSocket(appendOrchestrationProtocol(input.socketUrl), {
     openTimeout: SOCKET_OPEN_TIMEOUT,
   }).pipe(Layer.provide(Layer.succeed(Socket.WebSocketConstructor, input.webSocketConstructor)));
   const protocolLayer = Layer.effect(
@@ -305,7 +317,7 @@ const connectTuiEnvironmentWithBearer = Effect.fn("tui.connection.connectTuiEnvi
     readonly webSocketConstructor: WebSocketConstructor;
     readonly timeoutMs: number;
   }): Effect.fn.Return<AuthenticatedTuiEnvironment, TuiEnvironmentConnectionError> {
-    const httpClientLayer = remoteHttpClientLayer(options.fetch);
+    const httpClientLayer = layerRemoteHttpClient(options.fetch);
     return yield* Effect.gen(function* () {
       const session = yield* options.bearer
         .use((token) =>
@@ -428,7 +440,7 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
         );
     }
     return connected;
-  }).pipe(Effect.provide(remoteHttpClientLayer(fetch)));
+  }).pipe(Effect.provide(layerRemoteHttpClient(fetch)));
 });
 
 export const pairExistingTuiEnvironment = Effect.fn("tui.connection.pairExistingTuiEnvironment")(
@@ -450,13 +462,11 @@ export const pairExistingTuiEnvironment = Effect.fn("tui.connection.pairExisting
       const connected = yield* connectAuthenticatedTuiEnvironment({
         child: {
           useBootstrapToken: (use) =>
-            secret
-              .use(use)
-              .pipe(
-                Effect.catchTag("TuiBearerSessionClearedError", () =>
-                  Effect.fail(new BootstrapSecretClearedError()),
-                ),
-              ),
+            secret.use(use).pipe(
+              Effect.catchTags({
+                TuiBearerSessionClearedError: () => Effect.fail(new BootstrapSecretClearedError()),
+              }),
+            ),
           clearBootstrapSecret: () => secret.clear(),
         },
         readiness,
@@ -509,9 +519,11 @@ export const reattachAuthenticatedTuiEnvironment = Effect.fn(
     httpBaseUrl: stored.httpOrigin,
     timeoutMs,
   }).pipe(
-    Effect.provide(remoteHttpClientLayer(fetch)),
+    Effect.provide(layerRemoteHttpClient(fetch)),
     Effect.mapError(() => new TuiEnvironmentReattachError({ failure: "rejected" })),
   );
+  if (orchestrationProtocolCompatibilityError(descriptor))
+    return yield* new TuiEnvironmentReattachError({ failure: "rejected" });
   if (descriptor.environmentId !== stored.environmentId) {
     return yield* new TuiEnvironmentReattachError({ failure: "rejected" });
   }

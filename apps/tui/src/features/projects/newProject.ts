@@ -1,6 +1,7 @@
+import type { TuiShellState } from "../../connection/models.ts";
+import type { TuiCommand } from "../../connection/commands.ts";
 import type { SupervisorConnectionState } from "@t3tools/client-runtime/connection";
 import {
-  buildProjectCreateCommand,
   getCloneDirectoryName,
   normalizePastedCloneUrl,
 } from "@t3tools/client-runtime/operations/projects";
@@ -9,26 +10,22 @@ import {
   findProjectByPath,
   inferProjectTitleFromPath,
 } from "@t3tools/client-runtime/state/projects";
-import type { EnvironmentShellState } from "@t3tools/client-runtime/state/shell";
+
 import { parseGitHubRepositoryNameWithOwnerFromRemoteUrl } from "@t3tools/shared/git";
 import {
   CommandId,
   ProjectId,
-  type ClientOrchestrationCommand,
   type FilesystemBrowseResult,
   type ProjectCloneStartInput,
   type SourceControlCloneRepositoryInput,
   type SourceControlCloneRepositoryResult,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import * as Encoding from "effect/Encoding";
+import * as Hex from "effect/encoding/Hex";
 import * as Option from "effect/Option";
-import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 
-type CreateProjectCommand = Extract<
-  ClientOrchestrationCommand,
-  { readonly type: "project.create" }
->;
+type CreateProjectCommand = Extract<TuiCommand, { readonly type: "project.create" }>;
 
 export interface NewProjectState {
   readonly phase: "idle" | "creating" | "cloning" | "error" | "created";
@@ -39,7 +36,7 @@ export interface NewProjectState {
 const initial: NewProjectState = { phase: "idle", projectId: null, error: null };
 
 function ids() {
-  const value = Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16)));
+  const value = Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16)));
   return {
     projectId: ProjectId.make(`tui-${value}`),
     commandId: CommandId.make(`tui-create-project-${value}`),
@@ -53,7 +50,7 @@ export function defaultCloneDestination(baseDirectory: string, remoteUrl: string
 }
 
 export function makeNewProjectActions(options: {
-  readonly shell: Atom.Atom<EnvironmentShellState>;
+  readonly shell: Atom.Atom<TuiShellState>;
   readonly connection: Atom.Atom<SupervisorConnectionState>;
   readonly projectCloneTracking: Atom.Atom<boolean>;
   readonly dispatch: (
@@ -90,13 +87,17 @@ export function makeNewProjectActions(options: {
       Option.isNone(shell.error)
     );
   };
-  const createCommand = (projectId: ProjectId, commandId: CommandId, workspaceRoot: string) =>
-    buildProjectCreateCommand({
-      projectId,
-      commandId,
-      workspaceRoot,
-      createdAt: DateTime.formatIso(DateTime.nowUnsafe()),
-    });
+  const createCommand = (
+    projectId: ProjectId,
+    commandId: CommandId,
+    workspaceRoot: string,
+  ): CreateProjectCommand => ({
+    type: "project.create",
+    projectId,
+    commandId,
+    workspaceRoot,
+    title: inferProjectTitleFromPath(workspaceRoot),
+  });
 
   return {
     state,

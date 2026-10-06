@@ -8,7 +8,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type UploadChatImageAttachment,
 } from "@t3tools/contracts";
-import * as Encoding from "effect/Encoding";
+import * as Hex from "effect/encoding/Hex";
 
 const mimeByExtension: Readonly<Record<string, UploadChatImageAttachment["mimeType"]>> = {
   ".gif": "image/gif",
@@ -114,7 +114,7 @@ export async function loadImageAttachment(path: string): Promise<UploadChatImage
   if (info.size > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES)
     throw new Error(`'${name}' exceeds the 10 MB image limit.`);
   const bytes = await NodeFSP.readFile(path);
-  const id = `tui-${Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16)))}`;
+  const id = `tui-${Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16)))}`;
   return {
     type: "image",
     id,

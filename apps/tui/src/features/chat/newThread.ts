@@ -1,19 +1,20 @@
+import type { TuiShellState } from "../../connection/models.ts";
+import type { TuiCommand } from "../../connection/commands.ts";
 import {
   CommandId,
   ThreadId,
-  type ClientOrchestrationCommand,
   type ModelSelection,
   type ProjectId,
   type RuntimeMode,
   type VcsCreateWorktreeInput,
   type VcsCreateWorktreeResult,
 } from "@t3tools/contracts";
-import type { EnvironmentShellState } from "@t3tools/client-runtime/state/shell";
+
 import type { SupervisorConnectionState } from "@t3tools/client-runtime/connection";
 import * as DateTime from "effect/DateTime";
-import * as Encoding from "effect/Encoding";
+import * as Hex from "effect/encoding/Hex";
 import * as Option from "effect/Option";
-import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, type AtomRegistry } from "effect/reactivity";
 import type { ProviderCatalog } from "./providerChoices.ts";
 
 export interface NewThreadInput {
@@ -24,10 +25,7 @@ export interface NewThreadInput {
   readonly mode: "local" | "worktree";
   readonly baseRef: string;
 }
-export type CreateThreadCommand = Extract<
-  ClientOrchestrationCommand,
-  { readonly type: "thread.create" }
->;
+export type CreateThreadCommand = Extract<TuiCommand, { readonly type: "thread.create" }>;
 type Worktree = VcsCreateWorktreeResult["worktree"];
 interface CreationAttempt {
   readonly input: NewThreadInput;
@@ -45,7 +43,7 @@ export interface NewThreadState {
 const initial: NewThreadState = { phase: "idle", attempt: null, error: null };
 
 export function makeNewThreadActions(options: {
-  readonly shell: Atom.Atom<EnvironmentShellState>;
+  readonly shell: Atom.Atom<TuiShellState>;
   readonly connection: Atom.Atom<SupervisorConnectionState>;
   readonly providers: Atom.Atom<ProviderCatalog>;
   readonly createWorktree: (
@@ -124,7 +122,7 @@ export function makeNewThreadActions(options: {
           (baseRef.startsWith("-") || baseRef.includes("\0") || /[\r\n]/u.test(baseRef))
         )
           return fail("Enter a Git branch or commit ref, such as HEAD or main.");
-        const id = Encoding.encodeHex(globalThis.crypto.getRandomValues(new Uint8Array(16)));
+        const id = Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16)));
         const threadId = ThreadId.make(`tui-${id}`);
         attempt = {
           input: { ...actual, baseRef },

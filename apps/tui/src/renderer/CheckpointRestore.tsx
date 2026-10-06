@@ -25,7 +25,7 @@ export function CheckpointRestore({
   const registry = useContext(RegistryContext);
   const state = useAtomValue(client.thread(threadId));
   const interaction = useAtomValue(client.actions.state(threadId));
-  const page = Option.getOrNull(state.page);
+  const page = state.history;
   const thread = Option.getOrNull(state.data);
   const targets = thread ? checkpointRestoreTargets(thread).toReversed() : [];
   const [cursor, setCursor] = useState(0);
@@ -63,8 +63,8 @@ export function CheckpointRestore({
       if (key.repeated) return;
       if (messageId) void choose(choice);
       else if (targets[selected]) select(targets[selected].message.id);
-    } else if (key.name === "l" && !messageId && page?.hasMore && !page.loadingOlder) {
-      client.loadOlder(threadId);
+    } else if (key.name === "l" && !messageId && page?.hasMoreHistory && !page.loading) {
+      client.loadOlder(registry, threadId);
     } else return;
     key.preventDefault();
     key.stopPropagation();
@@ -130,7 +130,7 @@ export function CheckpointRestore({
               ))
             )}
           </Stack>
-          {page?.hasMore ? <Text tone="muted">L Load older prompts</Text> : null}
+          {page?.hasMoreHistory ? <Text tone="muted">L Load older prompts</Text> : null}
         </>
       )}
       {pending ? <Text tone="warning">Rewinding chat… Waiting for the environment.</Text> : null}

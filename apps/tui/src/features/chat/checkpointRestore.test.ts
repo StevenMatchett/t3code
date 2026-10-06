@@ -1,13 +1,8 @@
+import type { TuiThread } from "../../connection/models.ts";
 import { afterEach, describe, expect, it } from "@effect/vitest";
-import {
-  EventId,
-  CheckpointRef,
-  MessageId,
-  TurnId,
-  type OrchestrationThread,
-} from "@t3tools/contracts";
+import { CommandId, CheckpointRef, MessageId, TurnId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { makeClientFixture } from "../../testing/clientFixture.ts";
 import { checkpointRestoreTargets } from "./checkpointRestore.ts";
 import { makeThreadInteractions, type TuiThreadCommand } from "./interactions.ts";
@@ -37,7 +32,7 @@ function setup(dispatch?: (command: TuiThreadCommand) => Promise<boolean>) {
     role: "assistant" as const,
     text: "Fixed",
   };
-  const change = (patch: Partial<OrchestrationThread>) =>
+  const change = (patch: Partial<TuiThread>) =>
     registry.update(fixture.states[0]!, (value) => ({
       ...value,
       data: Option.map(value.data, (thread) => ({ ...thread, ...patch })),
@@ -117,17 +112,10 @@ describe("checkpoint restore", () => {
     const restored = f.actions.restoreCheckpoint(f.registry, f.id, f.prompt.id, true);
     await f.dispatched.promise;
     f.change({
-      activities: [
-        {
-          id: EventId.make("restore-failed"),
-          kind: "checkpoint.revert.failed",
-          tone: "error",
-          summary: "Rewind failed",
-          payload: { detail: "Checkpoint missing" },
-          turnId: null,
-          createdAt: time,
-        },
-      ],
+      rollbackFailure: {
+        requestId: CommandId.make("restore-failed"),
+        message: "Checkpoint missing",
+      },
     });
     expect(await restored).toBe(false);
     expect(f.registry.get(f.actions.state(f.id))).toMatchObject({

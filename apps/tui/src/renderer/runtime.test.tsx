@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "@effect/vitest"
 import { useAtomValue } from "@effect/atom-react";
 import { type CliRenderer } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { act, useEffect } from "react";
 
 import { startRendererRuntime } from "./runtime.tsx";

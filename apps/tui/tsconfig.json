@@ -6,7 +6,15 @@
     "lib": ["ESNext", "DOM"],
     "module": "Preserve",
     "moduleResolution": "Bundler",
-    "rootDir": "src"
+    "rootDir": "src",
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnosticSeverity": {
+          "globalDate": "off"
+        }
+      }
+    ]
   },
   "include": ["src"]
 }

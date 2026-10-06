@@ -13,7 +13,7 @@ import {
   type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import { EMPTY_TERMINAL_BUFFER_STATE } from "@t3tools/client-runtime/state/terminal";
-import { Atom, AtomRegistry, AsyncResult } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import * as Option from "effect/Option";
 import { act } from "react";
 import * as NodeChildProcess from "node:child_process";

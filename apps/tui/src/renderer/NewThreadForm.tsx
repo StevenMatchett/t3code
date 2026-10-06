@@ -105,7 +105,7 @@ function Fields({
     choices[0];
   const [title, setTitle] = useState(creation.attempt?.input.title ?? "");
   const [mode, setMode] = useState<"local" | "worktree">(
-    creation.attempt?.input.mode ?? defaults.defaultThreadEnvMode,
+    creation.attempt?.input.mode ?? defaults.defaultThreadEnvMode ?? "local",
   );
   const [baseRef, setBaseRef] = useState(creation.attempt?.input.baseRef ?? "HEAD");
   const [selection, setSelection] = useState<ModelSelection | null>(

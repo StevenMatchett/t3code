@@ -1,3 +1,4 @@
+import { ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
 /// <reference types="node" />
 // @effect-diagnostics nodeBuiltinImport:off
 // @effect-diagnostics preferSchemaOverJson:off
@@ -14,7 +15,7 @@ import {
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -43,6 +44,7 @@ const SERVER_CONFIG = {
     label: "TUI reattach test",
     platform: { os: "darwin", arch: "arm64" },
     serverVersion: "0.0.0-test",
+    orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     capabilities: { repositoryIdentity: true, connectionProbe: true },
   },
   auth: {
@@ -62,6 +64,7 @@ const SERVER_CONFIG = {
     localTracingEnabled: false,
     otlpTracesEnabled: false,
     otlpMetricsEnabled: false,
+    otlpLogsEnabled: false,
   },
   settings: DEFAULT_SERVER_SETTINGS,
 } satisfies ServerConfigType;
