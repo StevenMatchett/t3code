@@ -1,4 +1,6 @@
-import { appendOrchestrationProtocol } from "@t3tools/client-runtime/connection";
+import { makeV1CommonClient } from "../dist/connection/v1/commonRpc.js";
+import { appendTuiProtocol, tuiProtocolVersion } from "../dist/connection/protocol.js";
+import { makeLegacyRpcClient } from "../dist/connection/v1/rpc.js";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
@@ -107,9 +109,12 @@ export const openTerminalFixtureConnection = Effect.fn("tui.testing.terminalConn
         }),
       )
       .pipe(Effect.provide(layerRemoteHttpClient(globalThis.fetch)));
-    const socketLayer = Socket.layerWebSocket(appendOrchestrationProtocol(socketUrl), {
-      openTimeout: "10 seconds",
-    }).pipe(
+    const socketLayer = Socket.layerWebSocket(
+      appendTuiProtocol(socketUrl, tuiProtocolVersion(fixture.readiness.descriptor)),
+      {
+        openTimeout: "10 seconds",
+      },
+    ).pipe(
       Layer.provide(
         Layer.succeed(Socket.WebSocketConstructor, (url) => new globalThis.WebSocket(url)),
       ),
@@ -122,10 +127,16 @@ export const openTerminalFixtureConnection = Effect.fn("tui.testing.terminalConn
       }),
     ).pipe(Layer.provide(Layer.mergeAll(socketLayer, RpcSerialization.layerJson)));
     const context = yield* Layer.build(protocol).pipe(Scope.provide(scope));
-    const client = yield* makeWsRpcProtocolClient.pipe(
-      Effect.provide(context),
-      Scope.provide(scope),
-    );
+    const commonClient = yield* (
+      tuiProtocolVersion(fixture.readiness.descriptor) === 1
+        ? makeV1CommonClient
+        : makeWsRpcProtocolClient
+    ).pipe(Effect.provide(context), Scope.provide(scope));
+    const legacyClient =
+      tuiProtocolVersion(fixture.readiness.descriptor) === 1
+        ? yield* makeLegacyRpcClient.pipe(Effect.provide(context), Scope.provide(scope))
+        : {};
+    const client = { ...commonClient, ...legacyClient };
     const config = yield* client[WS_METHODS.serverGetConfig]({});
     if (config.environment.environmentId !== fixture.environment.config.environment.environmentId) {
       return yield* Effect.die("Terminal test connected to the wrong environment");

@@ -1,7 +1,13 @@
+import {
+  appendTuiProtocol,
+  tuiProtocolCompatibilityError,
+  tuiProtocolVersion,
+} from "./protocol.ts";
+import { makeV1ProtocolClient } from "./v1/rpc.ts";
+import { createV1State } from "./v1/state.ts";
+import { executeV1Command } from "./v1/commands.ts";
 import type { TuiShellState, TuiThreadState, TuiThreadShell } from "./models.ts";
 import {
-  orchestrationProtocolCompatibilityError,
-  appendOrchestrationProtocol,
   Connection,
   ConnectionBlockedError,
   Connectivity,
@@ -213,6 +219,7 @@ export function createTuiClient(
 ): TuiClient {
   const { descriptor, httpBaseUrl } = environment.readiness;
   const environmentId = descriptor.environmentId;
+  const protocolVersion = tuiProtocolVersion(descriptor);
   const target = new PrimaryConnectionTarget({
     environmentId,
     label: descriptor.label,
@@ -222,58 +229,66 @@ export function createTuiClient(
   const http = layerRemoteHttpClient(globalThis.fetch).pipe(
     Layer.provideMerge(Layer.succeed(FetchHttpClient.RequestInit, { redirect: "error" })),
   );
-  const connections = Connection.layerWithResolver({
-    prepareForUpdate: unsupported,
-    prepare: Effect.fn("tui.client.prepare")(function* (entry) {
-      if (entry.target.environmentId !== environmentId)
-        return yield* environmentMismatchError({
-          expected: environmentId,
-          actual: entry.target.environmentId,
-        });
-      const current = yield* fetchRemoteEnvironmentDescriptor({ httpBaseUrl }).pipe(
-        Effect.mapError(mapRemoteEnvironmentError),
-      );
-      const incompatible = orchestrationProtocolCompatibilityError(current);
-      if (incompatible) return yield* incompatible;
-      if (current.environmentId !== environmentId)
-        return yield* environmentMismatchError({
-          expected: environmentId,
-          actual: current.environmentId,
-        });
-      return yield* environment.bearer
-        .use((token) =>
-          Effect.gen(function* () {
-            const socketUrl = yield* resolveRemoteWebSocketConnectionUrl({
-              httpBaseUrl,
-              wsBaseUrl: target.wsBaseUrl,
-              bearerToken: token,
-              clientMetadata: { label: "T3 Code TUI", deviceType: "bot", surface: "cli" },
-              connectionMethod: "direct",
-            }).pipe(Effect.mapError(mapRemoteEnvironmentError));
-            return {
-              environmentId,
-              label: current.label,
-              httpBaseUrl,
-              socketUrl: appendOrchestrationProtocol(socketUrl),
-              httpAuthorization: { _tag: "Bearer" as const, token },
-              target,
-            };
-          }),
-        )
-        .pipe(
-          Effect.catchTags({
-            TuiBearerSessionClearedError: () =>
-              Effect.fail(
-                new ConnectionBlockedError({
-                  reason: "authentication",
-                  detail:
-                    "The saved credential is unavailable. Pair again through the command line.",
-                }),
-              ),
-          }),
+  const connections = Connection.layerWithResolver(
+    {
+      prepareForUpdate: unsupported,
+      prepare: Effect.fn("tui.client.prepare")(function* (entry) {
+        if (entry.target.environmentId !== environmentId)
+          return yield* environmentMismatchError({
+            expected: environmentId,
+            actual: entry.target.environmentId,
+          });
+        const current = yield* fetchRemoteEnvironmentDescriptor({ httpBaseUrl }).pipe(
+          Effect.mapError(mapRemoteEnvironmentError),
         );
-    }, Effect.provide(http)),
-  });
+        const incompatible = tuiProtocolCompatibilityError(current);
+        if (incompatible) return yield* incompatible;
+        if (tuiProtocolVersion(current) !== protocolVersion)
+          return yield* new ConnectionBlockedError({
+            reason: "unsupported",
+            detail: "The server protocol changed. Restart the TUI to reconnect.",
+          });
+        if (current.environmentId !== environmentId)
+          return yield* environmentMismatchError({
+            expected: environmentId,
+            actual: current.environmentId,
+          });
+        return yield* environment.bearer
+          .use((token) =>
+            Effect.gen(function* () {
+              const socketUrl = yield* resolveRemoteWebSocketConnectionUrl({
+                httpBaseUrl,
+                wsBaseUrl: target.wsBaseUrl,
+                bearerToken: token,
+                clientMetadata: { label: "T3 Code TUI", deviceType: "bot", surface: "cli" },
+                connectionMethod: "direct",
+              }).pipe(Effect.mapError(mapRemoteEnvironmentError));
+              return {
+                environmentId,
+                label: current.label,
+                httpBaseUrl,
+                socketUrl: appendTuiProtocol(socketUrl, protocolVersion),
+                httpAuthorization: { _tag: "Bearer" as const, token },
+                target,
+              };
+            }),
+          )
+          .pipe(
+            Effect.catchTags({
+              TuiBearerSessionClearedError: () =>
+                Effect.fail(
+                  new ConnectionBlockedError({
+                    reason: "authentication",
+                    detail:
+                      "The saved credential is unavailable. Pair again through the command line.",
+                  }),
+                ),
+            }),
+          );
+      }, Effect.provide(http)),
+    },
+    protocolVersion === 1 ? { protocolClient: makeV1ProtocolClient } : {},
+  );
   const started = Layer.effectDiscard(
     Effect.gen(function* () {
       const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
@@ -298,9 +313,10 @@ export function createTuiClient(
   );
   const catalog = createEnvironmentCatalogAtoms(runtime);
   const shell = createEnvironmentShellAtoms(runtime);
-  const shellValue = Atom.make((get) =>
-    presentShellState(get(shell.stateValueAtom(environmentId))),
-  );
+  const legacy = protocolVersion === 1 ? createV1State(runtime, environmentId) : undefined;
+  const shellValue =
+    legacy?.shell ??
+    Atom.make((get) => presentShellState(get(shell.stateValueAtom(environmentId))));
   const sessions = createEnvironmentSessionAtoms(runtime);
   const server = createServerEnvironmentAtoms(runtime, {
     initialConfigValueAtom: sessions.initialConfigValueAtom,
@@ -320,8 +336,17 @@ export function createTuiClient(
   }).pipe(Atom.keepAlive);
   const threads = createEnvironmentThreadStateAtoms(runtime);
   const terminals = createTerminalEnvironmentAtoms(runtime);
-  const orchestration = createOrchestrationEnvironmentAtoms(runtime);
-  const archivedSnapshot = orchestration.archivedShellSnapshot({ environmentId, input: {} });
+  const v2Orchestration = createOrchestrationEnvironmentAtoms(runtime);
+  const orchestration = legacy?.orchestration ?? v2Orchestration;
+  const archivedSnapshot: Atom.Atom<AsyncResult.AsyncResult<readonly TuiThreadShell[], unknown>> =
+    legacy
+      ? Atom.map(
+          legacy.orchestration.archivedShellSnapshot({ environmentId, input: {} }),
+          (result) => AsyncResult.map(result, (snapshot) => snapshot.threads),
+        )
+      : Atom.map(v2Orchestration.archivedShellSnapshot({ environmentId, input: {} }), (result) =>
+          AsyncResult.map(result, (snapshot) => snapshot.threads.map(presentShell)),
+        );
   const archivedThreads = Atom.make((get) => {
     const result = get(archivedSnapshot);
     return {
@@ -330,7 +355,7 @@ export function createTuiClient(
         : AsyncResult.isSuccess(result)
           ? ("live" as const)
           : ("loading" as const),
-      threads: Option.getOrNull(AsyncResult.value(result))?.threads.map(presentShell) ?? [],
+      threads: Option.getOrNull(AsyncResult.value(result)) ?? [],
     };
   }).pipe(Atom.keepAlive);
   const emptyThreadSearch = Atom.make({
@@ -354,15 +379,17 @@ export function createTuiClient(
       };
     });
   });
-  const thread = Atom.family((threadId: ThreadId) =>
-    Atom.make((get) => {
-      const result = get(threads.stateAtom(environmentId, threadId));
-      const detail = AsyncResult.isFailure(result)
-        ? { ...EMPTY_ENVIRONMENT_THREAD_STATE, error: Option.some("Could not load this thread.") }
-        : Option.getOrElse(AsyncResult.value(result), () => EMPTY_ENVIRONMENT_THREAD_STATE);
-      return presentThreadState(detail);
-    }),
-  );
+  const thread =
+    legacy?.thread ??
+    Atom.family((threadId: ThreadId) =>
+      Atom.make((get) => {
+        const result = get(threads.stateAtom(environmentId, threadId));
+        const detail = AsyncResult.isFailure(result)
+          ? { ...EMPTY_ENVIRONMENT_THREAD_STATE, error: Option.some("Could not load this thread.") }
+          : Option.getOrElse(AsyncResult.value(result), () => EMPTY_ENVIRONMENT_THREAD_STATE);
+        return presentThreadState(detail);
+      }),
+    );
   const connection = Atom.make((get) => {
     const result = get(catalog.stateAtom(environmentId));
     return AsyncResult.isFailure(result)
@@ -371,7 +398,11 @@ export function createTuiClient(
   });
   const command = createEnvironmentCommand(runtime, {
     label: "tui.thread.command",
-    execute: (input: TuiCommand) => Effect.asVoid(executeTuiCommand(input)),
+    execute: (input: TuiCommand) =>
+      Effect.gen(function* () {
+        if (protocolVersion === 1) yield* executeV1Command(input);
+        else yield* executeTuiCommand(input);
+      }),
   });
   const loadHistory = createEnvironmentCommand(runtime, {
     label: "tui.load-history",
@@ -535,7 +566,9 @@ export function createTuiClient(
       AsyncResult.isSuccess(await command.run(registry, { environmentId, input })),
   });
   const refreshArchivedThreads = (registry: AtomRegistry.AtomRegistry) => {
-    registry.refresh(archivedSnapshot);
+    if (legacy)
+      registry.refresh(legacy.orchestration.archivedShellSnapshot({ environmentId, input: {} }));
+    else registry.refresh(v2Orchestration.archivedShellSnapshot({ environmentId, input: {} }));
   };
   const threadManagement = makeThreadManagementActions({
     dispatch: async (registry, input) =>
@@ -608,7 +641,7 @@ export function createTuiClient(
     refreshProvider: async (registry, threadId, models) => {
       const value = Option.getOrNull(registry.get(thread(threadId)).data);
       if (!value || registry.get(connection).phase !== "connected") return false;
-      const snapshot = Option.getOrNull(registry.get(shell.stateValueAtom(environmentId)).snapshot);
+      const snapshot = Option.getOrNull(registry.get(shellValue).snapshot);
       const cwd =
         value.worktreePath ??
         snapshot?.projects.find((project) => project.id === value.projectId)?.workspaceRoot;
@@ -630,6 +663,7 @@ export function createTuiClient(
       await catalog.retryNow.run(registry, environmentId);
     },
     loadOlder: (registry, threadId) => {
+      if (legacy) return legacy.loadOlder(registry, threadId);
       void loadHistory.run(registry, { environmentId, input: threadId });
       return true;
     },

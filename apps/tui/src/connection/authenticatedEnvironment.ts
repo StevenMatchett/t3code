@@ -1,9 +1,10 @@
+import { makeV1CommonClient } from "./v1/commonRpc.ts";
 import {
-  appendOrchestrationProtocol,
-  orchestrationProtocolCompatibilityError,
-} from "@t3tools/client-runtime/connection";
+  appendTuiProtocol,
+  tuiProtocolCompatibilityError,
+  tuiProtocolVersion,
+} from "./protocol.ts";
 import {
-  ORCHESTRATION_PROTOCOL_VERSION,
   AuthOrchestrationReadScope,
   AuthStandardClientScopes,
   type AuthSessionState,
@@ -206,7 +207,7 @@ export class TuiEnvironmentReattachError extends Schema.TaggedError<TuiEnvironme
       case "rejected":
         return "The saved T3 connection was rejected or is unavailable. Check the existing server and pair again if needed. No server was started or stopped.";
       case "protocol":
-        return `The running T3 server (${this.serverVersion ?? "unknown version"}) uses orchestration protocol ${this.serverProtocolVersion ?? 1}, but this TUI requires protocol ${ORCHESTRATION_PROTOCOL_VERSION}. Run a server build compatible with this checkout (see UPSTREAM_BASE), then reconnect. Re-pairing cannot fix a protocol mismatch. No server was started or stopped.`;
+        return `The running T3 server (${this.serverVersion ?? "unknown version"}) uses orchestration protocol ${this.serverProtocolVersion ?? 1}, but this TUI supports protocols 1 and 2. Run a server build compatible with this checkout (see UPSTREAM_BASE), then reconnect. Re-pairing cannot fix a protocol mismatch. No server was started or stopped.`;
       case "unsafe":
         return "The saved T3 credential has unsafe ownership or permissions. Repair the credential file before attaching. No server was started or stopped.";
     }
@@ -274,7 +275,7 @@ export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEn
       }),
       Effect.provide(httpClientLayer),
     );
-    if (orchestrationProtocolCompatibilityError(descriptor))
+    if (tuiProtocolCompatibilityError(descriptor))
       return yield* new TuiEnvironmentConnectionError({ phase: "protocol-validation" });
     return {
       descriptor,
@@ -286,11 +287,15 @@ export const waitForTuiEnvironmentReady = Effect.fn("tui.connection.waitForTuiEn
 
 const readServerConfig = Effect.fn("tui.connection.readServerConfig")(function* (input: {
   readonly socketUrl: string;
+  readonly protocolVersion: number;
   readonly webSocketConstructor: WebSocketConstructor;
 }) {
-  const socketLayer = Socket.layerWebSocket(appendOrchestrationProtocol(input.socketUrl), {
-    openTimeout: SOCKET_OPEN_TIMEOUT,
-  }).pipe(Layer.provide(Layer.succeed(Socket.WebSocketConstructor, input.webSocketConstructor)));
+  const socketLayer = Socket.layerWebSocket(
+    appendTuiProtocol(input.socketUrl, input.protocolVersion),
+    {
+      openTimeout: SOCKET_OPEN_TIMEOUT,
+    },
+  ).pipe(Layer.provide(Layer.succeed(Socket.WebSocketConstructor, input.webSocketConstructor)));
   const protocolLayer = Layer.effect(
     RpcClient.Protocol,
     RpcClient.makeProtocolSocket({
@@ -299,7 +304,9 @@ const readServerConfig = Effect.fn("tui.connection.readServerConfig")(function* 
     }),
   ).pipe(Layer.provide(Layer.mergeAll(socketLayer, RpcSerialization.layerJson)));
   const protocolContext = yield* Layer.build(protocolLayer);
-  const client = yield* makeWsRpcProtocolClient.pipe(Effect.provide(protocolContext));
+  const client = yield* (
+    input.protocolVersion === 1 ? makeV1CommonClient : makeWsRpcProtocolClient
+  ).pipe(Effect.provide(protocolContext));
   return yield* client[WS_METHODS.serverGetConfig]({});
 });
 
@@ -325,6 +332,7 @@ const connectTuiEnvironmentWithBearer = Effect.fn("tui.connection.connectTuiEnvi
     readonly bearer: TuiBearerSession;
     readonly httpBaseUrl: string;
     readonly expectedEnvironmentId: EnvironmentId;
+    readonly protocolVersion: number;
     readonly fetch: typeof globalThis.fetch;
     readonly webSocketConstructor: WebSocketConstructor;
     readonly timeoutMs: number;
@@ -363,6 +371,7 @@ const connectTuiEnvironmentWithBearer = Effect.fn("tui.connection.connectTuiEnvi
         );
       const config = yield* readServerConfig({
         socketUrl,
+        protocolVersion: options.protocolVersion,
         webSocketConstructor: options.webSocketConstructor,
       }).pipe(
         Effect.scoped,
@@ -424,6 +433,7 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
       bearer,
       httpBaseUrl,
       expectedEnvironmentId: options.readiness.descriptor.environmentId,
+      protocolVersion: tuiProtocolVersion(options.readiness.descriptor),
       fetch,
       webSocketConstructor: options.webSocketConstructor ?? nodeWebSocketConstructor,
       timeoutMs,
@@ -534,7 +544,7 @@ export const reattachAuthenticatedTuiEnvironment = Effect.fn(
     Effect.provide(layerRemoteHttpClient(fetch)),
     Effect.mapError(() => new TuiEnvironmentReattachError({ failure: "rejected" })),
   );
-  if (orchestrationProtocolCompatibilityError(descriptor))
+  if (tuiProtocolCompatibilityError(descriptor))
     return yield* new TuiEnvironmentReattachError({
       failure: "protocol",
       serverVersion: descriptor.serverVersion,
@@ -552,6 +562,7 @@ export const reattachAuthenticatedTuiEnvironment = Effect.fn(
     bearer,
     httpBaseUrl: stored.httpOrigin,
     expectedEnvironmentId: stored.environmentId,
+    protocolVersion: tuiProtocolVersion(descriptor),
     fetch,
     webSocketConstructor: options.webSocketConstructor ?? nodeWebSocketConstructor,
     timeoutMs,

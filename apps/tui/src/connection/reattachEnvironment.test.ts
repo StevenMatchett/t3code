@@ -86,6 +86,7 @@ function makeReattachFetch(options: {
   readonly requests: RecordedRequest[];
   readonly descriptorEnvironmentId?: EnvironmentId;
   readonly authenticated?: boolean;
+  readonly protocolVersion?: number | null;
 }): typeof globalThis.fetch {
   return async (input, init) => {
     const request = new Request(input, init);
@@ -99,6 +100,8 @@ function makeReattachFetch(options: {
         return jsonResponse({
           ...SERVER_CONFIG.environment,
           environmentId: options.descriptorEnvironmentId ?? ENVIRONMENT_ID,
+          orchestrationProtocolVersion:
+            options.protocolVersion === null ? undefined : (options.protocolVersion ?? 2),
         });
       case "/api/auth/session":
         return options.authenticated === false
@@ -218,7 +221,7 @@ const prepareStore = Effect.fn(function* () {
 });
 
 describe("authenticated TUI environment reattachment", () => {
-  it.effect.each([undefined, 1, ORCHESTRATION_PROTOCOL_VERSION + 1])(
+  it.effect.each([0, ORCHESTRATION_PROTOCOL_VERSION + 1])(
     "explains incompatible protocol %s before using saved credentials",
     (protocol) =>
       Effect.gen(function* () {
@@ -241,7 +244,7 @@ describe("authenticated TUI environment reattachment", () => {
         );
         assert.equal(error.failure, "protocol");
         assert.include(error.message, "0.0.45");
-        assert.include(error.message, `requires protocol ${ORCHESTRATION_PROTOCOL_VERSION}`);
+        assert.include(error.message, "supports protocols 1 and 2");
         assert.include(error.message, "Re-pairing cannot fix");
         assert.deepEqual(requests, ["/.well-known/t3/environment"]);
         assert.equal((yield* store.read()).bearerToken, BEARER);
@@ -335,41 +338,47 @@ describe("authenticated TUI environment reattachment", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("reattaches with the saved bearer and never calls the OAuth exchange", () =>
-    Effect.gen(function* () {
-      const store = yield* prepareStore();
-      const requests: RecordedRequest[] = [];
-      const sockets: TestWebSocket[] = [];
+  it.effect.each([null, 1, 2])(
+    "reattaches to protocol %s with the saved bearer without exchanging it",
+    (protocolVersion) =>
+      Effect.gen(function* () {
+        const store = yield* prepareStore();
+        const requests: RecordedRequest[] = [];
+        const sockets: TestWebSocket[] = [];
 
-      const connected = yield* reattachAuthenticatedTuiEnvironment({
-        credentialStore: store,
-        expectedHttpBaseUrl: `${HTTP_ORIGIN}/ignored-path?ignored=yes`,
-        expectedEnvironmentId: ENVIRONMENT_ID,
-        fetch: makeReattachFetch({ requests }),
-        webSocketConstructor: makeTestWebSocketConstructor(sockets),
-      });
+        const connected = yield* reattachAuthenticatedTuiEnvironment({
+          credentialStore: store,
+          expectedHttpBaseUrl: `${HTTP_ORIGIN}/ignored-path?ignored=yes`,
+          expectedEnvironmentId: ENVIRONMENT_ID,
+          fetch: makeReattachFetch({ requests, protocolVersion }),
+          webSocketConstructor: makeTestWebSocketConstructor(sockets),
+        });
 
-      assert.isFalse(REATTACH_CAN_START_CHILD);
-      assert.equal(connected.readiness.httpBaseUrl, HTTP_ORIGIN);
-      assert.equal(connected.readiness.descriptor.environmentId, ENVIRONMENT_ID);
-      assert.deepEqual(connected.config, SERVER_CONFIG);
-      assert.deepEqual(
-        requests.map((request) => new URL(request.url).pathname),
-        ["/.well-known/t3/environment", "/api/auth/session", "/api/auth/websocket-ticket"],
-      );
-      assert.isFalse(requests.some((request) => request.url.includes("/oauth/token")));
-      assert.equal(requests[0]?.authorization, null);
-      assert.equal(requests[1]?.authorization, `Bearer ${BEARER}`);
-      assert.equal(requests[2]?.authorization, `Bearer ${BEARER}`);
-      assert.equal(sockets.length, 1);
-      const socketUrl = new URL(sockets[0]?.url ?? "");
-      assert.equal(socketUrl.origin, "ws://127.0.0.1:43220");
-      assert.equal(socketUrl.host, new URL(requests[0]?.url ?? "").host);
-      assert.equal(socketUrl.host, new URL(requests[2]?.url ?? "").host);
-      assert.equal(socketUrl.searchParams.get("wsTicket"), "reattach-websocket-ticket");
-      assert.notInclude(JSON.stringify(connected), BEARER);
-      connected.bearer.clear();
-    }),
+        assert.isFalse(REATTACH_CAN_START_CHILD);
+        assert.equal(connected.readiness.httpBaseUrl, HTTP_ORIGIN);
+        assert.equal(connected.readiness.descriptor.environmentId, ENVIRONMENT_ID);
+        assert.deepEqual(connected.config, SERVER_CONFIG);
+        assert.deepEqual(
+          requests.map((request) => new URL(request.url).pathname),
+          ["/.well-known/t3/environment", "/api/auth/session", "/api/auth/websocket-ticket"],
+        );
+        assert.isFalse(requests.some((request) => request.url.includes("/oauth/token")));
+        assert.equal(requests[0]?.authorization, null);
+        assert.equal(requests[1]?.authorization, `Bearer ${BEARER}`);
+        assert.equal(requests[2]?.authorization, `Bearer ${BEARER}`);
+        assert.equal(sockets.length, 1);
+        const socketUrl = new URL(sockets[0]?.url ?? "");
+        assert.equal(socketUrl.origin, "ws://127.0.0.1:43220");
+        assert.equal(socketUrl.host, new URL(requests[0]?.url ?? "").host);
+        assert.equal(socketUrl.host, new URL(requests[2]?.url ?? "").host);
+        assert.equal(socketUrl.searchParams.get("wsTicket"), "reattach-websocket-ticket");
+        assert.equal(
+          socketUrl.searchParams.get("orchestrationProtocol"),
+          String(protocolVersion ?? 1),
+        );
+        assert.notInclude(JSON.stringify(connected), BEARER);
+        connected.bearer.clear();
+      }),
   );
 
   it.effect("rejects a caller endpoint mismatch before making a request", () =>

@@ -56,6 +56,8 @@ export interface RpcSession {
 }
 
 export interface RpcSessionOptions {
+  /** Allows a client to add compatibility RPCs on the same transport. */
+  readonly protocolClient?: typeof makeWsRpcProtocolClient;
   readonly environmentThemes?: boolean;
   readonly usageLimitSources?: boolean;
   /** This client answers /usage-limits itself, so the server may advertise it. */
@@ -216,7 +218,9 @@ export const make = Effect.fn("RpcSessionFactory.make")(function* (
     const protocolContext = yield* Layer.build(layerProtocol).pipe(
       Effect.withSpan("environment.websocket.connect"),
     );
-    const protocolClient = yield* makeWsRpcProtocolClient.pipe(Effect.provide(protocolContext));
+    const protocolClient = yield* (options.protocolClient ?? makeWsRpcProtocolClient).pipe(
+      Effect.provide(protocolContext),
+    );
     const initialConfigDeferred = yield* Deferred.make<ServerConfig>();
     const serverConfigExit = yield* Deferred.make<void, ServerConfigSubscriptionError>();
     const configSubscriptionClosed = yield* Deferred.make<never, ConnectionAttemptError>();

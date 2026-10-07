@@ -82,11 +82,11 @@ Alternatively, with Node.js and npm installed, start the T3 Code server and web 
 npx t3@latest
 ```
 
-This checkout requires the orchestration V2 server protocol from the upstream revision in
-[UPSTREAM_BASE](./UPSTREAM_BASE). Stable 0.0.45 and earlier still use V1 and cannot
-connect to this TUI. Use a V2-compatible nightly or a server built from the recorded
-revision. Updating files on disk does not update an already-running server; restart
-the desktop app when active work is finished. Re-pairing does not resolve a protocol mismatch.
+The TUI automatically selects the server's connection protocol. It supports both V1
+(including stable 0.0.45) and V2 (newer nightlies and the revision in
+[UPSTREAM_BASE](./UPSTREAM_BASE)). Existing saved connections and pairing work with
+both. If an app update changes the protocol while the TUI is open, restart the TUI
+so it can select the new protocol.
 
 Keep the desktop app or server running while using the TUI. The TUI shares its projects, threads,
 and agents; it does not copy the database or start a second server against that data.
