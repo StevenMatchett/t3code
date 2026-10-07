@@ -88,6 +88,36 @@ describe("composer prompt history", () => {
     expect(draft()).toBe("Unsent draft");
   });
 
+  it.each(["single line", "first line\nlast line", "wrapped words ".repeat(30).trim()])(
+    "moves Down to the end of the last visual line before recalling history: %s",
+    async (prompt) => {
+      const { driver, draft, editor } = await setup([prompt]);
+      await driver.input.pressKey("ARROW_UP");
+      await driver.input.pressKey("ARROW_LEFT");
+      expect(editor().cursorOffset).toBe(prompt.length - 1);
+      await driver.input.pressKey("ARROW_DOWN");
+      expect(editor().cursorOffset).toBe(prompt.length);
+      expect(draft()).toBe(prompt);
+      await driver.input.pressKey("ARROW_DOWN");
+      expect(draft()).toBe("");
+    },
+  );
+
+  it("keeps Down moving between visual lines in a typed draft", async () => {
+    const { driver, draft, editor } = await setup();
+    await driver.input.typeText("first line");
+    await driver.input.pressKey("RETURN", { shift: true });
+    await driver.input.typeText("longer last line");
+    await act(async () => {
+      editor().cursorOffset = 2;
+    });
+    await driver.input.pressKey("ARROW_DOWN");
+    expect(editor().cursorOffset).toBe(13);
+    await driver.input.pressKey("ARROW_DOWN");
+    expect(editor().cursorOffset).toBe(draft().length);
+    expect(draft()).toBe("first line\nlonger last line");
+  });
+
   it("keeps an edited recall as a draft", async () => {
     const { driver, draft } = await setup();
     await driver.input.pressKey("ARROW_UP");

@@ -88,7 +88,7 @@ export function PromptEditor({
       const row = current.scrollY + current.visualCursor.visualRow;
       return direction === "backward"
         ? row === 0
-        : row === current.editorView.getTotalVirtualLineCount() - 1;
+        : cursorInText(current) === current.plainText.length;
     },
   }));
   useEffect(() => {
@@ -127,6 +127,23 @@ export function PromptEditor({
         ]}
         onMouseDown={() => onActivate?.()}
         onKeyDown={(key) => {
+          const current = editor.current;
+          if (
+            key.name === "down" &&
+            !key.shift &&
+            !key.ctrl &&
+            !key.meta &&
+            !key.option &&
+            current &&
+            !current.hasSelection() &&
+            current.scrollY + current.visualCursor.visualRow ===
+              current.editorView.getTotalVirtualLineCount() - 1
+          ) {
+            key.preventDefault();
+            key.stopPropagation();
+            current.gotoBufferEnd();
+            return;
+          }
           if (key.repeated && (key.name === "return" || key.name === "enter")) {
             key.preventDefault();
             key.stopPropagation();
