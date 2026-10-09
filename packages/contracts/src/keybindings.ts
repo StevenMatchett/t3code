@@ -199,8 +199,12 @@ export type ResolvedKeybindingRule = typeof ResolvedKeybindingRule.Type;
  * rejecting the config would take down the connection over a shortcut the
  * client couldn't dispatch anyway.
  */
-export const ResolvedKeybindingsConfig = ForwardCompatibleArray(ResolvedKeybindingRule).check(
-  Schema.isMaxLength(MAX_KEYBINDINGS_COUNT),
+export const ResolvedKeybindingsConfig = Schema.Array(Schema.Unknown).pipe(
+  // RPC Exit codecs validate the encoded shape before running decoding fallbacks.
+  // Leave wire entries open so unknown commands reach ForwardCompatibleArray.
+  Schema.decodeTo(
+    ForwardCompatibleArray(ResolvedKeybindingRule).check(Schema.isMaxLength(MAX_KEYBINDINGS_COUNT)),
+  ),
 );
 export type ResolvedKeybindingsConfig = typeof ResolvedKeybindingsConfig.Type;
 
