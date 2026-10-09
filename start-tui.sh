@@ -84,8 +84,12 @@ fi
 
 if [[ "$link_and_pair" == true ]]; then
   t3_home="${T3CODE_HOME:-$HOME/.t3}"
-  npx --yes t3@latest connect link --base-dir "$t3_home"
-  pair_url="$(npx --yes t3@latest pair --base-dir "$t3_home" --label 'T3 TUI' \
+  t3_cli=(npx --yes t3@latest)
+  if [[ -x "$t3_home/bin/t3" ]]; then
+    t3_cli=("$t3_home/bin/t3")
+  fi
+  "${t3_cli[@]}" connect link --base-dir "$t3_home"
+  pair_url="$("${t3_cli[@]}" pair --base-dir "$t3_home" --label 'T3 TUI' \
     | sed -n 's/^Pairing URL: //p')"
   if [[ ! "$pair_url" =~ ^(https?://[^/]+)/pair#[^[:space:]]+$ ]]; then
     printf '%s\n' 'Could not read a direct pairing URL from t3 pair.' >&2

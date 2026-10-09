@@ -138,7 +138,7 @@ describe("new thread form", () => {
       await driver.input.pressKey("RETURN");
       expect(fixture.worktreeRequests).toHaveLength(1);
       expect(fixture.worktreeRequests[0]).toMatchObject({
-        refName: "HEAD",
+        refName: "main",
         cwd: "/workspace/alpha",
       });
       expect(fixture.creationCommands[0]!.worktreePath).toContain("/worktrees/");

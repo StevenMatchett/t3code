@@ -6,7 +6,6 @@ import {
 } from "./protocol.ts";
 import {
   AuthOrchestrationReadScope,
-  AuthStandardClientScopes,
   type AuthSessionState,
   type EnvironmentId,
   type ExecutionEnvironmentDescriptor,
@@ -413,7 +412,8 @@ export const connectAuthenticatedTuiEnvironment = Effect.fn(
         bootstrapRemoteBearerSession({
           httpBaseUrl,
           credential,
-          scopes: AuthStandardClientScopes,
+          // Keep the permissions granted by pairing; older client scope lists
+          // would discard permissions added by a newer server.
           clientMetadata: {
             label: "T3 Code TUI",
             deviceType: "bot",

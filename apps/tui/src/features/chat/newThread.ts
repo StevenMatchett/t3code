@@ -116,7 +116,7 @@ export function makeNewThreadActions(options: {
           !provider.models.some((model) => model.slug === actual.modelSelection.model)
         )
           return fail("Choose an available provider model before creating a thread.");
-        const baseRef = actual.baseRef.trim() || "HEAD";
+        const baseRef = actual.baseRef.trim() || "main";
         if (
           actual.mode === "worktree" &&
           (baseRef.startsWith("-") || baseRef.includes("\0") || /[\r\n]/u.test(baseRef))

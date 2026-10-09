@@ -245,7 +245,7 @@ describe("authenticated TUI environment connection", () => {
         waitForTuiEnvironmentReady({
           httpBaseUrl: "http://127.0.0.1:43220",
           fetch: async () =>
-            Response.json({ ...SERVER_CONFIG.environment, orchestrationProtocolVersion: 1 }),
+            Response.json({ ...SERVER_CONFIG.environment, orchestrationProtocolVersion: 3 }),
           maxAttempts: 1,
         }),
       );
@@ -300,7 +300,7 @@ describe("authenticated TUI environment connection", () => {
       assert.equal(tokenPayload.get("subject_token"), bootstrapToken);
       assert.equal(tokenPayload.get("subject_token_type"), AuthEnvironmentBootstrapTokenType);
       assert.equal(tokenPayload.get("requested_token_type"), AuthAccessTokenType);
-      assert.equal(tokenPayload.get("scope"), AuthStandardClientScopes.join(" "));
+      assert.isFalse(tokenPayload.has("scope"));
       assert.equal(tokenPayload.get("client_label"), "T3 Code TUI");
 
       assert.equal(requests[2]?.authorization, "Bearer bearer-test-token");
