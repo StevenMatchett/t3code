@@ -11,6 +11,7 @@ import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import { useMemo, useContext, useEffect, useState, useCallback, useRef } from "react";
+import { sortSidebarThreads } from "../app/threadOrder.ts";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { AppShellView, useAppShellState } from "../app/AppShell.tsx";
 import {
@@ -153,10 +154,10 @@ export function AppShell({
       projects: [...(snapshot?.projects ?? [])].sort(
         (a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id),
       ),
-      threads: [
+      threads: sortSidebarThreads([
         ...(snapshot?.threads ?? []).filter((thread) => thread.archivedAt === null),
         ...archived.threads,
-      ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)),
+      ]),
     }),
     [snapshot, archived.threads],
   );

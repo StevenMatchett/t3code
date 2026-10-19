@@ -201,6 +201,35 @@ describeWithNativeFfi("connected AppShell", () => {
       expect(driver.captureFrame()).toContain("MESSAGE");
     },
   );
+  it("keeps old threads in place on metadata updates and moves them on new messages", async () => {
+    const { driver, fixture } = await renderShell({ width: 120, height: 32 });
+    const update = async (messageAt: string | null) => {
+      await act(async () =>
+        driver.registry.update(fixture.shell, (value) => ({
+          ...value,
+          snapshot: Option.map(value.snapshot, (snapshot) => ({
+            ...snapshot,
+            threads: snapshot.threads.map((thread) => ({
+              ...thread,
+              latestUserMessageAt:
+                thread.id === "thread-2" ? messageAt : "2026-02-01T00:00:00.000Z",
+              updatedAt: thread.id === "thread-2" ? "2026-03-01T00:00:00.000Z" : thread.updatedAt,
+            })),
+          })),
+        })),
+      );
+      await driver.flush();
+    };
+    const rowY = (id: string) =>
+      driver.renderer.root.findDescendantById("navigation-" + id)!.screenY;
+    await update("2026-01-02T00:00:00.000Z");
+    await driver.input.pressKey("b", { ctrl: true });
+    expect(rowY("thread-2")).toBeGreaterThan(rowY("thread-0"));
+    await update(null);
+    expect(rowY("thread-2")).toBeGreaterThan(rowY("thread-0"));
+    await update("2026-03-02T00:00:00.000Z");
+    expect(rowY("thread-2")).toBeLessThan(rowY("thread-0"));
+  });
   it("toggles the recent sidebar, orders across projects, and opens threads with their project context", async () => {
     const { driver, fixture } = await renderShell({ width: 120, height: 32, kittyKeyboard: true });
     await act(async () =>
@@ -210,7 +239,8 @@ describeWithNativeFfi("connected AppShell", () => {
           ...snapshot,
           threads: snapshot.threads.map((thread) => ({
             ...thread,
-            updatedAt: thread.id === "thread-2" ? "2026-02-01T00:00:00.000Z" : thread.updatedAt,
+            latestUserMessageAt:
+              thread.id === "thread-2" ? "2026-02-01T00:00:00.000Z" : thread.latestUserMessageAt,
           })),
         })),
       })),
