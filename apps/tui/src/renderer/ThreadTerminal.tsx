@@ -233,29 +233,32 @@ export function ThreadTerminal({
         </Text>
       </Stack>
       <Stack flexGrow={1} width="100%" overflow="hidden">
-        <EmbeddedTerminalSurface
-          key={terminalId}
-          id={`thread-terminal-${terminalId}`}
-          output={terminal.output}
-          focused={focused}
-          onReleaseFocus={() => setFocused(false)}
-          onWrite={async (data) => {
-            const result = await terminals.write.run(registry, {
-              environmentId,
-              input: { threadId, terminalId, data },
-            });
-            if (!AsyncResult.isSuccess(result)) setError("Could not write to this shell.");
-          }}
-          onResize={async ({ cols, rows }) => {
-            const result = await terminals.resize.run(registry, {
-              environmentId,
-              input: { threadId, terminalId, cols, rows },
-            });
-            if (!AsyncResult.isSuccess(result)) setError("Could not resize this shell.");
-          }}
-          onCopy={(text) => renderer.copyToClipboardOSC52(text)}
-          onError={() => setError("The shell connection failed.")}
-        />
+        {/* The server ignores resizes until attach has created the shell. */}
+        {terminal.status === "running" && (
+          <EmbeddedTerminalSurface
+            key={terminalId}
+            id={`thread-terminal-${terminalId}`}
+            output={terminal.output}
+            focused={focused}
+            onReleaseFocus={() => setFocused(false)}
+            onWrite={async (data) => {
+              const result = await terminals.write.run(registry, {
+                environmentId,
+                input: { threadId, terminalId, data },
+              });
+              if (!AsyncResult.isSuccess(result)) setError("Could not write to this shell.");
+            }}
+            onResize={async ({ cols, rows }) => {
+              const result = await terminals.resize.run(registry, {
+                environmentId,
+                input: { threadId, terminalId, cols, rows },
+              });
+              if (!AsyncResult.isSuccess(result)) setError("Could not resize this shell.");
+            }}
+            onCopy={(text) => renderer.copyToClipboardOSC52(text)}
+            onError={() => setError("The shell connection failed.")}
+          />
+        )}
       </Stack>
     </Stack>
   );
