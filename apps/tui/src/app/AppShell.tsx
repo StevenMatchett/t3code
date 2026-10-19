@@ -210,7 +210,7 @@ function Help() {
       <Text tone="accent">CONVERSATION</Text>
       <Text>Enter / i Write prompt Esc Return to history</Text>
       <Text>Enter Send Shift+Enter New line</Text>
-      <Text>Ctrl+P Show/hide pasted text; click the message toggle to preview it</Text>
+      <Text>Ctrl+P Show/hide pasted text; Ctrl+O Insert pasted text into the prompt to edit</Text>
       <Text>Ctrl+R Toggle rendered Markdown / raw source in output</Text>
       <Text>Up in an empty message recalls prompts; Down moves forward</Text>
       <Text>Click model/reasoning or Tab then Enter</Text>

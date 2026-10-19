@@ -176,6 +176,10 @@ export function Conversation({
     setAnchor(null);
     setMode("composer");
   };
+  const togglePastes = () => {
+    if (!showPastes) activateComposer();
+    setShowPastes((value) => !value);
+  };
   const activateAgents = (returnMode: "history" | "composer") => {
     setAgentReturnMode(returnMode);
     setAgentCursor(-1);
@@ -547,7 +551,7 @@ export function Conversation({
     ) {
       key.preventDefault();
       key.stopPropagation();
-      if (!key.repeated) setShowPastes((value) => !value);
+      if (!key.repeated) togglePastes();
       return;
     }
     if (search && !terminalOpen && !selectedAgent && mode === "history") {
@@ -990,7 +994,7 @@ export function Conversation({
         editorHeight={editorHeight}
         showPastes={showPastes}
         pastePreviewHeight={pastePreviewHeight}
-        onTogglePastes={() => setShowPastes((value) => !value)}
+        onTogglePastes={togglePastes}
         suggestedReplies={suggestedReplies}
         availableHeight={height - 1}
         onActivate={() => {

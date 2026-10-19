@@ -334,6 +334,37 @@ describe("thread interactions", () => {
     }
   });
 
+  it("expands multiple equal-length pastes in place and sends subsequent edits only once", async () => {
+    const commands: TuiThreadCommand[] = [];
+    const f = fixture(async (command) => {
+      commands.push(command);
+      return true;
+    });
+    const first = "a".repeat(201);
+    const second = "b".repeat(201);
+    try {
+      f.actions.setDraft(f.registry, f.id, "before ");
+      f.actions.addPaste(f.registry, f.id, first);
+      f.actions.setDraft(
+        f.registry,
+        f.id,
+        f.registry.get(f.actions.state(f.id)).draft + " between ",
+      );
+      f.actions.addPaste(f.registry, f.id, second);
+      f.actions.setDraft(f.registry, f.id, f.registry.get(f.actions.state(f.id)).draft + " after");
+      const expanded = `before ${first} between ${second} after`;
+      expect(f.actions.editPastes(f.registry, f.id)).toBe(expanded);
+      expect(f.registry.get(f.actions.state(f.id)).pastes).toEqual([]);
+      expect(f.actions.editPastes(f.registry, f.id)).toBe(expanded);
+      const edited = expanded.replace(first, "corrected");
+      f.actions.setDraft(f.registry, f.id, edited);
+      expect(await f.actions.send(f.registry, f.id)).toBe(true);
+      expect(commands[0]).toMatchObject({ message: { text: edited } });
+    } finally {
+      f.registry.dispose();
+    }
+  });
+
   it("accepts the authoritative message after a lost reply without submitting it again", async () => {
     const f = fixture(async () => false);
     try {

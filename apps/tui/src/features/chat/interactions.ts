@@ -681,6 +681,12 @@ export function makeThreadInteractions(options: {
         skill: skill && draft.startsWith(skill.prefix) ? skill : null,
       });
     },
+    editPastes: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => {
+      const current = registry.get(state(threadId));
+      const draft = expandPastes(current.draft, current.pastes);
+      update(registry, threadId, { draft, pastes: [] });
+      return draft;
+    },
     addPaste: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId, text: string) => {
       const characters = Array.from(text).length;
       if (characters <= 200) return false;

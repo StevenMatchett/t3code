@@ -1,5 +1,6 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useKeyboard } from "@opentui/react";
+import type { ScrollBoxRenderable } from "@opentui/core";
 import type { ModelSelection, ThreadId } from "@t3tools/contracts";
 import { formatProviderSkillDisplayName } from "@t3tools/client-runtime/providerSkills";
 import { getProviderOptionDescriptors, getProviderOptionCurrentLabel } from "@t3tools/shared/model";
@@ -90,6 +91,7 @@ export function ComposerControls({
   const selectedBackground = useThemeColor("selection");
   const [savedComposer] = useState(() => client.session?.composer(threadId));
   const editor = useRef<PromptEditorControl | null>(null);
+  const pastePreview = useRef<ScrollBoxRenderable | null>(null);
   const historyPosition = useRef<ComposerPromptHistoryPosition | null>(null);
   const recalling = useRef(false);
   const mounted = useRef(true);
@@ -185,6 +187,13 @@ export function ComposerControls({
     setDropdown(null);
     setDismissed(completionKey);
     setFocus(0);
+  };
+  const editPastes = () => {
+    onActivate();
+    close();
+    onDraftChange?.();
+    const draft = client.actions.editPastes(registry, threadId);
+    editor.current?.replace(draft, draft.length);
   };
   const chooseSuggestedReply = (index: number) => {
     const reply = suggestedReplies[index];
@@ -363,6 +372,19 @@ export function ComposerControls({
   };
   useKeyboard((key) => {
     if (!active || !focused) return;
+    if (
+      key.ctrl &&
+      key.name === "o" &&
+      !key.meta &&
+      !key.option &&
+      !menu &&
+      interaction.pastes.length
+    ) {
+      key.preventDefault();
+      key.stopPropagation();
+      if (!key.repeated) editPastes();
+      return;
+    }
     if (key.ctrl && key.name === "backspace" && interaction.attachments.length > 0) {
       const attachment = interaction.attachments.at(-1)!;
       client.actions.removeAttachment(registry, threadId, attachment.id!);
@@ -371,6 +393,12 @@ export function ComposerControls({
       return;
     }
     if (key.ctrl || key.meta || key.option) return;
+    if (showPastes && !menu && (key.name === "pageup" || key.name === "pagedown")) {
+      key.preventDefault();
+      key.stopPropagation();
+      pastePreview.current?.scrollBy(key.name === "pageup" ? -1 : 1, "viewport");
+      return;
+    }
     if (
       !menu &&
       focus === 0 &&
@@ -470,27 +498,43 @@ export function ComposerControls({
       >
         {interaction.pastes.length && onTogglePastes ? (
           <Stack height={pastePreviewHeight} flexShrink={0} flexDirection="column">
-            <Text
-              id="paste-visibility-toggle"
-              tone="accent"
-              height={1}
-              onMouseDown={(event) => {
-                if (!active || event.button !== 0) return;
-                event.preventDefault();
-                event.stopPropagation();
-                onTogglePastes();
-              }}
-            >
-              {`[Ctrl+P ${showPastes ? "Hide" : "Show"} pasted text]`}
-            </Text>
+            <Stack height={1} flexDirection="row" gap={1}>
+              <Text
+                id="paste-visibility-toggle"
+                tone="accent"
+                height={1}
+                onMouseDown={(event) => {
+                  if (!active || event.button !== 0) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onTogglePastes();
+                }}
+              >
+                {`[Ctrl+P ${showPastes ? "Hide" : "Show"} pasted text]`}
+              </Text>
+              <Text
+                id="paste-edit"
+                tone="accent"
+                onMouseDown={(event) => {
+                  if (!active || event.button !== 0) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  editPastes();
+                }}
+              >
+                [Ctrl+O Edit pasted text]
+              </Text>
+              {showPastes ? <Text tone="muted">PgUp/PgDn Scroll</Text> : null}
+            </Stack>
             {showPastes ? (
               <scrollbox
+                ref={pastePreview}
                 id="pasted-text-preview"
                 height={pastePreviewHeight - 1}
                 width="100%"
                 scrollX={false}
               >
-                <Text selectable wrapMode="word">
+                <Text selectable wrapMode="word" flexShrink={0}>
                   {pastedText}
                 </Text>
               </scrollbox>

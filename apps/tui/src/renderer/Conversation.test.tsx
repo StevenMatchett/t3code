@@ -483,6 +483,49 @@ describe("conversation interaction", () => {
     },
   );
 
+  it.each([false, true])(
+    "expands pasted text into an editable prompt with Ctrl+O (kitty=%s)",
+    async (kitty) => {
+      const { driver, fixture, id } = await setup(kitty);
+      const paste = "Dictated words 📝\n".repeat(15);
+      await driver.input.pressKey("RETURN");
+      await driver.input.typeText("Before: ");
+      await driver.input.paste(paste);
+      await driver.input.typeText(" after");
+      await driver.input.pressKey("p", { ctrl: true });
+      expect(fixture.commands).toEqual([]);
+      expect(driver.registry.get(fixture.client.actions.state(id)).pastes).toHaveLength(1);
+      await driver.input.pressKey("o", { ctrl: true });
+      expect(driver.registry.get(fixture.client.actions.state(id))).toMatchObject({
+        draft: `Before: ${paste} after`,
+        pastes: [],
+      });
+      expect(driver.renderer.root.findDescendantById("pasted-text-preview")).toBeUndefined();
+      // Remove the suffix and edit the end of the expanded paste itself.
+      for (let i = 0; i < 7; i++) await driver.input.pressKey("BACKSPACE");
+      await driver.input.typeText(" corrected");
+      await driver.input.pressKey("RETURN");
+      expect(fixture.commands[0]).toMatchObject({
+        type: "thread.turn.start",
+        message: { text: `Before: ${paste.slice(0, -1)} corrected` },
+      });
+    },
+  );
+
+  it("inserts a collapsed paste for editing by clicking its control", async () => {
+    const { driver, fixture, id } = await setup();
+    const paste = "Editable pasted words. ".repeat(12);
+    await driver.input.paste(paste);
+    await driver.input.pressKey("ESCAPE");
+    const edit = driver.renderer.root.findDescendantById("paste-edit")!;
+    await driver.mouse.click(edit.screenX + 2, edit.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    await driver.input.typeText("edited");
+    expect(driver.registry.get(fixture.client.actions.state(id))).toMatchObject({
+      draft: paste + "edited",
+      pastes: [],
+    });
+  });
+
   it("also toggles pasted text by clicking the visible control", async () => {
     const { driver } = await setup();
     await driver.input.paste("Pasted words are available in the preview. ".repeat(6));
@@ -498,6 +541,30 @@ describe("conversation interaction", () => {
     expect(driver.captureFrame()).toContain("Ctrl+P Show pasted text");
   });
 
+  it.each([false, true])(
+    "reads every line of a wrapped paste with Page Down and Page Up (kitty=%s)",
+    async (kitty) => {
+      const { driver, fixture, id } = await setup(kitty);
+      const paste =
+        Array.from(
+          { length: 30 },
+          (_, i) => `Dictated line ${i}: ${"words that wrap across the preview ".repeat(4)}`,
+        ).join("\n") + "\nEND OF PASTE";
+      await driver.input.paste(paste);
+      await driver.input.pressKey("ESCAPE");
+      await driver.input.pressKey("p", { ctrl: true });
+      const draft = driver.registry.get(fixture.client.actions.state(id));
+      expect(driver.captureFrame()).toContain("PgUp/PgDn Scroll");
+      expect(driver.captureFrame()).toContain("Dictated line 0:");
+      for (let i = 0; i < 30; i++) await driver.input.pressKey("\x1b[6~");
+      expect(driver.captureFrame()).toContain("END OF PASTE");
+      for (let i = 0; i < 30; i++) await driver.input.pressKey("\x1b[5~");
+      expect(driver.captureFrame()).toContain("Dictated line 0:");
+      expect(driver.registry.get(fixture.client.actions.state(id))).toBe(draft);
+      expect(fixture.commands).toEqual([]);
+    },
+  );
+
   it("allows scrolling to the end of a long paste while preserving it for sending", async () => {
     const { driver, fixture, id } = await setup();
     const paste = Array.from({ length: 20 }, (_, i) => `Dictated line ${i}`).join("\n");
@@ -509,8 +576,9 @@ describe("conversation interaction", () => {
     expect(driver.captureFrame()).toContain("Dictated line 0");
     await driver.mouse.scroll(preview.screenX + 1, preview.screenY + 1, "down", { delayMs: 0 });
     expect(preview.scrollTop).toBeGreaterThan(0);
-    await act(async () => preview.scrollTo(preview.scrollHeight));
-    await driver.flush();
+    for (let i = 0; i < 25; i++) {
+      await driver.mouse.scroll(preview.screenX + 1, preview.screenY + 1, "down", { delayMs: 0 });
+    }
     expect(driver.captureFrame()).toContain("Dictated line 19");
     expect(driver.registry.get(fixture.client.actions.state(id)).pastes[0]?.text).toBe(paste);
   });
