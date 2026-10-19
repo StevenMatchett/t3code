@@ -8,6 +8,7 @@ import { OrchestrationMessageContext } from "@t3tools/contracts";
 import { ProviderOptionSelections } from "@t3tools/contracts";
 import { RepositoryIdentity, ThreadEnvMode } from "@t3tools/contracts";
 import {
+  OrchestrationV2AppThreadLineage,
   RuntimeRequestId as ApprovalRequestId,
   CheckpointRef,
   ClientSurface,
@@ -698,6 +699,7 @@ export const ThreadPullRequestLink = Schema.Struct({
 export type ThreadPullRequestLink = typeof ThreadPullRequestLink.Type;
 
 export const OrchestrationThread = Schema.Struct({
+  lineage: Schema.optional(OrchestrationV2AppThreadLineage),
   id: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -781,6 +783,7 @@ export const OrchestrationProjectShell = Schema.Struct({
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 
 export const OrchestrationThreadShell = Schema.Struct({
+  lineage: Schema.optional(OrchestrationV2AppThreadLineage),
   id: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -1348,6 +1351,7 @@ export const ProjectDeletedPayload = Schema.Struct({
 });
 
 export const ThreadCreatedPayload = Schema.Struct({
+  lineage: Schema.optional(OrchestrationV2AppThreadLineage),
   threadId: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,

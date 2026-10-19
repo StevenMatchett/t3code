@@ -52,6 +52,7 @@ type PaletteEntry = CommandPaletteItem & {
     | { readonly type: "help" }
     | { readonly type: "toggle-sounds" }
     | { readonly type: "toggle-sidebar-view" }
+    | { readonly type: "toggle-subagents" }
     | { readonly type: "diff" }
     | { readonly type: "restore" }
     | { readonly type: "pull-request" }
@@ -262,6 +263,13 @@ export function AppShell({
         target: { type: "toggle-sidebar-view" },
       },
       {
+        id: "command:subagents",
+        label: state.showSubagents ? "Hide subagents in sidebar" : "Show subagents in sidebar",
+        detail: "Command · Ctrl+S",
+        keywords: "child threads visibility",
+        target: { type: "toggle-subagents" },
+      },
+      {
         id: "command:new-project",
         label: "New project",
         detail: "Command",
@@ -359,6 +367,7 @@ export function AppShell({
     selectedThread,
     state.projectId,
     state.sidebarView,
+    state.showSubagents,
     threadSearch.matches,
   ]);
   const toggleSounds = () => {
@@ -374,6 +383,9 @@ export function AppShell({
     switch (entry.target.type) {
       case "toggle-sounds":
         toggleSounds();
+        break;
+      case "toggle-subagents":
+        dispatch({ type: "toggle-subagents" });
         break;
       case "toggle-sidebar-view":
         dispatch({ type: "toggle-sidebar-view" });
@@ -420,6 +432,20 @@ export function AppShell({
       key.preventDefault();
       key.stopPropagation();
       toggleSounds();
+      return;
+    }
+    if (
+      key.ctrl &&
+      !key.meta &&
+      !key.option &&
+      !key.shift &&
+      key.name.toLowerCase() === "s" &&
+      !state.modal &&
+      !threadOverlay
+    ) {
+      key.preventDefault();
+      key.stopPropagation();
+      dispatch({ type: "toggle-subagents" });
       return;
     }
     if (key.ctrl && key.name === "b" && !state.modal && !threadOverlay) {

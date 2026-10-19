@@ -216,3 +216,46 @@ describe("shell coordination", () => {
     expect(shellCommandFromKey({ name: "2" })).toBeUndefined();
   });
 });
+
+describe("subagent sidebar visibility", () => {
+  const childRows: ShellRows = {
+    ...rows,
+    threads: [
+      rows.threads[0]!,
+      { ...rows.threads[1]!, lineage: { relationshipToParent: "subagent" } },
+      { ...rows.threads[2]!, lineage: { relationshipToParent: "fork" } },
+    ],
+  };
+  it.each(["projects", "recent", "archived"] as const)(
+    "skips subagents during %s navigation and allows toggling them",
+    (sidebarView) => {
+      const input = {
+        ...childRows,
+        threads: childRows.threads.map((thread) => ({
+          ...thread,
+          archivedAt: sidebarView === "archived" ? "2026-01-01T00:00:00Z" : null,
+        })),
+      };
+      const start = dispatchShellCommand(
+        { ...createInitialShellState("threads"), sidebarView },
+        { type: "reconcile" },
+        input,
+      );
+      const hidden = dispatchShellCommand(start, { type: "move", offset: 1, wrap: false }, input);
+      expect(hidden.threadId).toBe(sidebarView === "projects" ? t1 : t3);
+      const shown = dispatchShellCommand(start, { type: "toggle-subagents" }, input);
+      const child = dispatchShellCommand(shown, { type: "move", offset: 1, wrap: false }, input);
+      expect(child.threadId).toBe(t2);
+      expect(dispatchShellCommand(child, { type: "toggle-subagents" }, input).threadId).toBe(t1);
+    },
+  );
+  it("keeps a directly opened hidden child selected through updates until returning to the list", () => {
+    const opened = dispatchShellCommand(
+      createInitialShellState(),
+      { type: "open-thread", projectId: p1, threadId: t2 },
+      childRows,
+    );
+    expect(dispatchShellCommand(opened, { type: "reconcile" }, childRows)).toEqual(opened);
+    expect(dispatchShellCommand(opened, { type: "back" }, childRows).threadId).toBe(t1);
+  });
+});

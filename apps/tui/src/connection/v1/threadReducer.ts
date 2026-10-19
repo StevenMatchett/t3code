@@ -115,6 +115,7 @@ export function applyThreadDetailEvent(
         kind: "updated",
         thread: {
           id: event.payload.threadId,
+          lineage: event.payload.lineage,
           projectId: event.payload.projectId,
           title: event.payload.title,
           modelSelection: event.payload.modelSelection,

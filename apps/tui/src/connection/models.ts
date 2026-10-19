@@ -1,4 +1,5 @@
 import type {
+  OrchestrationV2AppThreadLineage,
   ChatAttachment,
   ModelSelection,
   RuntimeMode,
@@ -73,6 +74,7 @@ export interface TuiSession {
   readonly updatedAt: string;
 }
 interface ThreadMetadata {
+  readonly lineage?: OrchestrationV2AppThreadLineage | undefined;
   readonly id: ThreadId;
   readonly projectId: ProjectId;
   readonly title: string;

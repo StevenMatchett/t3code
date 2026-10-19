@@ -14,6 +14,7 @@ export function nextSidebarView(view: SidebarView = "projects", offset = 1): Sid
 
 export interface ShellState {
   readonly sidebarView?: SidebarView;
+  readonly showSubagents?: boolean;
   readonly route: ShellRoute;
   readonly projectId: ProjectId | null;
   readonly threadId: ThreadId | null;
@@ -26,10 +27,16 @@ export interface ShellRows {
     readonly id: ThreadId;
     readonly projectId: ProjectId;
     readonly archivedAt?: string | null;
+    readonly lineage?: { readonly relationshipToParent: "fork" | "subagent" | null } | undefined;
   }>;
 }
 
+export function isSidebarThreadVisible(thread: ShellRows["threads"][number], state: ShellState) {
+  return state.showSubagents || thread.lineage?.relationshipToParent !== "subagent";
+}
+
 export type ShellCommand =
+  | { readonly type: "toggle-subagents" }
   | { readonly type: "set-sidebar-view"; readonly view: SidebarView }
   | { readonly type: "toggle-sidebar-view" }
   | { readonly type: "move"; readonly offset: number; readonly wrap: boolean }
@@ -97,7 +104,10 @@ function reconcile(state: ShellState, rows: ShellRows): ShellState {
   rows = {
     ...rows,
     threads: rows.threads.filter(
-      (thread) => Boolean(thread.archivedAt) === (state.sidebarView === "archived"),
+      (thread) =>
+        Boolean(thread.archivedAt) === (state.sidebarView === "archived") &&
+        (isSidebarThreadVisible(thread, state) ||
+          (state.route === "conversation" && thread.id === state.threadId)),
     ),
   };
   if (state.sidebarView === "recent" || state.sidebarView === "archived") {
@@ -168,6 +178,8 @@ export function dispatchShellCommand(
       },
       rows,
     );
+  if (command.type === "toggle-subagents")
+    return reconcile({ ...state, showSubagents: !state.showSubagents }, rows);
   if (command.type === "reconcile") return state;
   if (command.type === "close-modal") return { ...state, modal: null };
   if (command.type === "new-project") return { ...state, modal: "new-project" };
@@ -215,7 +227,10 @@ export function dispatchShellCommand(
         state.sidebarView !== "projects" &&
         state.route === "threads")
       ? state
-      : { ...state, route: state.route === "conversation" ? "threads" : "projects" };
+      : reconcile(
+          { ...state, route: state.route === "conversation" ? "threads" : "projects" },
+          rows,
+        );
   if (command.type === "activate") {
     if (state.route === "projects" && state.projectId !== null)
       return { ...state, route: "threads" };
@@ -227,7 +242,9 @@ export function dispatchShellCommand(
   rows = {
     ...rows,
     threads: rows.threads.filter(
-      (thread) => Boolean(thread.archivedAt) === (state.sidebarView === "archived"),
+      (thread) =>
+        Boolean(thread.archivedAt) === (state.sidebarView === "archived") &&
+        isSidebarThreadVisible(thread, state),
     ),
   };
   const items =

@@ -19,6 +19,7 @@ import { calculateShellLayout } from "../ui/layout.ts";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { HotkeyBar, type HotkeyHint, type HotkeyState } from "../ui/HotkeyBar.tsx";
 import {
+  isSidebarThreadVisible,
   createInitialShellState,
   dispatchShellCommand,
   type ShellCommand,
@@ -205,6 +206,7 @@ function Help() {
       <Text>Left Projects Right Recent threads (sidebar)</Text>
       <Text>Esc Back R Reconnect</Text>
       <Text>Ctrl+B Cycle Projects / Recent / Archived sidebar</Text>
+      <Text>Ctrl+S Show/hide subagents in sidebar (hidden on launch)</Text>
       <Text>Ctrl+K Search conversation output, projects, threads, and commands</Text>
       <Text>Ctrl+G Toggle notification sounds</Text>
       <Text tone="accent">CONVERSATION</Text>
@@ -275,7 +277,9 @@ export function AppShellView({
   const projectThreads = threads.filter((item) => item.projectId === state.projectId);
   const selectedThread = projectThreads.find((item) => item.id === state.threadId);
   const browsingProjects = !recent && state.route === "projects";
-  const visibleThreads = recent ? threads : projectThreads;
+  const visibleThreads = (recent ? threads : projectThreads).filter((thread) =>
+    isSidebarThreadVisible(thread, state),
+  );
   const conversation = state.route === "conversation";
   const navigationHints: readonly HotkeyHint[] = browsingProjects
     ? [
@@ -283,6 +287,7 @@ export function AppShellView({
         { key: "Enter", label: "Open" },
         { key: "←/→", label: "View" },
         { key: "Ctrl+B", label: "Toggle view" },
+        { key: "Ctrl+S", label: state.showSubagents ? "Hide subagents" : "Show subagents" },
         { key: "P", label: "New project" },
         { key: "⇧A", label: "Archived" },
         { key: "Ctrl+K", label: "Search" },
@@ -294,6 +299,7 @@ export function AppShellView({
           { key: "Enter", label: "Manage / restore" },
           { key: "←/→", label: "View" },
           { key: "Ctrl+B", label: "Cycle view" },
+          { key: "Ctrl+S", label: state.showSubagents ? "Hide subagents" : "Show subagents" },
           { key: "R", label: "Refresh" },
         ]
       : [
@@ -301,6 +307,7 @@ export function AppShellView({
           { key: "Enter", label: "Open" },
           { key: "←/→", label: "View" },
           { key: "Ctrl+B", label: "Toggle view" },
+          { key: "Ctrl+S", label: state.showSubagents ? "Hide subagents" : "Show subagents" },
           { key: "N", label: "New thread" },
           { key: "M", label: "Manage" },
           { key: "D", label: "Diff" },
@@ -310,10 +317,10 @@ export function AppShellView({
           { key: "Esc", label: "Projects" },
         ];
   const title = recent
-    ? `${archived ? "Archived" : "Recent"} threads (${threads.length})`
+    ? `${archived ? "Archived" : "Recent"} threads (${visibleThreads.length})`
     : browsingProjects
       ? `Projects (${projects.length})`
-      : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
+      : `Threads (${visibleThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
   const priorities: Record<ThreadActivityPhase, number> = {
     idle: 0,
     completed: 1,

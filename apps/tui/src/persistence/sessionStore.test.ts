@@ -91,18 +91,22 @@ describe("TUI session persistence", () => {
     second.session.close();
     expect(open(path).session.conversation(first.id)?.renderMarkdown).toBe(true);
   });
-  it("remembers the archived sidebar view", () => {
+  it("remembers the sidebar view but resets subagent visibility on restart", () => {
     const path = directory();
     const first = open(path);
     first.session.saveShell({
       route: "threads",
       sidebarView: "archived",
+      showSubagents: true,
       projectId: null,
       threadId: null,
       modal: null,
     });
     first.session.close();
-    expect(open(path).session.shell?.sidebarView).toBe("archived");
+    expect(open(path).session.shell).toMatchObject({
+      sidebarView: "archived",
+    });
+    expect(open(path).session.shell?.showSubagents).toBeUndefined();
   });
   it("restores navigation, folded pastes and attachments in a fresh client", async () => {
     const path = directory();

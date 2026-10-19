@@ -57,6 +57,40 @@ const describeWithNativeFfi = runtime.process?.getBuiltinModule?.("node:ffi")
   : describe.skip;
 
 describeWithNativeFfi("connected AppShell", () => {
+  it("hides live subagents by default and toggles sidebar visibility with Ctrl+S", async () => {
+    const { driver, fixture } = await renderShell({ width: 120, height: 28 });
+    const current = driver.registry.get(fixture.shell);
+    const snapshot = Option.getOrThrow(current.snapshot);
+    await act(async () =>
+      driver.registry.set(fixture.shell, {
+        ...current,
+        snapshot: Option.some({
+          ...snapshot,
+          threads: snapshot.threads.map((thread, index) =>
+            index === 1
+              ? {
+                  ...thread,
+                  lineage: {
+                    parentThreadId: snapshot.threads[0]!.id,
+                    rootThreadId: snapshot.threads[0]!.id,
+                    relationshipToParent: "subagent" as const,
+                  },
+                }
+              : thread,
+          ),
+        }),
+      }),
+    );
+    await driver.input.pressKey("ARROW_RIGHT");
+    expect(driver.captureFrame()).toContain("Recent threads (2)");
+    expect(driver.renderer.root.findDescendantById("navigation-thread-1")).toBeFalsy();
+    await driver.input.pressKey("s", { ctrl: true });
+    expect(driver.captureFrame()).toContain("Recent threads (3)");
+    expect(driver.renderer.root.findDescendantById("navigation-thread-1")).toBeTruthy();
+    await driver.input.pressKey("s", { ctrl: true });
+    expect(driver.captureFrame()).toContain("Recent threads (2)");
+  });
+
   it("shows elapsed work time in the sidebar before and after turn projection", async () => {
     const { driver, fixture } = await renderShell({ width: 120, height: 28 });
     const startedAt = new Date(Date.now() - 65_000).toISOString();

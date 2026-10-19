@@ -2,10 +2,12 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 import { DEFAULT_SERVER_SETTINGS, ServerSettings } from "@t3tools/contracts";
 import { normalizeV1Config } from "./commonRpc.ts";
-import { OrchestrationThread } from "./contracts.ts";
+import { OrchestrationThread, OrchestrationEvent } from "./contracts.ts";
+import { applyThreadDetailEvent } from "./threadReducer.ts";
 import { presentV1Thread } from "./presentation.ts";
 
 const timestamp = "2026-01-01T00:00:00.000Z";
+const decodeEvent = Schema.decodeUnknownSync(OrchestrationEvent);
 const decodeThread = Schema.decodeUnknownSync(OrchestrationThread);
 const decodeSettings = Schema.decodeUnknownSync(ServerSettings);
 const encodeSettings = Schema.encodeSync(ServerSettings);
@@ -38,6 +40,34 @@ const activity = (id: string, kind: string, payload: unknown) => ({
 });
 
 describe("V1 compatibility boundary", () => {
+  it("preserves child lineage through thread.created decoding and presentation", () => {
+    const original = thread([]);
+    const lineage = {
+      parentThreadId: "parent",
+      rootThreadId: "parent",
+      relationshipToParent: "subagent",
+    };
+    const event = decodeEvent({
+      sequence: 1,
+      eventId: "created",
+      type: "thread.created",
+      occurredAt: timestamp,
+      aggregateKind: "thread",
+      aggregateId: original.id,
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      payload: { ...original, threadId: original.id, lineage },
+    });
+    const result = applyThreadDetailEvent(original, event);
+    expect(result.kind).toBe("updated");
+    if (result.kind !== "updated") throw new Error("Expected updated thread");
+    expect(presentV1Thread(result.thread).lineage).toEqual(lineage);
+    expect(decodeThread({ ...original, lineage }).lineage).toEqual(lineage);
+    expect(presentV1Thread(original).lineage).toBeUndefined();
+  });
+
   it("accepts retired token streaming in config snapshots and settings events", () => {
     const settings = {
       ...encodeSettings(DEFAULT_SERVER_SETTINGS),
