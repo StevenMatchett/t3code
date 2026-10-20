@@ -63,6 +63,7 @@ async function renderSurface(
   initialOutput: TerminalOutputState,
   overrides: Partial<EmbeddedTerminalSurfaceProps> = {},
   strict = false,
+  size = { width: 30, height: 6 },
 ) {
   let setOutput!: Dispatch<SetStateAction<TerminalOutputState>>;
   let handle: EmbeddedTerminalSurfaceHandle | null = null;
@@ -101,8 +102,7 @@ async function renderSurface(
       <Harness />
     ),
     {
-      width: 30,
-      height: 6,
+      ...size,
       exitOnCtrlC: false,
     },
   );
@@ -136,6 +136,48 @@ const describeWithNativeFfi = runtime.process?.getBuiltinModule?.("node:ffi")
   : describe.skip;
 
 describeWithNativeFfi("EmbeddedTerminalSurface", () => {
+  it.each([
+    { width: 30, height: 6 },
+    { width: 80, height: 24 },
+    { width: 110, height: 32 },
+  ])("restores a full-screen application after remount at $width×$height", async (size) => {
+    const empty = outputState("");
+    const editor = appendedOutput(
+      empty,
+      `\x1b[?1049h\x1b[2J\x1b[Heditor\x1b[${size.height - 3};${size.width - 20}Hbottom-right`,
+    );
+    const first = await renderSurface(empty, {}, false, size);
+    let expected: string;
+    try {
+      first.setOutput(editor);
+      await first.flush();
+      const terminal = first.renderer.root.findDescendantById(
+        "t3-embedded-terminal",
+      ) as EmbeddedTerminalRenderable;
+      expected = terminal.screen().text;
+      expect(terminal.screen().lines[size.height - 4]).toBe(
+        " ".repeat(size.width - 21) + "bottom-right",
+      );
+    } finally {
+      await act(async () => first.renderer.destroy());
+    }
+    const reopened = await renderSurface(editor, {}, false, size);
+    try {
+      const terminal = reopened.renderer.root.findDescendantById(
+        "t3-embedded-terminal",
+      ) as EmbeddedTerminalRenderable;
+      expect(terminal.screen().text).toBe(expected);
+      reopened.setOutput(appendedOutput(editor, "\x1b[1;1HEDITED"));
+      await reopened.flush();
+      expect(terminal.screen().lines[0]).toBe("EDITED");
+      expect(terminal.screen().lines[size.height - 4]).toBe(
+        " ".repeat(size.width - 21) + "bottom-right",
+      );
+    } finally {
+      await act(async () => reopened.renderer.destroy());
+    }
+  });
+
   it.each([
     ["F1", "\x1bOP", "\x1bOP"],
     ["F5", "\x1b[15~", "\x1b[15~"],
