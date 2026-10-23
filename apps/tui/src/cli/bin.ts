@@ -46,6 +46,10 @@ export async function main(): Promise<number> {
     return 0;
   }
 
+  // React reads NODE_ENV when it is first imported. Its development build records a
+  // performance.measure() entry per component render, and Node buffers those forever,
+  // so a long-running session grows without bound. Set NODE_ENV=development to opt in.
+  NodeProcess.env.NODE_ENV ??= "production";
   try {
     const { runTuiPrototype } = await import("./program.ts");
     const serverEntry =
