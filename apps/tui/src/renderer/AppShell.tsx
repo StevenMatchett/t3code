@@ -30,7 +30,7 @@ import { ArchivedThreadsPanel, ThreadActionsForm } from "./ThreadManagement.tsx"
 import type { HotkeyState } from "../ui/HotkeyBar.tsx";
 import { CommandPalette, type CommandPaletteItem } from "./CommandPalette.tsx";
 import { FavoriteModelsPanel } from "./FavoriteModelsPanel.tsx";
-import { toggleFavoriteModel, type FavoriteModel } from "../features/chat/providerChoices.ts";
+import type { FavoriteModel } from "../features/chat/providerChoices.ts";
 import { CheckpointRestore } from "./CheckpointRestore.tsx";
 import { ThreadDiff } from "./ThreadDiff.tsx";
 import { QueuedMessages } from "./QueuedMessages.tsx";
@@ -294,7 +294,7 @@ export function AppShell({
       {
         id: "command:favorite-models",
         label: "Favorite models",
-        detail: "Command · Listed first when starting a new thread",
+        detail: "Command · Choose and rank the models new threads start with",
         keywords: "star pin provider",
         target: { type: "favorite-models" },
       },
@@ -391,9 +391,11 @@ export function AppShell({
     client.session?.saveSoundsEnabled(enabled);
     if (!enabled) audio.current?.stop();
   };
-  const toggleFavorite = (favorite: FavoriteModel) => {
-    // Start from the saved list so a toggle cannot undo one made in another TUI.
-    const next = toggleFavoriteModel(client.session?.favoriteModels() ?? favoriteModels, favorite);
+  const updateFavorites = (
+    update: (favorites: readonly FavoriteModel[]) => readonly FavoriteModel[],
+  ) => {
+    // Start from the saved list so a change cannot undo one made in another TUI.
+    const next = update(client.session?.favoriteModels() ?? favoriteModels);
     setFavoriteModels(next);
     client.session?.saveFavoriteModels(next);
   };
@@ -744,18 +746,19 @@ export function AppShell({
                         title: "Favorite models",
                         context: "Favorite models",
                         hints: [
-                          { key: "Type", label: "Filter" },
+                          { key: "Tab", label: "Models/order" },
                           { key: "↑↓", label: "Select" },
-                          { key: "Enter", label: "Toggle" },
+                          { key: "Enter", label: "Add/move" },
                           { key: "Esc", label: "Close" },
                         ],
                         content: (
                           <FavoriteModelsPanel
                             client={client}
                             favorites={favoriteModels}
+                            width={Math.max(1, width - 6)}
                             height={layout.contentHeight}
                             active={active}
-                            onToggle={toggleFavorite}
+                            onChange={updateFavorites}
                             onClose={() => setThreadOverlay(null)}
                           />
                         ),

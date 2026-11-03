@@ -93,7 +93,10 @@ function Fields({
   const defaults = resolveProjectSettings(settings, project.id, project).settings;
   const choices = availableModelChoices(catalog.providers);
   const preferred = defaults.defaultModelSelection;
+  const rankedChoices = favoriteChoicesFirst(choices, favoriteModels);
+  const topFavorite = rankedChoices.find((choice) => isFavoriteChoice(favoriteModels, choice));
   const defaultChoice =
+    topFavorite ??
     choices.find(
       (choice) =>
         choice.provider.instanceId === preferred?.instanceId &&
@@ -142,7 +145,7 @@ function Fields({
         "create",
         "cancel",
       ];
-  const filtered = favoriteChoicesFirst(choices, favoriteModels).filter((choice) =>
+  const filtered = rankedChoices.filter((choice) =>
     `${choice.provider.displayName ?? choice.provider.instanceId} ${choice.model.name} ${choice.model.slug}`
       .toLocaleLowerCase()
       .includes(query.toLocaleLowerCase()),

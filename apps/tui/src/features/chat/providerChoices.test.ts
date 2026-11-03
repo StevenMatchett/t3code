@@ -4,13 +4,39 @@ import { AtomRegistry } from "effect/reactivity";
 import * as Option from "effect/Option";
 import { makeClientFixture } from "../../testing/clientFixture.ts";
 import {
+  availableModelChoices,
+  favoriteChoicesFirst,
   modelChangeProblem,
+  moveFavoriteModel,
   selectionForModel,
   skillPrefix,
   selectableSkills,
 } from "./providerChoices.ts";
 
 describe("provider choices", () => {
+  it("ranks favorites in saved order and moves one to a new position", () => {
+    const f = makeClientFixture();
+    const instanceId = f.provider.instanceId;
+    const current = { instanceId, model: "gpt-5-codex" };
+    const alternate = { instanceId, model: "opaque/model-b" };
+    const gone = { instanceId, model: "retired" };
+    const choices = availableModelChoices([f.provider]);
+    const slugs = (favorites: readonly (typeof current)[]) =>
+      favoriteChoicesFirst(choices, favorites).map((choice) => choice.model.slug);
+
+    expect(slugs([])).toEqual(["gpt-5-codex", "opaque/model-b"]);
+    expect(slugs([gone, alternate])).toEqual(["opaque/model-b", "gpt-5-codex"]);
+    expect(moveFavoriteModel([current, gone, alternate], alternate, 0)).toEqual([
+      alternate,
+      current,
+      gone,
+    ]);
+    expect(moveFavoriteModel([current, gone, alternate], current, 2)).toEqual([
+      gone,
+      alternate,
+      current,
+    ]);
+  });
   it("preserves native model and option IDs in shared state and subsequent prompts", async () => {
     const f = makeClientFixture();
     const registry = AtomRegistry.make();

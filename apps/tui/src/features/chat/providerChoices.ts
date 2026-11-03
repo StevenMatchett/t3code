@@ -41,13 +41,20 @@ export function isFavoriteChoice(favorites: readonly FavoriteModel[], choice: Mo
   );
 }
 
-/** Moves favorites to the top, keeping catalog order within each group. */
+/** Moves favorites to the top in rank order; the rest keep catalog order. */
 export function favoriteChoicesFirst(
   choices: readonly ModelChoice[],
   favorites: readonly FavoriteModel[],
 ) {
   return [
-    ...choices.filter((choice) => isFavoriteChoice(favorites, choice)),
+    ...favorites.flatMap(
+      (favorite) =>
+        choices.find(
+          (choice) =>
+            choice.provider.instanceId === favorite.instanceId &&
+            choice.model.slug === favorite.model,
+        ) ?? [],
+    ),
     ...choices.filter((choice) => !isFavoriteChoice(favorites, choice)),
   ];
 }
@@ -60,6 +67,18 @@ export function toggleFavoriteModel(
     (favorite) => favorite.instanceId !== target.instanceId || favorite.model !== target.model,
   );
   return remaining.length === favorites.length ? [...favorites, target] : remaining;
+}
+
+/** Places a favorite at `index`, counted after it is taken out of the list. */
+export function moveFavoriteModel(
+  favorites: readonly FavoriteModel[],
+  target: FavoriteModel,
+  index: number,
+): readonly FavoriteModel[] {
+  const remaining = favorites.filter(
+    (favorite) => favorite.instanceId !== target.instanceId || favorite.model !== target.model,
+  );
+  return [...remaining.slice(0, index), target, ...remaining.slice(index)];
 }
 
 export function selectableSkills(provider: ServerProvider, cwd: string | null) {

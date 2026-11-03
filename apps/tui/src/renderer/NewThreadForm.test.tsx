@@ -31,45 +31,95 @@ async function click(driver: TuiTestDriver, id: string) {
 }
 
 describe("new thread form", () => {
-  it("lists models favorited from the palette first, and drops them when unfavorited", async () => {
-    const { driver } = await setup();
-    const setFavoriteFromPalette = async () => {
-      await driver.input.pressKey("k", { ctrl: true });
-      await driver.input.typeText("favorite models");
+  it.each([false, true])(
+    "starts on the top favorite and follows its rank (kitty=%s)",
+    async (kitty) => {
+      const { driver } = await setup(kitty);
+      const openFavorites = async () => {
+        await driver.input.pressKey("k", { ctrl: true });
+        await driver.input.typeText("favorite models");
+        await driver.input.pressKey("RETURN");
+      };
+      const newThread = async () => {
+        await driver.input.pressKey("n");
+        const form = driver.captureFrame();
+        await click(driver, "new-thread-model");
+        const menu = driver.captureFrame();
+        await driver.input.pressKey("ESCAPE");
+        await driver.input.pressKey("ESCAPE");
+        return { form, menu };
+      };
+      const expectBefore = (frame: string, first: string, second: string) =>
+        expect(frame.lastIndexOf(first)).toBeLessThan(frame.lastIndexOf(second));
+
+      const initial = await newThread();
+      expect(initial.form).toContain("Fixture Codex / Current model v");
+      expectBefore(initial.menu, "/ Current model", "/ Alternate model");
+
+      await openFavorites();
       await driver.input.pressKey("RETURN");
-      expect(driver.captureFrame()).toContain("[ ] ");
       await driver.input.pressKey("ARROW_DOWN");
       await driver.input.pressKey("RETURN");
-    };
-    const modelMenu = async () => {
-      await driver.input.pressKey("n");
-      await click(driver, "new-thread-model");
-      const frame = driver.captureFrame();
+      let frame = driver.captureFrame();
+      expect(frame).toContain("[x] Fixture Codex / Current model");
+      expect(frame).toContain("[x] Fixture Codex / Alternate model");
+      expect(frame).toContain("1. Fixture Codex / Current model");
+      expect(frame).toContain("2. Fixture Codex / Alternate model");
+
+      // Esc puts a held model back; Enter drops it where it is.
+      await driver.input.pressKey("TAB");
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("ARROW_DOWN");
+      expect(driver.captureFrame()).toContain("↕ 2. Fixture Codex / Current model");
       await driver.input.pressKey("ESCAPE");
+      expect(driver.captureFrame()).toContain("1. Fixture Codex / Current model");
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("RETURN");
+      frame = driver.captureFrame();
+      expect(frame).toContain("1. Fixture Codex / Alternate model");
+      expect(frame).toContain("2. Fixture Codex / Current model");
+      expect(frame).not.toContain("↕");
       await driver.input.pressKey("ESCAPE");
-      return frame;
-    };
 
-    const initial = await modelMenu();
-    expect(initial.lastIndexOf("/ Current model")).toBeLessThan(
-      initial.lastIndexOf("/ Alternate model"),
-    );
+      const ranked = await newThread();
+      expect(ranked.form).toContain("Fixture Codex / Alternate model v");
+      expect(ranked.menu).toContain("★ Fixture Codex / Alternate model");
+      expectBefore(ranked.menu, "/ Alternate model", "/ Current model");
 
-    await setFavoriteFromPalette();
-    const toggled = driver.captureFrame();
-    expect(toggled).toContain("[ ] Fixture Codex / Current model");
-    expect(toggled).toContain("[x] Fixture Codex / Alternate model");
-    await driver.input.pressKey("ESCAPE");
-    const favorited = await modelMenu();
-    expect(favorited).toContain("★ Fixture Codex / Alternate model");
-    expect(favorited.lastIndexOf("/ Alternate model")).toBeLessThan(
-      favorited.lastIndexOf("/ Current model"),
-    );
+      await openFavorites();
+      await driver.input.pressKey("TAB");
+      await driver.input.pressKey("x");
+      frame = driver.captureFrame();
+      expect(frame).toContain("1. Fixture Codex / Current model");
+      expect(frame).toContain("[ ] Fixture Codex / Alternate model");
+      await driver.input.pressKey("x");
+      expect(driver.captureFrame()).toContain("No favorites yet");
+      await driver.input.pressKey("ESCAPE");
 
-    await setFavoriteFromPalette();
-    expect(driver.captureFrame()).toContain("[ ] Fixture Codex / Alternate model");
-    await driver.input.pressKey("ESCAPE");
-    expect(await modelMenu()).not.toContain("★");
+      const cleared = await newThread();
+      expect(cleared.form).toContain("Fixture Codex / Current model v");
+      expect(cleared.menu).not.toContain("★");
+    },
+  );
+  it("keeps a favorite listed and removable after its provider stops offering it", async () => {
+    const { driver, fixture } = await setup();
+    await driver.input.pressKey("k", { ctrl: true });
+    await driver.input.typeText("favorite models");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await act(async () => {
+      driver.registry.set(fixture.client.providers, {
+        providers: [{ ...fixture.provider, enabled: false }],
+        status: "live",
+      });
+    });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("1. codex / gpt-5-codex (unavailable)");
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("x");
+    expect(driver.captureFrame()).toContain("No favorites yet");
   });
   it.each([false, true])(
     "navigates fields with arrows while preserving text cursor keys (kitty=%s)",
