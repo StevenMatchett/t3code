@@ -15,6 +15,53 @@ export interface ProviderCatalog {
   readonly status: "loading" | "live" | "error";
 }
 
+/** Identifies a model across provider instances; saved locally by the TUI. */
+export type FavoriteModel = Pick<ModelSelection, "instanceId" | "model">;
+
+/** Every model a new thread can start with, in catalog order. */
+export function availableModelChoices(providers: readonly ServerProvider[]) {
+  return providers
+    .filter(
+      (provider) =>
+        provider.enabled &&
+        provider.installed &&
+        provider.availability !== "unavailable" &&
+        provider.status !== "error" &&
+        provider.auth.status !== "unauthenticated",
+    )
+    .flatMap((provider) => provider.models.map((model) => ({ provider, model })));
+}
+
+export type ModelChoice = ReturnType<typeof availableModelChoices>[number];
+
+export function isFavoriteChoice(favorites: readonly FavoriteModel[], choice: ModelChoice) {
+  return favorites.some(
+    (favorite) =>
+      favorite.instanceId === choice.provider.instanceId && favorite.model === choice.model.slug,
+  );
+}
+
+/** Moves favorites to the top, keeping catalog order within each group. */
+export function favoriteChoicesFirst(
+  choices: readonly ModelChoice[],
+  favorites: readonly FavoriteModel[],
+) {
+  return [
+    ...choices.filter((choice) => isFavoriteChoice(favorites, choice)),
+    ...choices.filter((choice) => !isFavoriteChoice(favorites, choice)),
+  ];
+}
+
+export function toggleFavoriteModel(
+  favorites: readonly FavoriteModel[],
+  target: FavoriteModel,
+): readonly FavoriteModel[] {
+  const remaining = favorites.filter(
+    (favorite) => favorite.instanceId !== target.instanceId || favorite.model !== target.model,
+  );
+  return remaining.length === favorites.length ? [...favorites, target] : remaining;
+}
+
 export function selectableSkills(provider: ServerProvider, cwd: string | null) {
   const root = cwd?.replaceAll("\\", "/").replace(/\/+$/, "");
   const rank = (skill: ServerProviderSkill) => {

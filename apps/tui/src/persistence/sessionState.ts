@@ -9,6 +9,7 @@ import * as Schema from "effect/Schema";
 import type { Atom } from "effect/reactivity";
 import type { ShellState } from "../app/state.ts";
 import type { ThreadInteractionState } from "../features/chat/interactions.ts";
+import type { FavoriteModel } from "../features/chat/providerChoices.ts";
 
 import { PromptCommand } from "../connection/commands.ts";
 export const SavedInteraction = Schema.Struct({
@@ -66,11 +67,17 @@ export const ComposerView = Schema.Struct({
 export type ComposerView = typeof ComposerView.Type;
 export const TerminalView = Schema.Struct({ terminalId: Schema.String, focused: Schema.Boolean });
 export type TerminalView = typeof TerminalView.Type;
+export const FavoriteModels = Schema.Array(
+  Schema.Struct({ instanceId: ProviderInstanceId, model: Schema.String }),
+);
 
 export interface TuiSessionState {
   readonly error: Atom.Atom<string | null>;
   readonly soundsEnabled: boolean;
   readonly saveSoundsEnabled: (enabled: boolean) => void;
+  /** Read fresh each call: favorites are shared by every TUI on this machine. */
+  readonly favoriteModels: () => readonly FavoriteModel[];
+  readonly saveFavoriteModels: (favorites: readonly FavoriteModel[]) => void;
   readonly shell: ShellState | undefined;
   readonly interactions: ReadonlyMap<ThreadId, SavedInteraction>;
   readonly saveShell: (state: ShellState) => void;

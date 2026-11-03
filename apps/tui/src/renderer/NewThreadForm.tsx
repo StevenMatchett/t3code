@@ -12,8 +12,13 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Option from "effect/Option";
 import { useContext, useEffect, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
-import type { ProviderCatalog } from "../features/chat/providerChoices.ts";
-import { selectionForModel } from "../features/chat/providerChoices.ts";
+import type { FavoriteModel, ProviderCatalog } from "../features/chat/providerChoices.ts";
+import {
+  availableModelChoices,
+  favoriteChoicesFirst,
+  isFavoriteChoice,
+  selectionForModel,
+} from "../features/chat/providerChoices.ts";
 import { permissionChoices } from "../features/chat/composerModes.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
@@ -24,6 +29,7 @@ import { useThemeColor } from "../ui/context.tsx";
 interface Props {
   readonly client: TuiClient;
   readonly projectId: ProjectId | null;
+  readonly favoriteModels: readonly FavoriteModel[];
   readonly height: number;
   readonly onClose: () => void;
   readonly onCreated: (projectId: ProjectId, threadId: ThreadId) => void;
@@ -74,6 +80,7 @@ function Fields({
   project,
   catalog,
   settings,
+  favoriteModels,
   height,
   onClose,
 }: Props & {
@@ -84,16 +91,7 @@ function Fields({
   const registry = useContext(RegistryContext);
   const creation = useAtomValue(client.newThreads.state);
   const defaults = resolveProjectSettings(settings, project.id, project).settings;
-  const choices = catalog.providers
-    .filter(
-      (provider) =>
-        provider.enabled &&
-        provider.installed &&
-        provider.availability !== "unavailable" &&
-        provider.status !== "error" &&
-        provider.auth.status !== "unauthenticated",
-    )
-    .flatMap((provider) => provider.models.map((model) => ({ provider, model })));
+  const choices = availableModelChoices(catalog.providers);
   const preferred = defaults.defaultModelSelection;
   const defaultChoice =
     choices.find(
@@ -144,7 +142,7 @@ function Fields({
         "create",
         "cancel",
       ];
-  const filtered = choices.filter((choice) =>
+  const filtered = favoriteChoicesFirst(choices, favoriteModels).filter((choice) =>
     `${choice.provider.displayName ?? choice.provider.instanceId} ${choice.model.name} ${choice.model.slug}`
       .toLocaleLowerCase()
       .includes(query.toLocaleLowerCase()),
@@ -480,7 +478,7 @@ function Fields({
             >
               <SelectionRow
                 selected={start + index === selectedIndex}
-                label={`${choice.provider.displayName ?? choice.provider.instanceId} / ${choice.model.name}`}
+                label={`${isFavoriteChoice(favoriteModels, choice) ? "★ " : ""}${choice.provider.displayName ?? choice.provider.instanceId} / ${choice.model.name}`}
               />
             </Stack>
           ))}

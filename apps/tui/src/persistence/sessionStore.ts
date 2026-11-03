@@ -8,6 +8,7 @@ import { Atom, type AtomRegistry } from "effect/reactivity";
 import {
   ComposerView,
   ConversationView,
+  FavoriteModels,
   SavedInteraction,
   SavedShell,
   TerminalView,
@@ -20,6 +21,7 @@ const decodeConversation = Schema.decodeUnknownSync(ConversationView);
 const decodeComposer = Schema.decodeUnknownSync(ComposerView);
 const decodeTerminal = Schema.decodeUnknownSync(TerminalView);
 const decodeThreadId = Schema.decodeUnknownSync(ThreadId);
+const decodeFavoriteModels = Schema.decodeUnknownSync(FavoriteModels);
 
 /** Separate lock databases let SQLite release ownership even after SIGKILL. */
 function claimSession(
@@ -114,6 +116,10 @@ export function openTuiSessionState(options: {
   db.exec(
     "CREATE TABLE IF NOT EXISTS ui_state_v1 (environment TEXT NOT NULL, origin TEXT NOT NULL, scope TEXT NOT NULL, field TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (environment, origin, scope, field))",
   );
+  // Preferences outlive sessions: a concurrent TUI claims its own session and must still see them.
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS ui_preferences (field TEXT PRIMARY KEY, value TEXT NOT NULL)",
+  );
   const environment = options.environmentId;
   const origin = new URL(options.httpOrigin).origin;
   const session = claimSession(db, options.stateDirectory, environment, origin);
@@ -198,6 +204,28 @@ export function openTuiSessionState(options: {
       read("sounds", Schema.decodeUnknownSync(Schema.Struct({ enabled: Schema.Boolean })))
         ?.enabled ?? true,
     saveSoundsEnabled: (enabled) => save("sounds", { enabled }),
+    favoriteModels: () => {
+      if (closed) return [];
+      try {
+        const row = db
+          .prepare("SELECT value FROM ui_preferences WHERE field = 'favoriteModels'")
+          .get();
+        return typeof row?.value === "string" ? decodeFavoriteModels(JSON.parse(row.value)) : [];
+      } catch {
+        report();
+        return [];
+      }
+    },
+    saveFavoriteModels: (favorites) => {
+      if (closed) return;
+      try {
+        db.prepare(
+          "INSERT INTO ui_preferences (field, value) VALUES ('favoriteModels', ?) ON CONFLICT (field) DO UPDATE SET value = excluded.value",
+        ).run(JSON.stringify(favorites));
+      } catch {
+        report();
+      }
+    },
     shell: shell ? { ...shell, modal: null } : undefined,
     interactions,
     saveShell: ({ route, sidebarView, projectId, threadId }) =>

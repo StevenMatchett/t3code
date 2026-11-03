@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import { afterEach, describe, expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
 import { AtomRegistry } from "effect/reactivity";
 import * as Option from "effect/Option";
 import * as NodeFS from "node:fs";
@@ -67,6 +67,18 @@ describe("TUI session persistence", () => {
     second.session.saveSoundsEnabled(true);
     second.session.close();
     expect(open(path).session.soundsEnabled).toBe(true);
+  });
+  it("shares favorite models between concurrent sessions and restores them", () => {
+    const path = directory();
+    const first = open(path);
+    const second = open(path);
+    const favorites = [{ instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" }];
+    expect(first.session.favoriteModels()).toEqual([]);
+    first.session.saveFavoriteModels(favorites);
+    expect(second.session.favoriteModels()).toEqual(favorites);
+    first.session.close();
+    second.session.close();
+    expect(open(path, EnvironmentId.make("other-env")).session.favoriteModels()).toEqual(favorites);
   });
   it("restores Markdown preferences and accepts views saved before the toggle existed", () => {
     const path = directory();

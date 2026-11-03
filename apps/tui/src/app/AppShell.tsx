@@ -225,6 +225,7 @@ function Help() {
       <Text>E Edit from checkpoint: rewind chat, optionally revert files</Text>
       <Text>Ctrl+T Open thread shell Ctrl+\ Release shell focus</Text>
       <Text>N New thread (from navigation or history)</Text>
+      <Text>Ctrl+K Favorite models: pick the models listed first in new threads</Text>
       <Text>P New project</Text>
       <Text>M Manage thread Shift+A Archived threads (navigation)</Text>
       <Text>D View saved thread changes (navigation or history)</Text>

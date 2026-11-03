@@ -31,6 +31,46 @@ async function click(driver: TuiTestDriver, id: string) {
 }
 
 describe("new thread form", () => {
+  it("lists models favorited from the palette first, and drops them when unfavorited", async () => {
+    const { driver } = await setup();
+    const setFavoriteFromPalette = async () => {
+      await driver.input.pressKey("k", { ctrl: true });
+      await driver.input.typeText("favorite models");
+      await driver.input.pressKey("RETURN");
+      expect(driver.captureFrame()).toContain("[ ] ");
+      await driver.input.pressKey("ARROW_DOWN");
+      await driver.input.pressKey("RETURN");
+    };
+    const modelMenu = async () => {
+      await driver.input.pressKey("n");
+      await click(driver, "new-thread-model");
+      const frame = driver.captureFrame();
+      await driver.input.pressKey("ESCAPE");
+      await driver.input.pressKey("ESCAPE");
+      return frame;
+    };
+
+    const initial = await modelMenu();
+    expect(initial.lastIndexOf("/ Current model")).toBeLessThan(
+      initial.lastIndexOf("/ Alternate model"),
+    );
+
+    await setFavoriteFromPalette();
+    const toggled = driver.captureFrame();
+    expect(toggled).toContain("[ ] Fixture Codex / Current model");
+    expect(toggled).toContain("[x] Fixture Codex / Alternate model");
+    await driver.input.pressKey("ESCAPE");
+    const favorited = await modelMenu();
+    expect(favorited).toContain("★ Fixture Codex / Alternate model");
+    expect(favorited.lastIndexOf("/ Alternate model")).toBeLessThan(
+      favorited.lastIndexOf("/ Current model"),
+    );
+
+    await setFavoriteFromPalette();
+    expect(driver.captureFrame()).toContain("[ ] Fixture Codex / Alternate model");
+    await driver.input.pressKey("ESCAPE");
+    expect(await modelMenu()).not.toContain("★");
+  });
   it.each([false, true])(
     "navigates fields with arrows while preserving text cursor keys (kitty=%s)",
     async (kitty) => {

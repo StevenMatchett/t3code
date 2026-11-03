@@ -29,6 +29,8 @@ import { ArchivedThreadsPanel, ThreadActionsForm } from "./ThreadManagement.tsx"
 
 import type { HotkeyState } from "../ui/HotkeyBar.tsx";
 import { CommandPalette, type CommandPaletteItem } from "./CommandPalette.tsx";
+import { FavoriteModelsPanel } from "./FavoriteModelsPanel.tsx";
+import { toggleFavoriteModel, type FavoriteModel } from "../features/chat/providerChoices.ts";
 import { CheckpointRestore } from "./CheckpointRestore.tsx";
 import { ThreadDiff } from "./ThreadDiff.tsx";
 import { QueuedMessages } from "./QueuedMessages.tsx";
@@ -50,6 +52,7 @@ type PaletteEntry = CommandPaletteItem & {
     | { readonly type: "new-project" }
     | { readonly type: "new-thread" }
     | { readonly type: "archived" }
+    | { readonly type: "favorite-models" }
     | { readonly type: "help" }
     | { readonly type: "toggle-sounds" }
     | { readonly type: "toggle-sidebar-view" }
@@ -132,6 +135,9 @@ export function AppShell({
   }, [notice]);
   const snapshot = Option.getOrNull(shell.snapshot);
   const [soundsEnabled, setSoundsEnabled] = useState(client.session?.soundsEnabled ?? true);
+  const [favoriteModels, setFavoriteModels] = useState<readonly FavoriteModel[]>(
+    () => client.session?.favoriteModels() ?? [],
+  );
   const [trackSounds] = useState(createSoundTracker);
   const audio = useRef<ReturnType<typeof createNotificationAudio> | null>(null);
   useEffect(() => {
@@ -177,6 +183,7 @@ export function AppShell({
   );
   const [threadOverlay, setThreadOverlay] = useState<
     | { readonly type: "palette" }
+    | { readonly type: "favorite-models" }
     | { readonly type: "rename"; readonly thread: TuiThreadShell }
     | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
     | { readonly type: "diff" }
@@ -285,6 +292,13 @@ export function AppShell({
         target: { type: "archived" },
       },
       {
+        id: "command:favorite-models",
+        label: "Favorite models",
+        detail: "Command · Listed first when starting a new thread",
+        keywords: "star pin provider",
+        target: { type: "favorite-models" },
+      },
+      {
         id: "command:help",
         label: "Show keyboard help",
         detail: "Command",
@@ -377,6 +391,12 @@ export function AppShell({
     client.session?.saveSoundsEnabled(enabled);
     if (!enabled) audio.current?.stop();
   };
+  const toggleFavorite = (favorite: FavoriteModel) => {
+    // Start from the saved list so a toggle cannot undo one made in another TUI.
+    const next = toggleFavoriteModel(client.session?.favoriteModels() ?? favoriteModels, favorite);
+    setFavoriteModels(next);
+    client.session?.saveFavoriteModels(next);
+  };
   const choosePaletteEntry = (id: string) => {
     const entry = paletteEntries.find((item) => item.id === id);
     if (!entry) return;
@@ -408,6 +428,9 @@ export function AppShell({
         break;
       case "archived":
         dispatch({ type: "set-sidebar-view", view: "archived" });
+        break;
+      case "favorite-models":
+        setThreadOverlay({ type: "favorite-models" });
         break;
       case "help":
         dispatch({ type: "toggle-help" });
@@ -716,65 +739,86 @@ export function AppShell({
                         />
                       ),
                     }
-                  : threadOverlay?.type === "archived"
+                  : threadOverlay?.type === "favorite-models"
                     ? {
-                        title: "Archived threads",
-                        context: "Archived",
+                        title: "Favorite models",
+                        context: "Favorite models",
                         hints: [
+                          { key: "Type", label: "Filter" },
                           { key: "↑↓", label: "Select" },
-                          { key: "Enter", label: "Manage" },
-                          { key: "R", label: "Refresh" },
+                          { key: "Enter", label: "Toggle" },
                           { key: "Esc", label: "Close" },
                         ],
                         content: (
-                          <ArchivedThreadsPanel
+                          <FavoriteModelsPanel
                             client={client}
+                            favorites={favoriteModels}
+                            height={layout.contentHeight}
                             active={active}
+                            onToggle={toggleFavorite}
                             onClose={() => setThreadOverlay(null)}
-                            onManage={(thread) =>
-                              setThreadOverlay({ type: "manage", thread, returnToArchived: true })
-                            }
                           />
                         ),
                       }
-                    : threadOverlay?.type === "manage"
+                    : threadOverlay?.type === "archived"
                       ? {
-                          title: threadOverlay.thread.archivedAt
-                            ? "Manage archived thread"
-                            : "Manage thread",
-                          context: "Manage thread",
+                          title: "Archived threads",
+                          context: "Archived",
                           hints: [
-                            { key: "Tab/↑↓", label: "Select" },
-                            { key: "Enter", label: "Activate" },
+                            { key: "↑↓", label: "Select" },
+                            { key: "Enter", label: "Manage" },
+                            { key: "R", label: "Refresh" },
                             { key: "Esc", label: "Close" },
                           ],
                           content: (
-                            <ThreadActionsForm
+                            <ArchivedThreadsPanel
                               client={client}
-                              initialAction={threadOverlay.initialAction ?? "rename"}
-                              thread={threadOverlay.thread}
                               active={active}
-                              onClose={() =>
-                                setThreadOverlay(
-                                  threadOverlay.returnToArchived ? { type: "archived" } : null,
-                                )
+                              onClose={() => setThreadOverlay(null)}
+                              onManage={(thread) =>
+                                setThreadOverlay({ type: "manage", thread, returnToArchived: true })
                               }
-                              onRemoved={() => {
-                                if (threadOverlay.returnToArchived) {
-                                  setThreadOverlay({ type: "archived" });
-                                } else {
-                                  setThreadOverlay(null);
-                                  if (
-                                    state.route === "conversation" &&
-                                    state.threadId === threadOverlay.thread.id
-                                  )
-                                    dispatch({ type: "back" });
-                                }
-                              }}
                             />
                           ),
                         }
-                      : null
+                      : threadOverlay?.type === "manage"
+                        ? {
+                            title: threadOverlay.thread.archivedAt
+                              ? "Manage archived thread"
+                              : "Manage thread",
+                            context: "Manage thread",
+                            hints: [
+                              { key: "Tab/↑↓", label: "Select" },
+                              { key: "Enter", label: "Activate" },
+                              { key: "Esc", label: "Close" },
+                            ],
+                            content: (
+                              <ThreadActionsForm
+                                client={client}
+                                initialAction={threadOverlay.initialAction ?? "rename"}
+                                thread={threadOverlay.thread}
+                                active={active}
+                                onClose={() =>
+                                  setThreadOverlay(
+                                    threadOverlay.returnToArchived ? { type: "archived" } : null,
+                                  )
+                                }
+                                onRemoved={() => {
+                                  if (threadOverlay.returnToArchived) {
+                                    setThreadOverlay({ type: "archived" });
+                                  } else {
+                                    setThreadOverlay(null);
+                                    if (
+                                      state.route === "conversation" &&
+                                      state.threadId === threadOverlay.thread.id
+                                    )
+                                      dispatch({ type: "back" });
+                                  }
+                                }}
+                              />
+                            ),
+                          }
+                        : null
         }
         onOpenArchived={() => dispatch({ type: "set-sidebar-view", view: "archived" })}
         onOpenPalette={openPalette}
@@ -809,6 +853,7 @@ export function AppShell({
             <NewThreadForm
               client={client}
               projectId={state.projectId}
+              favoriteModels={favoriteModels}
               height={layout.contentHeight}
               onClose={() => dispatch({ type: "close-modal" })}
               onCreated={(projectId, threadId) =>
