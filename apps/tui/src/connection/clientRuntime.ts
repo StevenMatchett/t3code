@@ -67,6 +67,12 @@ import {
   type ThreadId,
   type GitResolvedPullRequest,
   type ExecutionEnvironmentCapabilities,
+  type VcsPullResult,
+  type GitRunStackedActionResult,
+  type GitStackedAction,
+  type ProjectId,
+  type VcsRef,
+  type VcsStatusResult,
   type ProjectSearchEntriesInput,
   type ProjectSearchEntriesResult,
   type ProjectWriteFileInput,
@@ -92,6 +98,11 @@ import * as HttpBody from "effect/http/HttpBody";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Cause from "effect/Cause";
+import {
+  createVcsActionManager,
+  createVcsEnvironmentAtoms,
+  type VcsActionState,
+} from "@t3tools/client-runtime/state/vcs";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
@@ -101,8 +112,42 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type { TuiSessionState } from "../persistence/sessionState.ts";
 import type { ReattachedAuthenticatedTuiEnvironment } from "./authenticatedEnvironment.ts";
 
+/** Source control for one checkout. Each method rejects with a message written for the user. */
+export interface TuiGit {
+  readonly actionState: (cwd: string) => Atom.Atom<VcsActionState>;
+  readonly status: (registry: AtomRegistry.AtomRegistry, cwd: string) => Promise<VcsStatusResult>;
+  readonly run: (
+    registry: AtomRegistry.AtomRegistry,
+    target: {
+      readonly cwd: string;
+      readonly threadId: ThreadId;
+      readonly projectId: ProjectId;
+    },
+    input: {
+      readonly action: GitStackedAction;
+      readonly commitMessage?: string;
+      readonly featureBranch?: boolean;
+    },
+  ) => Promise<GitRunStackedActionResult>;
+  readonly pull: (registry: AtomRegistry.AtomRegistry, cwd: string) => Promise<VcsPullResult>;
+  readonly listRefs: (
+    registry: AtomRegistry.AtomRegistry,
+    cwd: string,
+  ) => Promise<readonly VcsRef[]>;
+  readonly switchRef: (
+    registry: AtomRegistry.AtomRegistry,
+    input: { readonly cwd: string; readonly refName: string },
+  ) => Promise<string | null>;
+  readonly createRef: (
+    registry: AtomRegistry.AtomRegistry,
+    input: { readonly cwd: string; readonly refName: string },
+  ) => Promise<string>;
+}
+
 export interface TuiClient {
   readonly session?: TuiSessionState;
+  /** Absent on servers that speak the older protocol. */
+  readonly git?: TuiGit;
   /** Rejects with the server's failure, which never echoes the secret. */
   /** Waits this long after a keystroke before searching. Tests set it to 0. */
   readonly pathSearchDebounceMs?: number;
@@ -448,6 +493,64 @@ export function createTuiClient(
     label: "tui.create-worktree",
     tag: WS_METHODS.vcsCreateWorktree,
   });
+  const vcs = createVcsEnvironmentAtoms(runtime);
+  const vcsActions = createVcsActionManager(runtime);
+  const gitFailure = (result: { readonly cause: Cause.Cause<unknown> }, fallback: string) => {
+    const failure = Cause.squash(result.cause);
+    return new Error(failure instanceof Error && failure.message ? failure.message : fallback);
+  };
+  const git: TuiGit = {
+    actionState: (cwd) => vcsActions.stateAtom({ environmentId, cwd }),
+    status: async (registry, cwd) => {
+      const result = await refreshVcsStatus.run(registry, { environmentId, input: { cwd } });
+      if (AsyncResult.isFailure(result)) throw gitFailure(result, "Could not read the Git status.");
+      if (!AsyncResult.isSuccess(result)) throw new Error("Could not read the Git status.");
+      return result.value;
+    },
+    run: async (registry, target, input) => {
+      const result = await vcsActions
+        .runStackedAction({ environmentId, cwd: target.cwd })
+        .run(registry, {
+          ...input,
+          actionId: Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16))),
+          threadId: target.threadId,
+          projectId: target.projectId,
+        });
+      if (AsyncResult.isFailure(result)) throw gitFailure(result, "The Git action failed.");
+      if (!AsyncResult.isSuccess(result)) throw new Error("The Git action failed.");
+      return result.value as GitRunStackedActionResult;
+    },
+    pull: async (registry, cwd) => {
+      const result = await vcs.pull.run(registry, { environmentId, input: { cwd } });
+      if (AsyncResult.isFailure(result)) throw gitFailure(result, "Could not pull.");
+      if (!AsyncResult.isSuccess(result)) throw new Error("Could not pull.");
+      return result.value;
+    },
+    listRefs: async (registry, cwd) => {
+      const result = await listRefs.run(registry, {
+        environmentId,
+        input: { cwd, refKind: "all", limit: 200 },
+      });
+      if (AsyncResult.isFailure(result)) throw gitFailure(result, "Could not list branches.");
+      if (!AsyncResult.isSuccess(result)) throw new Error("Could not list branches.");
+      return result.value.refs;
+    },
+    switchRef: async (registry, input) => {
+      const result = await vcs.switchRef.run(registry, { environmentId, input });
+      if (AsyncResult.isFailure(result)) throw gitFailure(result, "Could not switch branch.");
+      if (!AsyncResult.isSuccess(result)) throw new Error("Could not switch branch.");
+      return result.value.refName ?? null;
+    },
+    createRef: async (registry, input) => {
+      const result = await vcs.createRef.run(registry, {
+        environmentId,
+        input: { ...input, switchRef: true },
+      });
+      if (AsyncResult.isFailure(result)) throw gitFailure(result, "Could not create the branch.");
+      if (!AsyncResult.isSuccess(result)) throw new Error("Could not create the branch.");
+      return result.value.refName;
+    },
+  };
   const searchProjectEntries = createEnvironmentRpcCommand(runtime, {
     label: "tui.search-project-entries",
     tag: WS_METHODS.projectsSearchEntries,
@@ -663,6 +766,7 @@ export function createTuiClient(
       if (!AsyncResult.isSuccess(result)) throw new Error("Could not search this project.");
       return result.value;
     },
+    ...(legacy ? {} : { git }),
     writeProjectFile: async (registry, input) =>
       AsyncResult.isSuccess(await writeProjectFile.run(registry, { environmentId, input })),
     implementPlanInNewThread: async (registry, source, plan) => {

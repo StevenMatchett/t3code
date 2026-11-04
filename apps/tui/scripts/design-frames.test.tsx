@@ -126,6 +126,14 @@ const screens: Record<string, (harness: Harness) => Promise<void>> = {
     await harness.driver.input.typeText("/");
     await harness.driver.flush();
   },
+  git: async (harness) => {
+    await openConversation(harness);
+    await harness.driver.input.pressKey("n", { ctrl: true });
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await harness.driver.flush();
+  },
   secret: async (harness) => {
     await openConversation(harness);
     await set(harness, 0, (thread) => ({

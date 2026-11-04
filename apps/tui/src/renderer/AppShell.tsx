@@ -454,6 +454,22 @@ function AppShellContent({
         enabled: selectedThread !== null,
         run: () => pushOverlay({ type: "diff" }),
       },
+      "git.open": {
+        enabled: selectedThread !== null,
+        run: () => {
+          if (!selectedThread) return;
+          const cwd =
+            selectedThread.worktreePath ??
+            rows.projects.find((project) => project.id === selectedThread.projectId)?.workspaceRoot;
+          if (cwd)
+            pushOverlay({
+              type: "git",
+              cwd,
+              threadId: selectedThread.id,
+              projectId: selectedThread.projectId,
+            });
+        },
+      },
       "pullRequest.open": { enabled: selectedThread !== null, run: openPullRequest },
       "checkpoint.restore": {
         enabled: selectedThread !== null,

@@ -11,6 +11,8 @@ import { FavoriteModelsPanel } from "./FavoriteModelsPanel.tsx";
 import { HelpPanel } from "./HelpPanel.tsx";
 import { NewProjectForm } from "./NewProjectForm.tsx";
 import { NewThreadForm } from "./NewThreadForm.tsx";
+import { GitBranchPicker } from "./GitBranchPicker.tsx";
+import { GitPanel } from "./GitPanel.tsx";
 import { ProposedPlanPanel } from "./ProposedPlanPanel.tsx";
 import { PullRequestPanel } from "./PullRequestPanel.tsx";
 import { RenameThreadDialog } from "./RenameThreadDialog.tsx";
@@ -188,6 +190,55 @@ export function renderShellOverlay(
             cwd={overlay.cwd}
             branch={overlay.branch}
             active={overlayActive}
+            onClose={popOverlay}
+          />
+        ),
+      };
+    case "git": {
+      const thread = rows.threads.find((item) => item.id === overlay.threadId);
+      return {
+        title: "Git",
+        size: { width: 84, height: 18 },
+        content: (
+          <GitPanel
+            client={client}
+            cwd={overlay.cwd}
+            threadId={overlay.threadId}
+            projectId={overlay.projectId}
+            active={overlayActive}
+            width={Math.max(1, Math.min(84, width - 6) - 2)}
+            height={contentRows(18)}
+            onClose={popOverlay}
+            onViewPullRequest={() => {
+              popOverlay();
+              pushOverlay({
+                type: "pull-request",
+                cwd: overlay.cwd,
+                branch: thread?.branch ?? null,
+              });
+            }}
+            onBranches={() =>
+              pushOverlay({
+                type: "git-branches",
+                cwd: overlay.cwd,
+                threadId: overlay.threadId,
+              })
+            }
+          />
+        ),
+      };
+    }
+    case "git-branches":
+      return {
+        title: "Switch branch",
+        size: { width: 84, height: 24 },
+        content: (
+          <GitBranchPicker
+            client={client}
+            cwd={overlay.cwd}
+            threadId={overlay.threadId}
+            active={overlayActive}
+            height={contentRows(24)}
             onClose={popOverlay}
           />
         ),

@@ -39,6 +39,18 @@ copyFileSync(
   join(fixture, "state/standalone/userdata/settings.json"),
 );
 const socket = `t3-tui-core-${process.pid}`;
+// A real repository, so the git panel and the `@` file menu have something true to read.
+const workspace = join(fixture, "workspace");
+mkdirSync(workspace, { recursive: true });
+writeFileSync(join(workspace, "README.md"), "# Core loop fixture\n");
+for (const args of [
+  ["init", "-b", "main"],
+  ["config", "user.name", "Fixture"],
+  ["config", "user.email", "fixture@example.com"],
+  ["add", "."],
+  ["commit", "-m", "Initial"],
+])
+  execFileSync("git", args, { cwd: workspace, stdio: "ignore" });
 const tmux = (...args) => execFileSync("tmux", ["-L", socket, ...args], { encoding: "utf8" });
 
 const port = await new Promise((resolvePort) => {
@@ -181,6 +193,28 @@ try {
   send("Escape");
   await waitFor(/CONVERSATION/, "the transcript");
   capture("transcript");
+  // Git: the panel opens from a real terminal and reads the fixture's real repository.
+  await timed("open git panel", () => send("C-n"), /Switch branch/);
+  await waitFor(/main/, "the branch in the git panel");
+  capture("git-panel");
+  await timed("close git panel", () => send("Escape"), /CONVERSATION/);
+
+  // The composer's two typed menus, against the real provider catalog and project index.
+  await timed("focus composer", () => send("Enter"), /MESSAGE/);
+  tmux("send-keys", "-t", "core", "-l", "/");
+  await waitFor(/Commands and skills/, "the command menu");
+  capture("slash-menu");
+  send("BSpace");
+  tmux("send-keys", "-t", "core", "-l", "@README");
+  await waitFor(/Files/, "the file menu");
+  await waitFor(/@README\.md/, "a file from the project index");
+  capture("mention-menu");
+  send("Enter");
+  await waitFor(/@README\.md /, "the mention in the draft");
+  send("C-u");
+  await waitFor(/\/ for commands/, "the empty composer");
+  send("Escape");
+  await waitFor(/CONVERSATION/, "the transcript");
   await timed("open diff", () => send("d"), /Thread changes/);
   capture("diff");
   await timed("close overlay", () => send("Escape"), /CONVERSATION|MESSAGE/);

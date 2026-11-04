@@ -23,7 +23,7 @@
     "test:backend": "tsc --noEmit false --outDir dist && node ./scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run --root . ./scripts/backend-auth.test.mjs",
     "test:terminal": "tsc --noEmit false --outDir dist && node ./scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run --root . ./scripts/terminal-rpc.test.mjs",
     "test:live": "tsc --noEmit false --outDir dist && node ./scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run --root . ./scripts/live-client.test.mjs",
-    "test:prompts": "tsc --noEmit false --outDir dist && node ./scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run --root . ./scripts/prompt-rpc.test.mjs",
+    "test:prompts": "tsc --noEmit false --outDir dist && node ./scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run --root . ./scripts/prompt-rpc.test.mjs ./scripts/git-rpc.test.mjs",
     "test:new-thread": "tsc --noEmit false --outDir dist && node ./scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run --root . ./scripts/new-thread.test.mjs",
     "typecheck": "tsc --noEmit"
   },

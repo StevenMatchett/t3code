@@ -19,6 +19,10 @@ import {
   ThreadId,
   type OrchestrationProjectShell,
   type UploadChatImageAttachment,
+  type GitRunStackedActionResult,
+  type GitStackedAction,
+  type VcsRef,
+  type VcsStatusResult,
   type ProjectEntry,
   type ProjectSearchEntriesInput,
   type ProjectWriteFileInput,
@@ -30,6 +34,7 @@ import {
 } from "@t3tools/client-runtime/connection";
 
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+import { EMPTY_VCS_ACTION_STATE } from "@t3tools/client-runtime/state/vcs";
 import * as Option from "effect/Option";
 import { planThreadCommands } from "../features/chat/proposedPlan.ts";
 import type { TuiCommand } from "../connection/commands.ts";
@@ -432,6 +437,46 @@ export function makeClientFixture(
   const managementCommands: ThreadManagementCommand[] = [];
   const secretAnswers: SecretRequestAnswerInput[] = [];
   const writtenFiles: ProjectWriteFileInput[] = [];
+  const gitActionState = Atom.make(EMPTY_VCS_ACTION_STATE);
+  const gitStatus: { current: VcsStatusResult } = {
+    current: {
+      isRepo: true,
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: "feature",
+      hasWorkingTreeChanges: true,
+      workingTree: {
+        files: [{ path: "src/a.ts", insertions: 2, deletions: 1 }],
+        insertions: 2,
+        deletions: 1,
+      },
+      hasUpstream: true,
+      aheadCount: 0,
+      behindCount: 0,
+      pr: null,
+    },
+  };
+  const gitRuns: { readonly target: object; readonly input: object }[] = [];
+  const gitFailure: { current: string | null } = { current: null };
+  const gitPulls = { current: 0 };
+  const gitSwitches: string[] = [];
+  const gitCreates: string[] = [];
+  const gitRefs: VcsRef[] = [
+    { name: "feature", current: true, isDefault: false, worktreePath: null },
+    { name: "main", current: false, isDefault: true, worktreePath: null },
+    { name: "taken", current: false, isDefault: false, worktreePath: "/elsewhere" },
+  ];
+  const gitResult = (action: GitStackedAction): GitRunStackedActionResult => ({
+    action,
+    branch: { status: "skipped_not_requested" },
+    commit: { status: "created", commitSha: "abc1234", subject: "Fixture commit" },
+    push: { status: "pushed", branch: "feature" },
+    pr:
+      action === "commit_push_pr" || action === "create_pr"
+        ? { status: "created", url: "https://github.com/example/repo/pull/42", number: 42 }
+        : { status: "skipped_not_requested" },
+    toast: { title: "Done", cta: { kind: "none" } },
+  });
   const pathSearches: ProjectSearchEntriesInput[] = [];
   const projectEntries: ProjectEntry[] = [
     { path: "src/projects/search.ts", kind: "file" },
@@ -495,6 +540,28 @@ export function makeClientFixture(
   });
   const client: TuiClient = {
     ...(session ? { session } : {}),
+    git: {
+      actionState: () => gitActionState,
+      status: async () => gitStatus.current,
+      run: async (_registry, target, input) => {
+        gitRuns.push({ target, input });
+        if (gitFailure.current) throw new Error(gitFailure.current);
+        return gitResult(input.action);
+      },
+      pull: async () => {
+        gitPulls.current += 1;
+        return { status: "pulled", refName: "feature", upstreamRef: "origin/feature" };
+      },
+      listRefs: async () => gitRefs,
+      switchRef: async (_registry, input) => {
+        gitSwitches.push(input.refName);
+        return input.refName;
+      },
+      createRef: async (_registry, input) => {
+        gitCreates.push(input.refName);
+        return input.refName;
+      },
+    },
     pathSearchDebounceMs: 0,
     searchProjectEntries: async (_registry, input) => {
       pathSearches.push(input);
@@ -606,6 +673,13 @@ export function makeClientFixture(
     managementCommands,
     secretAnswers,
     writtenFiles,
+    gitStatus,
+    gitActionState,
+    gitRuns,
+    gitFailure,
+    gitPulls,
+    gitSwitches,
+    gitCreates,
     pathSearches,
     planThreadStarts,
     archivedRows,

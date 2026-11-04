@@ -33,6 +33,12 @@ export interface ThreadManagementActions {
   readonly archive: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => Promise<boolean>;
   readonly unarchive: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => Promise<boolean>;
   readonly delete: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => Promise<boolean>;
+  /** Records the branch the thread's checkout moved to. */
+  readonly setBranch: (
+    registry: AtomRegistry.AtomRegistry,
+    threadId: ThreadId,
+    branch: string,
+  ) => Promise<boolean>;
   readonly lifecycle: (
     registry: AtomRegistry.AtomRegistry,
     threadId: ThreadId,
@@ -142,6 +148,8 @@ export function makeThreadManagementActions(options: {
         title: trimmed,
       });
     },
+    setBranch: (registry, threadId, branch) =>
+      run(registry, { type: "thread.meta.update", commandId: commandId(), threadId, branch }),
     archive: (registry, threadId) =>
       run(registry, { type: "thread.archive", commandId: commandId(), threadId }),
     unarchive: (registry, threadId) =>

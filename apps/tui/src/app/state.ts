@@ -28,6 +28,13 @@ export type ShellOverlay =
   | { readonly type: "rename"; readonly threadId: ThreadId }
   | { readonly type: "plan"; readonly threadId: ThreadId }
   | {
+      readonly type: "git";
+      readonly cwd: string;
+      readonly threadId: ThreadId;
+      readonly projectId: ProjectId;
+    }
+  | { readonly type: "git-branches"; readonly cwd: string; readonly threadId: ThreadId }
+  | {
       readonly type: "manage";
       readonly threadId: ThreadId;
       readonly initialAction?: "rename" | "delete";

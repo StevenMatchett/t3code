@@ -1,4 +1,5 @@
-import { PlanId } from "@t3tools/contracts";
+import { makeClientFixture } from "../testing/clientFixture.ts";
+import { PlanId, type VcsStatusResult } from "@t3tools/contracts";
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import type { CapturedFrame } from "@opentui/core";
 import * as Option from "effect/Option";
@@ -683,6 +684,176 @@ describe("states", () => {
     expect(footer).not.toContain("Expand");
     await driver.input.pressKey("p");
     expect(driver.captureFrame()).toContain("Add a project");
+  });
+});
+
+describe("git panel", () => {
+  const clean = {
+    hasWorkingTreeChanges: false,
+    workingTree: { files: [], insertions: 0, deletions: 0 },
+    aheadCount: 2,
+  };
+  async function setupGit(status: Partial<VcsStatusResult> = {}) {
+    const fixture = makeClientFixture();
+    Object.assign(fixture.gitStatus.current, status);
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await step(driver, "n", { ctrl: true });
+    return { driver, fixture };
+  }
+  const step = async (
+    driver: TuiTestDriver,
+    ...args: Parameters<TuiTestDriver["input"]["pressKey"]>
+  ) => {
+    await act(async () => {
+      await driver.input.pressKey(...args);
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+  };
+  const moveTo = async (driver: TuiTestDriver, label: string) => {
+    for (let index = 0; index < 8 && !driver.captureFrame().includes(`> ${label}`); index += 1)
+      await step(driver, "ARROW_DOWN");
+    expect(driver.captureFrame()).toContain(`> ${label}`);
+  };
+
+  it("commits with a typed message and reports the result", async () => {
+    const { driver, fixture } = await setupGit();
+    expect(driver.captureFrame()).toContain("feature · 1 file changed");
+    await step(driver, "RETURN");
+    expect(driver.captureFrame()).toContain("leave empty to have one written");
+    await driver.input.typeText("Fix the header");
+    await driver.flush();
+    await step(driver, "RETURN");
+    expect(fixture.gitRuns.at(-1)?.input).toEqual({
+      action: "commit",
+      commitMessage: "Fix the header",
+    });
+    expect(driver.captureFrame()).toContain("Done");
+  });
+
+  it("explains a disabled action instead of running it", async () => {
+    const { driver, fixture } = await setupGit();
+    await moveTo(driver, "Push");
+    expect(driver.captureFrame()).toContain("Commit or stash local changes before pushing.");
+    await step(driver, "RETURN");
+    expect(fixture.gitRuns).toEqual([]);
+  });
+
+  it("creates a PR without a message step and offers to copy its URL", async () => {
+    const { driver, fixture } = await setupGit(clean);
+    await moveTo(driver, "Create PR");
+    await step(driver, "RETURN");
+    expect(fixture.gitRuns.at(-1)?.input).toEqual({ action: "create_pr" });
+    expect(driver.captureFrame()).toMatch(/C\s+Copy URL/u);
+  });
+
+  it("stops before publishing from the default branch, and Enter alone cancels", async () => {
+    const { driver, fixture } = await setupGit({ ...clean, isDefaultRef: true });
+    await moveTo(driver, "Push");
+    await step(driver, "RETURN");
+    expect(driver.captureFrame()).toContain("Push to default branch?");
+    await step(driver, "RETURN");
+    expect(fixture.gitRuns).toEqual([]);
+
+    await step(driver, "RETURN");
+    await step(driver, "ARROW_DOWN");
+    await step(driver, "RETURN");
+    expect(fixture.gitRuns.at(-1)?.input).toEqual({ action: "push", featureBranch: true });
+  });
+
+  it("shows a failure and stays open", async () => {
+    const { driver, fixture } = await setupGit(clean);
+    fixture.gitFailure.current = "The remote rejected the push.";
+    await moveTo(driver, "Push");
+    await step(driver, "RETURN");
+    expect(driver.captureFrame()).toContain("The remote rejected the push.");
+    expect(driver.captureFrame()).toContain("> Push");
+  });
+
+  it("shows the running stage and refuses another action until it ends", async () => {
+    const { driver, fixture } = await setupGit(clean);
+    await act(async () =>
+      driver.registry.update(fixture.gitActionState, (state) => ({
+        ...state,
+        isRunning: true,
+        currentLabel: "Pushing to origin",
+        hookName: "pre-push",
+      })),
+    );
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Pushing to origin · pre-push");
+    await moveTo(driver, "Push");
+    await step(driver, "RETURN");
+    expect(fixture.gitRuns).toEqual([]);
+    await step(driver, "ESCAPE");
+    expect(driver.captureFrame()).toContain("Pushing to origin");
+  });
+
+  it("pulls", async () => {
+    const { driver, fixture } = await setupGit(clean);
+    await moveTo(driver, "Pull");
+    await step(driver, "RETURN");
+    expect(fixture.gitPulls.current).toBe(1);
+    expect(driver.captureFrame()).toContain("Pulled into feature.");
+  });
+
+  it("switches branches and records the new one on the thread", async () => {
+    const { driver, fixture } = await setupGit(clean);
+    await moveTo(driver, "Switch branch...");
+    await step(driver, "RETURN");
+    expect(driver.captureFrame()).toContain("Switch branch");
+    await driver.input.typeText("main");
+    await driver.flush();
+    await step(driver, "RETURN");
+    expect(fixture.gitSwitches).toEqual(["main"]);
+    expect(fixture.managementCommands.at(-1)).toMatchObject({
+      type: "thread.meta.update",
+      branch: "main",
+    });
+  });
+
+  it("creates a branch from a name that matches nothing", async () => {
+    const { driver, fixture } = await setupGit(clean);
+    await moveTo(driver, "Switch branch...");
+    await step(driver, "RETURN");
+    await driver.input.typeText("brand-new");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Create branch brand-new");
+    await step(driver, "RETURN");
+    expect(fixture.gitCreates).toEqual(["brand-new"]);
+  });
+
+  it("will not switch to a branch held by another worktree", async () => {
+    const { driver, fixture } = await setupGit(clean);
+    await moveTo(driver, "Switch branch...");
+    await step(driver, "RETURN");
+    await driver.input.typeText("taken");
+    await driver.flush();
+    await step(driver, "RETURN");
+    expect(fixture.gitSwitches).toEqual([]);
+    expect(driver.captureFrame()).toContain("taken is checked out in /elsewhere.");
+  });
+
+  it("says so on a server without git actions", async () => {
+    const fixture = makeClientFixture();
+    const { git: _git, ...client } = fixture.client;
+    const driver = await createTuiTestDriver(<AppShell client={client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await step(driver, "n", { ctrl: true });
+    expect(driver.captureFrame()).toContain("Git actions need a newer T3 Code server.");
   });
 });
 
