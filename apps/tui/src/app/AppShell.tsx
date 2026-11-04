@@ -247,7 +247,16 @@ function Header({
       <Text strong tone="accent" flexShrink={0} height={1}>
         T3 TUI
       </Text>
-      <Text tone="text" flexGrow={1} minWidth={0} height={1} wrapMode="none" truncate>
+      <Text
+        tone="text"
+        flexGrow={1}
+        flexShrink={1}
+        flexBasis={0}
+        minWidth={0}
+        height={1}
+        wrapMode="none"
+        truncate
+      >
         {breadcrumb}
       </Text>
       {showLabel ? (

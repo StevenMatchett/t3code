@@ -86,7 +86,7 @@ const waitFor = async (pattern, label, timeoutMs = 30_000) => {
   while (Date.now() < deadline) {
     const text = pane();
     if (pattern.test(text)) return text;
-    await sleep(5);
+    await sleep(1);
   }
   throw new Error(`Timed out waiting for ${label}.\n${pane()}`);
 };
@@ -107,6 +107,16 @@ const percentile = (values, p) =>
     Math.min(values.length - 1, Math.floor((values.length * p) / 100))
   ];
 
+// One capture round trip, which every latency below includes at least once.
+const captureCost = () => {
+  const samples = Array.from({ length: 30 }, () => {
+    const started = performance.now();
+    pane();
+    return performance.now() - started;
+  });
+  return percentile(samples, 50);
+};
+
 let failed = false;
 try {
   tmux("new-session", "-d", "-s", "core", "-x", "80", "-y", "24", launch);
@@ -116,6 +126,7 @@ try {
     60_000,
   );
   capture("first-launch");
+  const overhead = captureCost();
 
   // The empty state says to press P.
   await timed("open form", () => send("p"), /Add a project/);
@@ -182,6 +193,15 @@ try {
   await timed("scroll by page", () => send("PageDown"), /\s(?!1-)\d+-\d+ of \d+/);
   capture("help-scrolled");
   await timed("close overlay", () => send("Escape"), /CONVERSATION|MESSAGE/);
+  // An idle client must not repaint: output and CPU both stay flat while nothing changes.
+  const cpuTicks = () => {
+    const pid = tmux("list-panes", "-t", "core", "-F", "#{pane_pid}").trim();
+    const fields = readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1].split(" ");
+    return Number(fields[11]) + Number(fields[12]);
+  };
+  const idleStart = cpuTicks();
+  await sleep(5_000);
+  process.stdout.write(`idle CPU over 5s: ${(cpuTicks() - idleStart) * 10}ms\n`);
   tmux("resize-window", "-t", "core", "-x", "120", "-y", "40");
   await waitFor(/Threads \(1\)/, "the sidebar at 120 columns");
   capture("resized");
@@ -194,6 +214,7 @@ try {
     await sleep(50);
   }
   process.stdout.write(`tmux core loop passed. Frames: ${frames}\n`);
+  process.stdout.write(`capture round trip: ${overhead.toFixed(1)}ms\n`);
   for (const [name, values] of latencies)
     process.stdout.write(
       `${name}: p50 ${percentile(values, 50).toFixed(1)}ms p95 ${percentile(values, 95).toFixed(1)}ms (n=${values.length})\n`,

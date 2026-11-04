@@ -1,3 +1,7 @@
+import { createTuiTestDriver } from "../../testing/driver.tsx";
+import { richTerminalCapabilities } from "../../ui/capabilities.ts";
+import { UiProvider } from "../../ui/context.tsx";
+import { lightTheme } from "../../ui/theme.ts";
 import { EmbeddedTerminalRenderable } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
 import type { TerminalOutputState } from "@t3tools/client-runtime/state/terminal";
@@ -18,6 +22,11 @@ import {
 } from "./EmbeddedTerminalSurface.tsx";
 
 const encoder = new TextEncoder();
+/** What reached the emulator from the shell, without the theme's own color sequences. */
+const shellOutput = (calls: ReadonlyArray<ReadonlyArray<unknown>>) =>
+  calls
+    .map(([data]) => data)
+    .filter((data) => !(typeof data === "string" && data.startsWith("\u001b]11;")));
 
 function outputState(
   data: string,
@@ -202,15 +211,15 @@ describeWithNativeFfi("EmbeddedTerminalSurface", () => {
 
     const terminal = rendered.renderer.root.findDescendantById("t3-embedded-terminal");
     expect(terminal).toBeInstanceOf(EmbeddedTerminalRenderable);
-    expect(write.mock.calls.map(([data]) => data)).toEqual(["hello"]);
+    expect(shellOutput(write.mock.calls)).toEqual(["hello"]);
 
     rendered.setOutput(appendedOutput(initial, " world"));
     await rendered.flush();
-    expect(write.mock.calls.map(([data]) => data)).toEqual(["hello", " world"]);
+    expect(shellOutput(write.mock.calls)).toEqual(["hello", " world"]);
 
     rendered.setOutput(appendedOutput(initial, " world"));
     await rendered.flush();
-    expect(write.mock.calls.map(([data]) => data)).toEqual(["hello", " world"]);
+    expect(shellOutput(write.mock.calls)).toEqual(["hello", " world"]);
     await act(async () => rendered.renderer.destroy());
   });
 
@@ -317,5 +326,25 @@ describeWithNativeFfi("EmbeddedTerminalSurface", () => {
     expect(terminal.focused).toBe(false);
     expect(rendered.onWrite.mock.calls.flatMap(([data]) => [...data])).not.toContain("\x1c");
     await act(async () => rendered.renderer.destroy());
+  });
+
+  it("paints the shell with the active theme instead of the emulator's black", async () => {
+    const driver = await createTuiTestDriver(
+      <UiProvider capabilities={richTerminalCapabilities} theme={lightTheme}>
+        <EmbeddedTerminalSurface
+          output={outputState("hi")}
+          focused={false}
+          onWrite={() => undefined}
+          onResize={() => undefined}
+          onReleaseFocus={() => undefined}
+          onCopy={() => undefined}
+        />
+      </UiProvider>,
+      { width: 30, height: 6 },
+    );
+    await driver.flush();
+    const blank = driver.captureSpans().lines[3]!.spans[0]!.bg.toInts().slice(0, 3);
+    await driver.close();
+    expect(blank).toEqual([255, 255, 255]);
   });
 });

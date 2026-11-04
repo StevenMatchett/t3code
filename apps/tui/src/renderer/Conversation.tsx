@@ -518,6 +518,10 @@ export function Conversation({
         live,
       )
     : "stale";
+  // An answered request stays on the server until it confirms, but it no longer needs the reader.
+  const answered =
+    (phase === "waiting_for_approval" || phase === "waiting_for_input") && !approval && !question;
+  const shownPhase = answered ? "running" : phase;
   const timingTurn =
     phase === "completed" || (phase !== "stale" && thread?.latestTurn?.state === "running")
       ? (thread?.latestTurn ?? null)
@@ -659,7 +663,7 @@ export function Conversation({
         />
         <StatusRow
           worktree={Boolean(thread?.worktreePath)}
-          phase={phase}
+          phase={shownPhase}
           animate={active}
           // A notice or the way back to live output matters more than when the turn ended.
           timingTurn={
@@ -673,15 +677,19 @@ export function Conversation({
           showParent={parentThreadId !== null}
           renderMarkdown={renderMarkdown}
           message={
-            requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
-              ? "A: respond to requests"
-              : interaction.pending
-                ? "Sending command..."
-                : queued?.status === "queued"
-                  ? "Sends after next tool call / turn end"
-                  : (interaction.notice ?? "")
+            answered
+              ? "Response sent."
+              : approval || question
+                ? mode === "requests" || mode === "questions"
+                  ? ""
+                  : "A: respond to requests"
+                : interaction.pending
+                  ? "Sending command..."
+                  : queued?.status === "queued"
+                    ? "Sends after next tool call / turn end"
+                    : (interaction.notice ?? "")
           }
-          messageTone={requestCount ? "warning" : "muted"}
+          messageTone={approval || question ? "warning" : "muted"}
           detail={[
             linkMenu.notice,
             mode === "history" ? vim.status : "",

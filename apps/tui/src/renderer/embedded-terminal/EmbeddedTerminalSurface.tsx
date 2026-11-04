@@ -1,3 +1,5 @@
+import { useThemeColor } from "../../ui/context.tsx";
+import type { TuiEmbeddedTerminalRenderable } from "./register.ts";
 import {
   EmbeddedTerminalRenderable,
   type EmbeddedTerminalDataSource,
@@ -162,6 +164,16 @@ export const EmbeddedTerminalSurface = forwardRef<
     terminalRef.current?.blur();
     releaseFocusRef.current();
   }, []);
+
+  const background = useThemeColor("panel");
+  const foreground = useThemeColor("text");
+  useLayoutEffect(() => {
+    if (!background || !foreground) return;
+    (terminalRef.current as TuiEmbeddedTerminalRenderable | null)?.setDefaultColors(
+      background,
+      foreground,
+    );
+  }, [background, foreground, terminalEpoch]);
 
   useLayoutEffect(() => {
     const update = readTerminalOutputUpdate(output, cursorRef.current);

@@ -125,6 +125,10 @@ export async function startRendererRuntime(
       (() =>
         createCliRenderer({
           exitOnCtrlC: false,
+          // Rendering is on demand, so these only cap how soon the next frame may follow a change.
+          // They do not cause idle repaints, and they shorten the wait after a keypress.
+          targetFps: 60,
+          maxFps: 120,
           // Enter can retain its legacy encoding unless all keys are reported.
           // Request associated text too so composed/non-ASCII input is preserved.
           useKittyKeyboard: { allKeysAsEscapes: true, reportText: true },

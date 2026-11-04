@@ -187,6 +187,28 @@ describe("layout stability", () => {
   });
 });
 
+describe("honest labels", () => {
+  it("stops asking for a response as soon as one is sent", async () => {
+    const { driver, update } = await setup(80, 24);
+    await openThread(driver);
+    await update(0, (thread) => ({ ...thread, latestTurn: runningTurn }));
+    await setRequests(update, designApproval());
+    expect(driver.captureFrame()).toContain("Approval needed");
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    const frame = driver.captureFrame();
+    expect(frame).toContain("Response sent.");
+    expect(frame).not.toContain("A: respond to requests");
+    expect(frame).not.toContain("Approval needed");
+  });
+
+  it.each([60, 80, 104])("keeps the connection status readable at width %i", async (width) => {
+    const { driver } = await setup(width, 24);
+    await openThread(driver);
+    expect(driver.captureFrame().split("\n")[0]).toContain("Connected");
+  });
+});
+
 describe("scroll anchoring", () => {
   it("does not move what you are reading when output arrives, and End returns to live", async () => {
     const { driver, update } = await setup();

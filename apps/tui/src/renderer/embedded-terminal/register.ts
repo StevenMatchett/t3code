@@ -16,8 +16,17 @@ const navigationKeys: Readonly<Record<string, string>> = {
   end: "End",
 };
 
-class TuiEmbeddedTerminalRenderable extends EmbeddedTerminalRenderable {
+export class TuiEmbeddedTerminalRenderable extends EmbeddedTerminalRenderable {
   private pendingOutput: Array<string | Uint8Array> | null = [];
+
+  /**
+   * Sets the emulator's default colors, so the shell matches the app's theme and programs asking the
+   * terminal for its background get the true answer. This is local state, not shell output.
+   */
+  setDefaultColors(background: string, foreground: string): void {
+    super.write(`\u001b]11;${background}\u0007\u001b]10;${foreground}\u0007`);
+    this.requestRender();
+  }
 
   override write(data: string | Uint8Array): void {
     if (this.pendingOutput !== null) {
