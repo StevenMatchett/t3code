@@ -220,6 +220,30 @@ it.live.each(["complete", "interrupt", "approval", "question", "choices"])(
       );
       NodeAssert.equal(finished.messages.filter((message) => message.role === "user").length, 1);
       if (scenario === "complete") {
+        // A real fork from the finished run: the server accepts it and the new thread appears.
+        const finished = Option.getOrThrow(registry.get(client.thread(threadId)).data);
+        const unmountShell = registry.mount(client.shell);
+        yield* Effect.addFinalizer(() => Effect.sync(unmountShell));
+        const forkId = yield* Effect.promise(() =>
+          client.forkThreadFromRun(registry, {
+            sourceThreadId: threadId,
+            runId: finished.latestTurn.turnId,
+            title: "Fixture fork",
+          }),
+        );
+        NodeAssert.ok(forkId, "the server accepted the fork");
+        yield* AtomRegistry.toStream(registry, client.shell).pipe(
+          Stream.filter(
+            (state) =>
+              Option.isSome(state.snapshot) &&
+              state.snapshot.value.threads.some(
+                (thread) => thread.id === forkId && thread.title === "Fixture fork",
+              ),
+          ),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.timeout("15 seconds"),
+        );
         yield* waitFor((thread) => thread.checkpoints.length > 0);
         const prompt = finished.messages.find((message) => message.role === "user");
         NodeAssert.equal(
