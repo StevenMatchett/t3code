@@ -12,11 +12,62 @@ import { Button } from "../ui/Button.tsx";
 import { ListFilterRow } from "../ui/FormField.tsx";
 import { ListView } from "../ui/ListView.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
+import { useThemeColor, useUi } from "../ui/context.tsx";
 import { diffFiles } from "../ui/diffFiles.ts";
+import { parseDiffRows, splitDiffRows, type DiffRow } from "../ui/diffRows.ts";
+import { diffSyntaxTokens, type DiffTokenKind } from "../ui/diffSyntax.ts";
+import { FormInput } from "../ui/FormField.tsx";
 import type { ThemeToken } from "../ui/theme.ts";
 
 type Scope = "saved" | "working" | number;
 const EMPTY_DIFF = Atom.make({ diff: "", loading: false, failed: false, truncated: false });
+/** Below this a side-by-side pane is too narrow to read code in. */
+const SPLIT_MIN_WIDTH = 100;
+
+const rowTone = (kind: DiffRow["kind"]): ThemeToken =>
+  kind === "hunk" ? "accent" : kind === "add" ? "success" : kind === "del" ? "danger" : "text";
+
+/** One column of diff text: the code in syntax color, with the sign carrying the change. */
+function DiffText({
+  row,
+  path,
+  width,
+  text,
+}: {
+  readonly row: DiffRow;
+  readonly path: string;
+  readonly width: number;
+  /** The part of the row to draw, when a long line wraps. */
+  readonly text?: string;
+}) {
+  const colors: Record<DiffTokenKind, string | undefined> = {
+    plain: useThemeColor(rowTone(row.kind)),
+    keyword: useThemeColor("syntaxCommand"),
+    string: useThemeColor("syntaxString"),
+    comment: useThemeColor("muted"),
+    number: useThemeColor("syntaxNumber"),
+  };
+  const signColor = useThemeColor(rowTone(row.kind));
+  const isCode = row.kind === "add" || row.kind === "del" || row.kind === "context";
+  const shown = text ?? row.raw;
+  const sign = isCode ? shown.slice(0, 1) : "";
+  const tokens = isCode
+    ? diffSyntaxTokens(shown.slice(1), path)
+    : [{ text: shown, kind: "plain" as const }];
+  return (
+    <Text height={1} width={width} flexShrink={0} tone={rowTone(row.kind)} wrapMode="none">
+      {sign ? <span {...(signColor ? { fg: signColor } : {})}>{sign}</span> : null}
+      {tokens.map((token, index) => {
+        const color = colors[token.kind];
+        return (
+          <span key={index} {...(color ? { fg: color } : {})}>
+            {token.text}
+          </span>
+        );
+      })}
+    </Text>
+  );
+}
 
 export function ThreadDiff({
   client,
@@ -31,9 +82,11 @@ export function ThreadDiff({
   readonly active: boolean;
   readonly width: number;
   readonly height: number;
-  readonly onClose: () => void;
+  /** `commented` means the message gained line comments, so the composer should take focus. */
+  readonly onClose: (commented?: boolean) => void;
 }) {
   const registry = useContext(RegistryContext);
+  const { capabilities } = useUi();
   const state = useAtomValue(client.thread(threadId));
   const shell = useAtomValue(client.shell);
   const thread = Option.getOrNull(state.data);
@@ -111,34 +164,64 @@ export function ThreadDiff({
   const selected = Math.max(0, Math.min(cursor, files.length - 1));
   const file = files[selected];
   const split = width >= 76;
+  const [sideBySide, setSideBySide] = useState<boolean | null>(null);
+  const [lineCursor, setLineCursor] = useState(0);
+  const [comment, setComment] = useState<string | null>(null);
+  const [commentCount, setCommentCount] = useState(0);
   const listWidth = split ? Math.min(48, Math.floor(width / 3)) : width;
   const count = Math.max(1, height - 2);
   const diffWidth = Math.max(1, split ? width - listWidth - 1 : width);
+  const canSplit = diffWidth >= SPLIT_MIN_WIDTH;
+  // Wide enough for two readable columns means side by side, until the reader chooses otherwise.
+  const showSplit = canSplit && (sideBySide ?? diffWidth >= SPLIT_MIN_WIDTH + 20);
+  const textWidth = Math.max(1, diffWidth - 1);
+  const columnWidth = Math.max(1, Math.floor((textWidth - 1) / 2));
+  const parsed = useMemo(() => parseDiffRows(file?.text ?? ""), [file?.text]);
   const lines = useMemo(
     () =>
-      (file?.text ?? "").split("\n").flatMap((text, index) => {
-        const tone: ThemeToken =
-          text.startsWith("diff --git") || text.startsWith("@@")
-            ? "accent"
-            : text.startsWith("+")
-              ? "success"
-              : text.startsWith("-")
-                ? "danger"
-                : "text";
-        return wrapTerminalLines(text, diffWidth).map((part, partIndex) => ({
-          id: `${index}:${partIndex}`,
-          text: part,
-          tone,
-        }));
-      }),
-    [file?.text, diffWidth],
+      showSplit
+        ? splitDiffRows(parsed).map((pair, index) => ({
+            id: `${index}`,
+            row: pair.right ?? pair.left!,
+            pair,
+            part: undefined,
+          }))
+        : parsed.flatMap((row, index) =>
+            wrapTerminalLines(row.raw, textWidth).map((part, partIndex) => ({
+              id: `${index}:${partIndex}`,
+              row,
+              pair: null,
+              part,
+            })),
+          ),
+    [parsed, showSplit, textWidth],
   );
   const maximum = Math.max(0, lines.length - count);
   const start = Math.min(offset, maximum);
   const scroll = (position: number) => setOffset(Math.max(0, Math.min(maximum, position)));
+  const line = Math.max(0, Math.min(lineCursor, lines.length - 1));
+  const moveLine = (position: number) => {
+    const next = Math.max(0, Math.min(lines.length - 1, position));
+    setLineCursor(next);
+    // The view follows the cursor, so scrolling by key and moving the cursor are one motion.
+    if (next < start) scroll(next);
+    else if (next >= start + count) scroll(next - count + 1);
+  };
+  const target = lines[line]?.row;
+  const targetLine = target?.newLine ?? target?.oldLine ?? null;
+  const saveComment = () => {
+    const text = comment?.trim();
+    if (!text || !file || targetLine === null) return;
+    const draft = registry.get(client.actions.state(threadId)).draft;
+    const entry = `${file.path}:${targetLine}: ${text}`;
+    client.actions.setDraft(registry, threadId, draft ? `${draft}\n${entry}` : entry);
+    setCommentCount((value) => value + 1);
+    setComment(null);
+  };
   const selectFile = (index: number) => {
     setCursor(Math.max(0, Math.min(files.length - 1, index)));
     setOffset(0);
+    setLineCursor(0);
   };
   const changeScope = (next: Scope) => {
     setScope(next);
@@ -151,21 +234,38 @@ export function ThreadDiff({
     );
   const move = (fileIndex: number, lineIndex: number) => {
     if (focus === "files") selectFile(fileIndex);
-    else scroll(lineIndex);
+    else moveLine(lineIndex);
   };
   const closeFilter = () => {
     setFilter(null);
     setCursor(0);
     setOffset(0);
   };
+  useKeyLayer("diffComment", {
+    active: active && comment !== null,
+    modal: true,
+    typing: true,
+    bindings: {
+      "diffComment.save": { enabled: Boolean(comment?.trim()), run: saveComment },
+      "diffComment.cancel": () => setComment(null),
+    },
+  });
   useKeyLayer("diff", {
-    active,
+    active: active && comment === null,
     modal: true,
     typing: filter !== null,
     bindings: {
       "diff.close": () => {
         if (filter !== null) closeFilter();
-        else onClose();
+        else onClose(commentCount > 0);
+      },
+      "diff.layout": {
+        enabled: filter === null && canSplit,
+        run: () => setSideBySide(!showSplit),
+      },
+      "diff.comment": {
+        enabled: filter === null && focus === "diff" && targetLine !== null,
+        run: () => setComment(""),
       },
       "diff.filter": { enabled: filter === null, run: () => setFilter("") },
       "diff.saved": { enabled: filter === null, run: () => changeScope("saved") },
@@ -181,12 +281,12 @@ export function ThreadDiff({
       "diff.switchPane": () => setFocus((value) => (value === "files" ? "diff" : "files")),
       "diff.openFile": () => setFocus("diff"),
       "diff.files": () => setFocus("files"),
-      "diff.up": () => move(selected - 1, start - 1),
-      "diff.down": () => move(selected + 1, start + 1),
-      "diff.pageUp": () => move(selected - count, start - count),
-      "diff.pageDown": () => move(selected + count, start + count),
+      "diff.up": () => move(selected - 1, line - 1),
+      "diff.down": () => move(selected + 1, line + 1),
+      "diff.pageUp": () => move(selected - count, line - count),
+      "diff.pageDown": () => move(selected + count, line + count),
       "diff.top": () => move(0, 0),
-      "diff.bottom": () => move(files.length - 1, maximum),
+      "diff.bottom": () => move(files.length - 1, lines.length - 1),
     },
   });
   const scopeButton = (id: string, label: string, chosen: boolean, action: () => void) => (
@@ -226,31 +326,49 @@ export function ThreadDiff({
         {scopeButton("previous", "[ Prev", false, () => cycleScope(-1))}
         {scopeButton("next", "Next ]", false, () => cycleScope(1))}
       </Stack>
-      <ListFilterRow
-        id="diff-filter"
-        value={filter}
-        focused={active}
-        onInput={(value) => {
-          setFilter(value);
-          setCursor(0);
-          setOffset(0);
-        }}
-      >
-        <Text
-          height={1}
-          flexShrink={0}
-          tone={result.truncated ? "warning" : "muted"}
-          wrapMode="none"
-          truncate
+      {comment !== null ? (
+        <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
+          <Text height={1} flexShrink={0} tone="muted" wrapMode="none">
+            {`${file?.path ?? ""}:${targetLine ?? ""}`.slice(-Math.floor(width / 3))}
+          </Text>
+          <FormInput
+            id="diff-comment"
+            value={comment}
+            placeholder="Comment on this line"
+            focused={active}
+            onInput={setComment}
+          />
+        </Stack>
+      ) : (
+        <ListFilterRow
+          id="diff-filter"
+          value={filter}
+          focused={active}
+          onInput={(value) => {
+            setFilter(value);
+            setCursor(0);
+            setOffset(0);
+          }}
         >
-          {selectedScope === "saved"
-            ? `Saved changes through turn ${latest}`
-            : selectedScope === "working"
-              ? "Uncommitted workspace changes"
-              : `Turn ${selectedScope} changes`}
-          {` · ${files.length} files${result.truncated ? " · Preview truncated" : ""}`}
-        </Text>
-      </ListFilterRow>
+          <Text
+            height={1}
+            flexShrink={0}
+            tone={result.truncated ? "warning" : "muted"}
+            wrapMode="none"
+            truncate
+          >
+            {selectedScope === "saved"
+              ? `Saved changes through turn ${latest}`
+              : selectedScope === "working"
+                ? "Uncommitted workspace changes"
+                : `Turn ${selectedScope} changes`}
+            {` · ${files.length} files${result.truncated ? " · Preview truncated" : ""}`}
+            {commentCount > 0
+              ? ` · ${commentCount} ${commentCount === 1 ? "comment" : "comments"} in your message`
+              : ""}
+          </Text>
+        </ListFilterRow>
+      )}
       {message ? (
         <Stack flexGrow={1}>
           {result.failed ? (
@@ -307,11 +425,45 @@ export function ThreadDiff({
                 event.stopPropagation();
               }}
             >
-              {lines.slice(start, start + count).map((line) => (
-                <Text key={line.id} height={1} flexShrink={0} tone={line.tone} wrapMode="none">
-                  {line.text}
-                </Text>
-              ))}
+              {lines.slice(start, start + count).map((entry, index) => {
+                const atCursor = focus === "diff" && start + index === line;
+                return (
+                  <Stack key={entry.id} height={1} flexShrink={0} flexDirection="row">
+                    <Text height={1} width={1} flexShrink={0} tone="accent" wrapMode="none">
+                      {atCursor ? (capabilities.unicode ? "▌" : ">") : " "}
+                    </Text>
+                    {entry.pair ? (
+                      <Stack height={1} flexDirection="row" gap={1}>
+                        {entry.pair.left ? (
+                          <DiffText
+                            row={entry.pair.left}
+                            path={file?.path ?? ""}
+                            width={columnWidth}
+                          />
+                        ) : (
+                          <Text height={1} width={columnWidth} flexShrink={0}>
+                            {" "}
+                          </Text>
+                        )}
+                        {entry.pair.right ? (
+                          <DiffText
+                            row={entry.pair.right}
+                            path={file?.path ?? ""}
+                            width={columnWidth}
+                          />
+                        ) : null}
+                      </Stack>
+                    ) : (
+                      <DiffText
+                        row={entry.row}
+                        path={file?.path ?? ""}
+                        width={textWidth}
+                        {...(entry.part === undefined ? {} : { text: entry.part })}
+                      />
+                    )}
+                  </Stack>
+                );
+              })}
             </Stack>
           ) : null}
         </Stack>

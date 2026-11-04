@@ -3,7 +3,7 @@ import { PlanId, type VcsStatusResult } from "@t3tools/contracts";
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import type { CapturedFrame } from "@opentui/core";
 import * as Option from "effect/Option";
-import { Atom } from "effect/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { act } from "react";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
 import {
@@ -695,6 +695,146 @@ describe("help rows", () => {
     expect(frame).toMatch(/↑\s+Previous row/u);
     expect(frame).toMatch(/↓\s+Next row/u);
     expect(frame).not.toMatch(/↑↓\s+Previous row/u);
+  });
+});
+
+describe("diff viewer", () => {
+  const DIFF = [
+    "diff --git a/src/a.ts b/src/a.ts",
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -10,2 +10,3 @@",
+    " const keep = 1;",
+    "-const old = 2;",
+    "+const fresh = 3;",
+    "+const more = 4;",
+  ].join("\n");
+  async function openDiff(width: number, height: number) {
+    const fixture = makeDesignFixture();
+    const client = {
+      ...fixture.client,
+      diffs: {
+        ...fixture.client.diffs,
+        fullThreadDiff: () => Atom.make(AsyncResult.success({ diff: DIFF })),
+      } as never,
+    };
+    const driver = await createTuiTestDriver(<AppShell client={client} />, {
+      width,
+      height,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("d");
+    await driver.flush();
+    return { driver, fixture };
+  }
+
+  it("reads across side by side on a wide terminal, and V goes back to unified", async () => {
+    const { driver } = await openDiff(200, 60);
+    const row = () =>
+      driver
+        .captureFrame()
+        .split("\n")
+        .find((line) => line.includes("const old"))!;
+    expect(row()).toContain("const fresh");
+    await driver.input.pressKey("v");
+    await driver.flush();
+    expect(row()).not.toContain("const fresh");
+  });
+
+  it("stays unified where two columns would not be readable", async () => {
+    const { driver } = await openDiff(80, 24);
+    // At this width the file list and the diff take turns on screen.
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("v");
+    await driver.flush();
+    const frame = driver.captureFrame();
+    expect(frame.split("\n").find((line) => line.includes("const old"))).not.toContain("fresh");
+  });
+
+  it("colors code by syntax", async () => {
+    const { driver } = await openDiff(120, 40);
+    await driver.input.pressKey("TAB");
+    await driver.flush();
+    const line = driver.captureSpans().lines.find((item) =>
+      item.spans
+        .map((span) => span.text)
+        .join("")
+        .includes("const fresh"),
+    )!;
+    const color = (needle: string) =>
+      line.spans
+        .find((span) => span.text.includes(needle))!
+        .fg.toInts()
+        .join();
+    expect(color("const")).not.toBe(color("fresh"));
+  });
+
+  it("sends a line comment to the message, and closing focuses the composer", async () => {
+    const { driver, fixture } = await openDiff(120, 40);
+    const id = fixture.threads[0]!.id;
+    await driver.input.pressKey("TAB");
+    for (let index = 0; index < 6; index += 1) await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("c");
+    await driver.flush();
+    await driver.input.typeText("Why three?");
+    await driver.flush();
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe(
+      "src/a.ts:11: Why three?",
+    );
+    expect(driver.captureFrame()).toContain("1 comment in your message");
+
+    await driver.input.pressKey("ESCAPE");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("MESSAGE");
+  });
+
+  it("will not comment on the file header, and Esc cancels a comment", async () => {
+    const { driver, fixture } = await openDiff(120, 40);
+    const id = fixture.threads[0]!.id;
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("c");
+    await driver.flush();
+    expect(driver.captureFrame()).not.toContain("Comment on this line");
+    for (let index = 0; index < 6; index += 1) await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("c");
+    await driver.input.typeText("nope");
+    await driver.input.pressKey("ESCAPE");
+    await driver.flush();
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe("");
+    expect(driver.captureFrame()).toContain("Thread changes");
+  });
+});
+
+describe("fork from a run", () => {
+  it("offers the latest run in the palette and opens the fork", async () => {
+    const fixture = makeDesignFixture();
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("k", { ctrl: true });
+    await driver.input.typeText("fork thread");
+    await act(async () => {
+      await driver.input.pressKey("RETURN");
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(fixture.forks).toEqual([
+      {
+        sourceThreadId: fixture.threads[0]!.id,
+        runId: fixture.threads[0]!.latestTurn!.turnId,
+        title: `${fixture.threads[0]!.title} fork`,
+      },
+    ]);
   });
 });
 

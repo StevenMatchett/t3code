@@ -18,12 +18,14 @@ export function CheckpointRestore({
   active,
   height,
   onClose,
+  onForked,
 }: {
   readonly client: TuiClient;
   readonly threadId: ThreadId;
   readonly active: boolean;
   readonly height: number;
   readonly onClose: (restored?: boolean) => void;
+  readonly onForked: (threadId: ThreadId) => void;
 }) {
   const registry = useContext(RegistryContext);
   const state = useAtomValue(client.thread(threadId));
@@ -38,6 +40,7 @@ export function CheckpointRestore({
   const [cursor, setCursor] = useState(0);
   const [messageId, setMessageId] = useState<MessageId | null>(null);
   const [choice, setChoice] = useState(0);
+  const [forkFailed, setForkFailed] = useState(false);
   const selected = Math.min(cursor, Math.max(0, targets.length - 1));
   const pending = interaction.pending === "rewind";
   const target = targets.find((entry) => entry.message.id === messageId);
@@ -75,6 +78,25 @@ export function CheckpointRestore({
         run: () => {
           setFilter("");
           setCursor(0);
+        },
+      },
+      "restore.fork": {
+        enabled:
+          !pending &&
+          !messageId &&
+          filter === null &&
+          Boolean(client.forkThreadFromRun && targets[selected]?.message.turnId),
+        run: async () => {
+          const runId = targets[selected]?.message.turnId;
+          if (!runId || !thread) return;
+          setForkFailed(false);
+          const forked = await client.forkThreadFromRun?.(registry, {
+            sourceThreadId: threadId,
+            runId,
+            title: `${thread.title} fork`,
+          });
+          if (forked) onForked(forked);
+          else setForkFailed(true);
         },
       },
       "restore.up": {
@@ -124,7 +146,11 @@ export function CheckpointRestore({
         }}
       >
         <Text height={1} flexShrink={0} strong>
-          {messageId ? "Edit from here?" : "Select a prompt to edit from"}
+          {messageId
+            ? "Edit from here?"
+            : forkFailed
+              ? "The fork was not created. Try again."
+              : "Select a prompt to edit from, or F to fork from it"}
         </Text>
       </ListFilterRow>
       {messageId ? (

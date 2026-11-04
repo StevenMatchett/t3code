@@ -155,7 +155,10 @@ export function renderShellOverlay(
                 active={overlayActive}
                 width={Math.max(1, width - 6)}
                 height={layout.contentHeight}
-                onClose={popOverlay}
+                onClose={(commented) => {
+                  popOverlay();
+                  if (commented) focusComposer();
+                }}
               />
             ),
           }
@@ -172,6 +175,11 @@ export function renderShellOverlay(
                 threadId={state.threadId}
                 active={overlayActive}
                 height={contentRows(28)}
+                onForked={(threadId) => {
+                  popOverlay();
+                  if (state.projectId)
+                    dispatch({ type: "open-thread", projectId: state.projectId, threadId });
+                }}
                 onClose={(restored) => {
                   popOverlay();
                   if (restored) focusComposer();

@@ -25,6 +25,7 @@ export const ACTION_SCOPES = {
   linkMenu: { level: 7, title: "Link menu" },
   palette: { level: 10, title: "Command palette" },
   help: { level: 10, title: "Help" },
+  diffComment: { level: 10, title: "Line comment" },
   diff: { level: 10, title: "Diff" },
   restore: { level: 10, title: "Restore" },
   git: { level: 10, title: "Git" },
@@ -157,6 +158,12 @@ export const ACTIONS = {
     label: "Git",
     hint: 41,
     keywords: "commit push pull branch checkout switch pr source control vcs",
+  },
+  "thread.fork": {
+    scope: "workspace",
+    title: "Fork thread from the latest run",
+    keys: [],
+    keywords: "branch copy duplicate run conversation",
   },
   "pullRequest.open": {
     scope: "workspace",
@@ -1124,6 +1131,38 @@ export const ACTIONS = {
     hint: 88,
     ...keyOnly,
   },
+  "diff.layout": {
+    scope: "diff",
+    title: "Switch between unified and side by side",
+    keys: ["v"],
+    label: "Layout",
+    hint: 62,
+    ...keyOnly,
+  },
+  "diff.comment": {
+    scope: "diff",
+    title: "Comment on this line in your message",
+    keys: ["c"],
+    label: "Comment",
+    hint: 63,
+    ...keyOnly,
+  },
+  "diffComment.save": {
+    scope: "diffComment",
+    title: "Add the comment to your message",
+    keys: ["return"],
+    label: "Add",
+    hint: 91,
+    ...keyOnly,
+  },
+  "diffComment.cancel": {
+    scope: "diffComment",
+    title: "Cancel the comment",
+    keys: ["escape"],
+    label: "Cancel",
+    hint: 88,
+    ...keyOnly,
+  },
   "diff.saved": {
     scope: "diff",
     title: "Show saved thread changes",
@@ -1199,6 +1238,14 @@ export const ACTIONS = {
   "diff.bottom": { scope: "diff", title: "Jump to the end", keys: ["end"], ...keyOnly },
 
   // Checkpoint restore.
+  "restore.fork": {
+    scope: "restore",
+    title: "Fork a new thread from this run",
+    keys: ["f"],
+    label: "Fork",
+    hint: 70,
+    ...keyOnly,
+  },
   "restore.up": {
     scope: "restore",
     title: "Previous entry",

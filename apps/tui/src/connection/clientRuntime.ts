@@ -64,7 +64,8 @@ import {
   type EnvironmentId,
   type FilesystemBrowseResult,
   type OrchestrationThreadSearchMatch,
-  type ThreadId,
+  RunId,
+  ThreadId,
   type GitResolvedPullRequest,
   type ExecutionEnvironmentCapabilities,
   type VcsPullResult,
@@ -148,6 +149,11 @@ export interface TuiClient {
   readonly session?: TuiSessionState;
   /** Absent on servers that speak the older protocol. */
   readonly git?: TuiGit;
+  /** A new thread with this thread's history up to the run. Absent on the older protocol. */
+  readonly forkThreadFromRun?: (
+    registry: AtomRegistry.AtomRegistry,
+    input: { readonly sourceThreadId: ThreadId; readonly runId: string; readonly title: string },
+  ) => Promise<ThreadId | null>;
   /** Rejects with the server's failure, which never echoes the secret. */
   /** Waits this long after a keystroke before searching. Tests set it to 0. */
   readonly pathSearchDebounceMs?: number;
@@ -766,7 +772,29 @@ export function createTuiClient(
       if (!AsyncResult.isSuccess(result)) throw new Error("Could not search this project.");
       return result.value;
     },
-    ...(legacy ? {} : { git }),
+    ...(legacy
+      ? {}
+      : {
+          git,
+          forkThreadFromRun: async (registry, { sourceThreadId, runId, title }) => {
+            const targetThreadId = ThreadId.make(
+              Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16))),
+            );
+            const accepted = AsyncResult.isSuccess(
+              await command.run(registry, {
+                environmentId,
+                input: {
+                  type: "thread.fork",
+                  sourceThreadId,
+                  targetThreadId,
+                  runId: RunId.make(runId),
+                  title,
+                },
+              }),
+            );
+            return accepted ? targetThreadId : null;
+          },
+        }),
     writeProjectFile: async (registry, input) =>
       AsyncResult.isSuccess(await writeProjectFile.run(registry, { environmentId, input })),
     implementPlanInNewThread: async (registry, source, plan) => {

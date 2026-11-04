@@ -454,6 +454,28 @@ function AppShellContent({
         enabled: selectedThread !== null,
         run: () => pushOverlay({ type: "diff" }),
       },
+      "thread.fork": {
+        enabled:
+          Boolean(client.forkThreadFromRun) &&
+          selectedThread?.latestTurn != null &&
+          selectedThread.latestTurn.state !== "running",
+        run: async () => {
+          const runId = selectedThread?.latestTurn?.turnId;
+          if (!runId || !selectedThread) return;
+          const forked = await client.forkThreadFromRun?.(registry, {
+            sourceThreadId: selectedThread.id,
+            runId,
+            title: `${selectedThread.title} fork`,
+          });
+          if (forked)
+            dispatch({
+              type: "open-thread",
+              projectId: selectedThread.projectId,
+              threadId: forked,
+            });
+          else setNotice({ text: "The fork was not created.", failed: true });
+        },
+      },
       "git.open": {
         enabled: selectedThread !== null,
         run: () => {

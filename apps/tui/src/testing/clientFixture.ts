@@ -437,6 +437,7 @@ export function makeClientFixture(
   const managementCommands: ThreadManagementCommand[] = [];
   const secretAnswers: SecretRequestAnswerInput[] = [];
   const writtenFiles: ProjectWriteFileInput[] = [];
+  const forks: { sourceThreadId: string; runId: string; title: string }[] = [];
   const gitActionState = Atom.make(EMPTY_VCS_ACTION_STATE);
   const gitStatus: { current: VcsStatusResult } = {
     current: {
@@ -562,6 +563,10 @@ export function makeClientFixture(
         return input.refName;
       },
     },
+    forkThreadFromRun: async (_registry, input) => {
+      forks.push(input);
+      return threads[1]?.id ?? input.sourceThreadId;
+    },
     pathSearchDebounceMs: 0,
     searchProjectEntries: async (_registry, input) => {
       pathSearches.push(input);
@@ -673,6 +678,7 @@ export function makeClientFixture(
     managementCommands,
     secretAnswers,
     writtenFiles,
+    forks,
     gitStatus,
     gitActionState,
     gitRuns,
