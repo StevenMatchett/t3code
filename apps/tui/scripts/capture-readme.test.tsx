@@ -1,7 +1,7 @@
 // Opt-in documentation capture. Uses the real renderer with synthetic, local-only data.
 // From apps/tui: T3_TUI_MEDIA_DIR=../../docs/media/tui node scripts/run-with-node-ffi.mjs \
 //   ../../node_modules/vite-plus/bin/vp test run --root . scripts/capture-readme.test.tsx
-// Requires ImageMagick, FFmpeg, and the DejaVu Sans Mono font.
+// Requires ImageMagick, FFmpeg, and a JetBrains Mono font (Nerd Font builds also work).
 import { it, expect } from "@effect/vitest";
 import { MouseButtons } from "@opentui/core/testing";
 import {
@@ -19,6 +19,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import { agentFixture } from "../src/testing/agentFixture.ts";
 import { makeClientFixture } from "../src/testing/clientFixture.ts";
 import { createTuiTestDriver } from "../src/testing/driver.tsx";
 import { frameToSvg } from "../src/testing/frameImage.ts";
@@ -147,8 +148,8 @@ it.skipIf(!process.env.T3_TUI_MEDIA_DIR)(
     };
     const driver = await createTuiTestDriver(<AppShell client={client} searchDebounceMs={0} />, {
       registry,
-      width: 112,
-      height: 32,
+      width: 120,
+      height: 36,
       kittyKeyboard: true,
     });
     const frames: Record<string, string> = {};
@@ -158,7 +159,10 @@ it.skipIf(!process.env.T3_TUI_MEDIA_DIR)(
       const source = NodePath.join(scratch, `${name}.svg`);
       NodeFS.writeFileSync(
         source,
-        frameToSvg(driver.captureSpans(), { title: "T3 TUI / interactive demo" }),
+        frameToSvg(driver.captureSpans(), {
+          title: "T3 TUI / interactive demo",
+          fontFamily: "JetBrainsMono Nerd Font, JetBrains Mono, monospace",
+        }),
       );
       const target = NodePath.join(output, `${name}.png`);
       NodeChildProcess.execFileSync("magick", ["-background", "#0d1117", source, "-strip", target]);
@@ -187,11 +191,16 @@ it.skipIf(!process.env.T3_TUI_MEDIA_DIR)(
             threads: snapshot.threads.map((value, index) => ({
               ...value,
               title: ["Add project search", "Improve onboarding", "Keyboard navigation"][index]!,
+              updatedAt: now,
             })),
           })),
         })),
       );
+      await driver.input.pressKey("k", { ctrl: true });
+      await driver.input.typeText("inbox sidebar");
+      await driver.flush();
       await driver.input.pressKey("RETURN");
+      await driver.flush();
       await driver.input.pressKey("RETURN");
       await capture("conversation", "Project search");
       await driver.input.pressKey("i");
@@ -232,7 +241,19 @@ it.skipIf(!process.env.T3_TUI_MEDIA_DIR)(
         agentKind: "agent",
         summary: "Reviewing arrow keys, Enter, and Escape behavior.",
       });
-      await updateActivities();
+      await act(async () =>
+        registry.update(fixture.states[0]!, (state) => ({
+          ...state,
+          data: Option.map(state.data, (value) => ({
+            ...value,
+            activities: [...activities],
+            agents: [
+              agentFixture("builder", "Search implementation", "gpt-5.6-luna"),
+              agentFixture("reviewer", "Keyboard review", "gpt-5.6-luna"),
+            ],
+          })),
+        })),
+      );
       await capture("agent-swarm", "Show agents (2)");
       const agent = driver.renderer.root.findDescendantById("agent-row-builder")!;
       await driver.mouse.click(agent.screenX + 2, agent.screenY, MouseButtons.LEFT, { delayMs: 0 });

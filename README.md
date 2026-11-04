@@ -18,10 +18,13 @@ remain unfinished. Cross-platform certification remains a release requirement.
 
 ## See it in action
 
+[![T3 TUI demo: inbox, Mermaid diagrams, diff review, and the embedded terminal](./docs/media/tui/launch.gif)](./docs/media/tui/launch.mp4)
+
 Real TUI renders with synthetic demo conversations, tool output, and agent activity—no private
 workspace data or credentials. The walkthroughs are scripted examples, not live agent sessions.
+Select the video to open the full-resolution MP4.
 
-![T3 TUI conversation with Markdown, a workspace sidebar, and contextual keyboard shortcuts](./docs/media/tui/conversation.png)
+![T3 TUI conversation with Markdown, an inbox sidebar, and contextual keyboard shortcuts](./docs/media/tui/conversation.png)
 
 <details>
 <summary>Screenshot gallery: queued messages, agents, diffs, search, and terminal</summary>
@@ -32,7 +35,7 @@ Queue a follow-up while the agent works. It sends after a tool completes or the 
 
 See the agent list, then open an agent's output without leaving the conversation.
 
-![Two agents listed beneath the message composer](./docs/media/tui/agent-swarm.png)
+![Two agents listed above the message composer](./docs/media/tui/agent-swarm.png)
 
 ![An agent's attributed tool output in a floating panel](./docs/media/tui/agent-output.png)
 
