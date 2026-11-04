@@ -55,6 +55,7 @@ export function conversationLines(
     // must remain distinct. Live tools stay visible outside collapsed groups.
     const groupable =
       row.source === "activity" &&
+      row.activityKind !== "proposed_plan" &&
       row.kind !== "error" &&
       row.activityTone !== "error" &&
       row.status !== "failed" &&
@@ -142,6 +143,14 @@ function renderRow(
               "",
             ]
           : [`${row.text}: ${row.status}`, "  File counts unavailable.", ""];
+    } else if (row.source === "activity" && row.activityKind === "proposed_plan") {
+      // A plan is what the turn produced, so it reads like a reply and never hides behind details.
+      return markdownLines(
+        `**Proposed plan** (Ctrl+L to act on it)\n\n${row.detail ?? row.text}`,
+        width,
+        renderMarkdown,
+        unicode,
+      ).map((current, index) => ({ ...current, id: row.id, line: index }));
     } else if (row.source === "activity") {
       if (!expanded && row.kind !== "tool" && !error) return [];
       const status =

@@ -326,6 +326,7 @@ function AppShellContent({
     const enabled = !soundsEnabled;
     setSoundsEnabled(enabled);
     client.session?.saveSoundsEnabled(enabled);
+    setNotice({ text: enabled ? "Sounds on." : "Sounds off.", failed: false });
     if (!enabled) audio.current?.stop();
   };
   const updateFavorites = (
@@ -346,7 +347,6 @@ function AppShellContent({
       "commandPalette.toggle": togglePalette,
       "help.toggle": () => dispatch({ type: "toggle-help" }),
       "sounds.toggle": {
-        label: soundsEnabled ? "Sounds on" : "Sounds off",
         title: soundsEnabled ? "Turn notification sounds off" : "Turn notification sounds on",
         run: toggleSounds,
       },

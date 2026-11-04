@@ -91,8 +91,6 @@ export const ACTIONS = {
     scope: "app",
     title: "Toggle notification sounds",
     keys: ["ctrl+g"],
-    label: "Sounds",
-    hint: 72,
     keywords: "audio mute unmute alerts approval finished",
   },
   "app.quit": {
@@ -1760,6 +1758,14 @@ export function asciiKeyLabel(label: string) {
 }
 
 /** The key text shown for an action in the bar, help, and palette. */
+/** Help lists each action on its own row, so an arrow pair names only that row's own key. */
+export function helpKeyLabel(definition: ActionDefinition, unicode = true) {
+  const first = definition.keys[0];
+  return first !== undefined && /^[↑↓←→]{2}$/u.test(definition.keyLabel ?? "")
+    ? formatChord(first, unicode)
+    : actionKeyLabel(definition, unicode);
+}
+
 export function actionKeyLabel(definition: ActionDefinition, unicode = true) {
   if (definition.keyLabel)
     return unicode ? definition.keyLabel : asciiKeyLabel(definition.keyLabel);

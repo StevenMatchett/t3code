@@ -25,7 +25,7 @@ it.each([
     });
     try {
       expect(audio.play).not.toHaveBeenCalled();
-      expect(driver.captureFrame().split("\n").slice(-3).join("\n")).toMatch(/Ctrl\+G\s+Sounds on/);
+      expect(driver.captureFrame()).not.toContain("Ctrl+G");
       const update = async (input: boolean, completed = false) => {
         const shell = driver.registry.get(fixture.client.shell);
         const snapshot = Option.getOrThrow(shell.snapshot);
@@ -67,9 +67,7 @@ it.each([
         expect(driver.captureFrame()).toContain("Turn notification sounds off");
         await driver.input.pressKey("RETURN");
       }
-      expect(driver.captureFrame().split("\n").slice(-3).join("\n")).toMatch(
-        /Ctrl\+G\s+Sounds off/,
-      );
+      expect(driver.captureFrame()).toContain("Sounds off.");
       audio.play.mockClear();
       await update(false, true);
       expect(audio.play).not.toHaveBeenCalled();

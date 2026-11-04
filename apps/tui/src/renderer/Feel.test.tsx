@@ -11,6 +11,7 @@ import {
   designApproval,
   longTranscript,
   makeDesignFixture,
+  updateShellThread,
   runningTurn,
   updateThread,
   type DesignFixture,
@@ -215,6 +216,29 @@ describe("honest labels", () => {
     await driver.input.pressKey("RETURN");
     const header = driver.captureFrame().split("\n")[0]!;
     expect(header).toContain("Atlas › Add project search");
+    expect(header).toContain("Connected");
+  });
+
+  it("cuts a long breadcrumb at its end, keeping the start of the name", async () => {
+    const fixture = makeDesignFixture();
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 80,
+      height: 24,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await act(async () => {
+      updateShellThread(driver.registry, fixture, 0, (thread) => ({
+        ...thread,
+        title: "Rework the project search index so that archived workspaces rank last",
+      }));
+    });
+    await driver.flush();
+    const header = driver.captureFrame().split("\n")[0]!;
+    expect(header).toContain("Atlas › Rework the project search");
+    expect(header).toContain("…");
+    expect(header).not.toContain("...");
     expect(header).toContain("Connected");
   });
 

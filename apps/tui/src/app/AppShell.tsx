@@ -20,7 +20,7 @@ import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { useThemeColor, useUi } from "../ui/context.tsx";
 import { BREAKPOINTS, calculateShellLayout, clampBox, MINIMUM_SIZE } from "../ui/layout.ts";
-import { inlineTerminalText } from "../ui/textLayout.ts";
+import { inlineTerminalText, truncateEnd } from "../ui/textLayout.ts";
 import { HotkeyBar } from "../ui/HotkeyBar.tsx";
 import { Button } from "../ui/Button.tsx";
 import { ListView } from "../ui/ListView.tsx";
@@ -217,6 +217,7 @@ const STATUS_WIDTH = 16;
 function Header({
   width,
   breadcrumb,
+  unicode,
   label,
   status,
   error,
@@ -229,6 +230,7 @@ function Header({
 }: {
   readonly width: number;
   readonly breadcrumb: string;
+  readonly unicode: boolean;
   readonly label: string;
   readonly status: string;
   readonly error: boolean;
@@ -248,7 +250,12 @@ function Header({
         : "pending";
   // Buttons appear in priority order as width allows, and their order never changes.
   // The location comes first: a button only appears once the breadcrumb has its room.
-  const available = width - 8 - STATUS_WIDTH - 1 - Math.max(16, Math.min(breadcrumb.length, 32));
+  const available =
+    width -
+    8 -
+    STATUS_WIDTH -
+    1 -
+    Math.max(16, Math.min(breadcrumb.length, Math.floor(width * 0.6)));
   const candidates = [
     { id: "new-thread-action", label: "[+ New thread]", onPress: onNewThread },
     { id: "new-project-action", label: "[+ New project]", onPress: onNewProject },
@@ -282,9 +289,8 @@ function Header({
         minWidth={0}
         height={1}
         wrapMode="none"
-        truncate
       >
-        {breadcrumb}
+        {truncateEnd(breadcrumb, width - 8 - STATUS_WIDTH - 2 - used, unicode)}
       </Text>
       {showLabel ? (
         <Text
@@ -690,6 +696,7 @@ export function AppShellView({
         <Header
           width={Math.max(1, width - 2)}
           breadcrumb={breadcrumb}
+          unicode={capabilities.unicode}
           label={label}
           status={status}
           error={error}

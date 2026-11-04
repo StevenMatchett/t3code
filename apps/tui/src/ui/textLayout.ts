@@ -3,6 +3,20 @@ import { normalizeTerminalText } from "../features/chat/terminalText.ts";
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
+/** Cuts from the end, so the start of a name stays readable. */
+export function truncateEnd(text: string, width: number, unicode = true) {
+  if (stringWidth(text) <= width) return text;
+  const ellipsis = unicode ? "…" : "...";
+  const room = width - stringWidth(ellipsis);
+  if (room <= 0) return ellipsis.slice(0, Math.max(0, width));
+  let result = "";
+  for (const character of text) {
+    if (stringWidth(result + character) > room) break;
+    result += character;
+  }
+  return `${result.trimEnd()}${ellipsis}`;
+}
+
 export function inlineTerminalText(text: string): string {
   return normalizeTerminalText(text).replace(/\n/gu, " ");
 }

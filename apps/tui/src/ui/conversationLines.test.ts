@@ -75,6 +75,40 @@ describe("conversationLines", () => {
     detail: `output ${id}`,
   });
 
+  it("shows a proposed plan inline between tools, without expanding details", () => {
+    const tool = (id: string): TimelineRow => ({
+      ...base,
+      id,
+      source: "activity",
+      kind: "tool",
+      text: id,
+      activityKind: "tool.completed",
+      activityTone: "tool",
+      status: "completed",
+    });
+    const rows: TimelineRow[] = [
+      tool("first"),
+      {
+        ...base,
+        id: "plan",
+        source: "activity",
+        kind: "activity",
+        text: "# Add search",
+        detail: "# Add search\n\n- Index the projects",
+        activityKind: "proposed_plan",
+        activityTone: "info",
+      },
+      tool("second"),
+    ];
+    const text = conversationLines(rows, 60, false).map((line) => line.text);
+    expect(text).toContain("Proposed plan (Ctrl+L to act on it)");
+    expect(text.some((line) => line.includes("Index the projects"))).toBe(true);
+    // A plan splits the tool group, so what ran before and after stays in order around it.
+    const at = (needle: string) => text.findIndex((line) => line.includes(needle));
+    expect(at("first")).toBeLessThan(at("Proposed plan"));
+    expect(at("Proposed plan")).toBeLessThan(at("second"));
+  });
+
   it("collapses completed tools and supports individual and global expansion", () => {
     const rows = [tool("a"), tool("b"), tool("c")];
     const collapsed = conversationLines(rows, 100, false);

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   ACTION_SCOPES,
-  actionKeyLabel,
+  helpKeyLabel,
   allActions,
   type ActionDefinition,
   type ActionScope,
@@ -45,7 +45,7 @@ export function HelpPanel({
   const [offset, setOffset] = useState(0);
   const [filter, setFilter] = useState<string | null>(null);
   const keyColumn = (definition: ActionDefinition) =>
-    actionKeyLabel(definition, capabilities.unicode);
+    helpKeyLabel(definition, capabilities.unicode);
   const signature = actions.map((action) => action.id).join(",");
   const rows = useMemo(() => {
     const here = new Set<string>();

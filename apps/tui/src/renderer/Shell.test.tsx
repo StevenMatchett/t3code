@@ -687,6 +687,17 @@ describe("states", () => {
   });
 });
 
+describe("help rows", () => {
+  it("gives each direction its own key instead of repeating the arrow pair", async () => {
+    const { driver } = await setup(120, 40);
+    await driver.input.typeText("?");
+    const frame = driver.captureFrame();
+    expect(frame).toMatch(/↑\s+Previous row/u);
+    expect(frame).toMatch(/↓\s+Next row/u);
+    expect(frame).not.toMatch(/↑↓\s+Previous row/u);
+  });
+});
+
 describe("git panel", () => {
   const clean = {
     hasWorkingTreeChanges: false,
