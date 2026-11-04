@@ -445,6 +445,23 @@ export function makeClientFixture(
         if (activeIndex >= 0) threads.splice(activeIndex, 1);
         const archivedIndex = archivedRows.findIndex((item) => item.id === command.threadId);
         if (archivedIndex >= 0) archivedRows.splice(archivedIndex, 1);
+      } else {
+        const row = threads.find((item) => item.id === command.threadId);
+        if (row) {
+          const changes: Partial<Record<ThreadManagementCommand["type"], object>> = {
+            "thread.pin": { pinnedAt: time },
+            "thread.unpin": { pinnedAt: null },
+            "thread.settle": { settledOverride: "settled", settledAt: time, pinnedAt: null },
+            "thread.unsettle": { settledOverride: "active", settledAt: null },
+            "thread.snooze":
+              command.type === "thread.snooze"
+                ? { snoozedUntil: command.snoozedUntil, snoozedAt: new Date().toISOString() }
+                : {},
+            "thread.unsnooze": { snoozedUntil: null, snoozedAt: null },
+          };
+          // Replaced, not mutated: presented shells are immutable and rows compare by identity.
+          threads[threads.indexOf(row)] = { ...row, ...changes[command.type] };
+        }
       }
       registry.update(shell, (value) =>
         Option.map(value.snapshot, (snapshot) => ({
@@ -481,6 +498,7 @@ export function makeClientFixture(
     newThreads,
     newProjects,
     threadManagement,
+    threadCapabilities: Atom.make({ repositoryIdentity: false }),
     archivedThreads,
     refreshArchivedThreads: () => {},
     threadSearch,

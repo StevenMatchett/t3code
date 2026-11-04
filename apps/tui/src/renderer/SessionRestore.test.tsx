@@ -36,6 +36,7 @@ function setup(path: string) {
     httpOrigin: "http://localhost:3773",
     registry,
   });
+  session.saveSidebarLayout("tree");
   cleanups.push(() => session.close());
   const fixture = makeClientFixture(undefined, undefined, session);
   let state: ShellState | undefined;

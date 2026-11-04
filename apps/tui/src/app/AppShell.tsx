@@ -7,6 +7,7 @@ import type {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { threadActivityPhase, type ThreadActivityPhase } from "../features/chat/threadActivity.ts";
 import {
   AnimationGate,
@@ -29,6 +30,8 @@ import { StatusBadge, type StatusTone } from "../ui/StatusBadge.tsx";
 import { FormInput } from "../ui/FormField.tsx";
 import { resolveGlyph } from "../ui/glyphs.tsx";
 import type { Toast } from "../ui/StatusLine.tsx";
+import { ShelfSidebar } from "./ShelfSidebar.tsx";
+import type { ShelfRow } from "./threadShelves.ts";
 import {
   createInitialShellState,
   dispatchShellCommand,
@@ -39,6 +42,20 @@ import {
   type ShellRows,
   type ShellState,
 } from "./state.ts";
+
+/** The GUI-style sidebar's rows, built once by the owner because keys need them too. */
+export interface ShelvesView {
+  readonly rows: readonly ShelfRow[];
+  readonly cursor: number;
+  readonly marked: ReadonlySet<TuiThreadShell["id"]>;
+  readonly scopeTitle: string | null;
+  readonly onActivate: (
+    row: ShelfRow,
+    modifiers: { readonly shift: boolean; readonly ctrl: boolean },
+  ) => void;
+  readonly onSearch: () => void;
+  readonly onChooseScope: () => void;
+}
 
 /** One entry of the overlay stack. Lower entries stay mounted so they keep their state. */
 export interface ShellOverlayView {
@@ -88,6 +105,8 @@ export interface AppShellViewProps {
   readonly onManageThread?: () => void;
   readonly onOpenPalette?: () => void;
   readonly onToggleSidebarView?: () => void;
+  /** Present while the shelves layout lists threads; the archived view keeps the flat list. */
+  readonly shelves?: ShelvesView | null;
 }
 
 export function useAppShellState(
@@ -353,6 +372,7 @@ export function AppShellView({
   onManageThread,
   onOpenPalette,
   onToggleSidebarView,
+  shelves = null,
 }: AppShellViewProps) {
   const layout = calculateShellLayout(width, height);
   const { capabilities } = useUi();
@@ -367,17 +387,26 @@ export function AppShellView({
   const archived = state.sidebarView === "archived";
   const recent = state.sidebarView === "recent" || archived;
   const allProjectThreads = threads.filter((item) => item.projectId === state.projectId);
-  const selectedThread = allProjectThreads.find((item) => item.id === state.threadId);
+  const shelfRow = shelves?.rows[shelves.cursor];
+  // On a shelf header nothing is selected, so nothing below may claim a thread is.
+  const selectedThread =
+    shelves && state.route !== "conversation"
+      ? shelfRow?.kind === "thread"
+        ? shelfRow.thread
+        : undefined
+      : allProjectThreads.find((item) => item.id === state.threadId);
   const browsingProjects = !recent && state.route === "projects";
   const visibleThreads = sidebarThreads(threads, state);
   const projectThreads = visibleThreads.filter((item) => item.projectId === state.projectId);
   const conversation = state.route === "conversation";
   const listedProjects = sidebarProjects(projects, threads, state);
-  const title = recent
-    ? `${archived ? "Archived" : "Recent"} threads (${visibleThreads.length})`
-    : browsingProjects
-      ? `Projects (${listedProjects.length})`
-      : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
+  const title = shelves
+    ? `Inbox (${shelves.rows.filter((row) => row.kind === "thread" && (row.shelf === "active" || row.shelf === "pinned")).length})${shelves.marked.size > 0 ? ` - ${shelves.marked.size} selected` : ""}`
+    : recent
+      ? `${archived ? "Archived" : "Recent"} threads (${visibleThreads.length})`
+      : browsingProjects
+        ? `Projects (${listedProjects.length})`
+        : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
   const projectActivity = new Map<ProjectId, ThreadActivityPhase>();
   const phases = new Map(
     threads.map((thread) => {
@@ -461,14 +490,47 @@ export function AppShellView({
     <EmptyState title="No active threads in this project." description="Press N to start one." />
   );
   const showFilter = filtering || Boolean(state.filter);
-  const navigation = (
+  const navigation = shelves ? (
+    <ShelfSidebar
+      rows={shelves.rows}
+      cursor={shelves.cursor}
+      marked={shelves.marked}
+      height={layout.contentHeight}
+      width={Math.max(1, (layout.split ? layout.sidebarWidth : layout.mainWidth) - 4)}
+      hasProjects={projects.length > 0}
+      loaded={loaded}
+      error={error}
+      filter={state.filter}
+      filtering={filtering && !overlayOpen && !conversation}
+      scopeTitle={shelves.scopeTitle}
+      focused={!conversation}
+      projectTitle={(thread) =>
+        projects.find((item) => item.id === thread.projectId)?.title ?? "Unknown project"
+      }
+      onFilterChange={onFilterChange}
+      onSearch={shelves.onSearch}
+      onChooseScope={shelves.onChooseScope}
+      onNewThread={onNewThread}
+      onActivate={shelves.onActivate}
+      onThreadContextMenu={onThreadContextMenu}
+    />
+  ) : (
     <Stack flexDirection="column" height="100%">
-      <Tabs
-        id="sidebar-view-toggle"
-        tabs={SIDEBAR_TABS}
-        selected={state.sidebarView ?? "projects"}
-        {...(onToggleSidebarView ? { onPress: onToggleSidebarView } : {})}
-      />
+      {state.sidebarLayout === "shelves" ? (
+        <Button
+          id="sidebar-back-to-threads"
+          label="[< Back to threads]"
+          tone="accent"
+          {...(onToggleSidebarView ? { onPress: onToggleSidebarView } : {})}
+        />
+      ) : (
+        <Tabs
+          id="sidebar-view-toggle"
+          tabs={SIDEBAR_TABS}
+          selected={state.sidebarView ?? "projects"}
+          {...(onToggleSidebarView ? { onPress: onToggleSidebarView } : {})}
+        />
+      )}
       <Stack height={1} flexShrink={0} flexDirection="row">
         {showFilter ? (
           <>
@@ -562,9 +624,29 @@ export function AppShellView({
     : selectedThread
       ? [
           `Model  ${inlineTerminalText(selectedThread.modelSelection.model)}`,
+          ...(shelves && selectedThread.branch
+            ? [`Branch  ${inlineTerminalText(selectedThread.branch)}`]
+            : []),
+          ...(shelves
+            ? visibleThreadPullRequests(selectedThread.pullRequests).map(
+                (link) =>
+                  `PR #${link.number}  ${inlineTerminalText(link.snapshot?.title ?? link.url)}`,
+              )
+            : []),
+          ...(shelves && selectedThread.session?.lastError
+            ? [`Error  ${inlineTerminalText(selectedThread.session.lastError)}`]
+            : []),
           archived ? "Enter restores or deletes it." : "Enter opens the conversation.",
         ]
-      : [archived ? "Nothing is archived." : "No thread selected."];
+      : [
+          archived
+            ? "Nothing is archived."
+            : shelfRow?.kind === "shelf"
+              ? "Enter or Space opens this shelf."
+              : shelfRow?.kind === "more"
+                ? "Enter shows more."
+                : "No thread selected.",
+        ];
   const preview = (
     <Stack flexDirection="column" paddingTop={1} gap={1}>
       <Text strong tone="accent" wrapMode="none" truncate>

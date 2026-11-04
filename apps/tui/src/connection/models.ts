@@ -16,6 +16,7 @@ import type {
   ThreadPullRequestLink,
   OrchestrationProjectShell,
   OrchestrationMessageContext,
+  OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import type { ThreadHistoryMeta } from "@t3tools/client-runtime/state/threads";
 import type { PendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
@@ -106,10 +107,22 @@ interface ThreadMetadata {
 }
 export interface TuiThreadShell extends ThreadMetadata {
   readonly latestUserMessageAt: string | null;
+  /** The last message the user wrote, not a wake or a background result. V2 only. */
+  readonly latestUserAuthoredMessageAt?: string | null | undefined;
   readonly hasPendingApprovals: boolean;
   readonly hasPendingUserInput: boolean;
   readonly hasActionableProposedPlan: boolean;
   readonly backgroundLiveness?: "working" | "monitoring" | null | undefined;
+  /** The fields below come from V2 servers only; V1 shells simply omit them. */
+  readonly autoSettleDisabledAt?: string | null | undefined;
+  readonly lastVisitedAt?: string | null | undefined;
+  readonly providerInstanceHistory?: readonly ProviderInstanceId[] | undefined;
+  readonly goal?: { readonly status: string } | null | undefined;
+  readonly titleRegeneration?: { readonly requestId: unknown } | null | undefined;
+  readonly status?: string | undefined;
+  readonly activityRunStatus?: string | null | undefined;
+  readonly lastErrorClass?: string | null | undefined;
+  readonly pendingBackgroundTasks?: OrchestrationV2ThreadShell["pendingBackgroundTasks"];
 }
 export interface TuiThread extends ThreadMetadata {
   readonly messages: readonly TuiMessage[];

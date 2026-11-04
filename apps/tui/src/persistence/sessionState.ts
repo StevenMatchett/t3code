@@ -7,7 +7,7 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import type { Atom } from "effect/reactivity";
-import type { ShellState } from "../app/state.ts";
+import type { ShellState, SidebarLayout } from "../app/state.ts";
 import type { ThreadInteractionState } from "../features/chat/interactions.ts";
 import type { FavoriteModel } from "../features/chat/providerChoices.ts";
 import type { ThemePreference } from "../ui/theme.ts";
@@ -49,6 +49,10 @@ export const SavedShell = Schema.Struct({
   projectId: Schema.NullOr(ProjectId),
   threadId: Schema.NullOr(ThreadId),
   expandedProjects: Schema.optionalKey(Schema.Array(ProjectId)),
+  expandedShelves: Schema.optionalKey(
+    Schema.Array(Schema.Literals(["working", "snoozed", "settled"])),
+  ),
+  projectScope: Schema.optionalKey(ProjectId),
 });
 export const ConversationView = Schema.Struct({
   mode: Schema.Literals(["history", "composer", "requests", "questions", "agents"]),
@@ -88,6 +92,9 @@ export interface TuiSessionState {
   /** Read fresh each call: the theme is shared by every TUI on this machine. */
   readonly themePreference: () => ThemePreference;
   readonly saveThemePreference: (preference: ThemePreference) => void;
+  /** Read fresh each call: the sidebar layout is shared by every TUI on this machine. */
+  readonly sidebarLayout: () => SidebarLayout;
+  readonly saveSidebarLayout: (layout: SidebarLayout) => void;
   readonly shell: ShellState | undefined;
   readonly interactions: ReadonlyMap<ThreadId, SavedInteraction>;
   readonly saveShell: (state: ShellState) => void;

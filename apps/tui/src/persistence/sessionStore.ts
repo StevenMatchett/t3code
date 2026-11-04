@@ -246,15 +246,48 @@ export function openTuiSessionState(options: {
         report();
       }
     },
+    sidebarLayout: () => {
+      // The inbox is the default, so only an explicit choice brings the tree back.
+      if (closed) return "shelves";
+      try {
+        const row = db
+          .prepare("SELECT value FROM ui_preferences WHERE field = 'sidebarLayout'")
+          .get();
+        return row?.value === "tree" ? "tree" : "shelves";
+      } catch {
+        report();
+        return "shelves";
+      }
+    },
+    saveSidebarLayout: (layout) => {
+      if (closed) return;
+      try {
+        db.prepare(
+          "INSERT INTO ui_preferences (field, value) VALUES ('sidebarLayout', ?) ON CONFLICT (field) DO UPDATE SET value = excluded.value",
+        ).run(layout);
+      } catch {
+        report();
+      }
+    },
     shell: shell ? { ...shell, overlays: [] } : undefined,
     interactions,
-    saveShell: ({ route, sidebarView, projectId, threadId, expandedProjects }) =>
+    saveShell: ({
+      route,
+      sidebarView,
+      projectId,
+      threadId,
+      expandedProjects,
+      expandedShelves,
+      projectScope,
+    }) =>
       save("shell", {
         route,
         sidebarView: sidebarView ?? "projects",
         projectId,
         threadId,
         ...(expandedProjects?.length ? { expandedProjects } : {}),
+        ...(expandedShelves?.length ? { expandedShelves } : {}),
+        ...(projectScope ? { projectScope } : {}),
       }),
     saveInteraction: (
       id,

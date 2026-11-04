@@ -77,7 +77,12 @@ export function presentShell(source: OrchestrationV2ThreadShell): TuiThreadShell
     snoozedAt: nullableIso(source.snoozedAt),
     snoozedUntil: nullableIso(source.snoozedUntil),
     pinnedAt: nullableIso(source.pinnedAt),
+    autoSettleDisabledAt: nullableIso(source.autoSettleDisabledAt),
+    // Absent means a server without visit tracking, which is different from never visited.
+    lastVisitedAt:
+      source.lastVisitedAt === undefined ? undefined : nullableIso(source.lastVisitedAt),
     latestUserMessageAt: nullableIso(source.latestUserMessageAt),
+    latestUserAuthoredMessageAt: nullableIso(source.latestUserAuthoredMessageAt),
     hasPendingApprovals:
       source.pendingRuntimeRequest !== null &&
       source.pendingRuntimeRequest.kind !== "user_input" &&

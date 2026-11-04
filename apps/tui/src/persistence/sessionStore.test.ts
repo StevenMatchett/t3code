@@ -68,6 +68,16 @@ describe("TUI session persistence", () => {
     second.session.close();
     expect(open(path).session.soundsEnabled).toBe(true);
   });
+  it("defaults to the inbox sidebar and shares a saved choice between sessions", () => {
+    const stateDirectory = directory();
+    const first = open(stateDirectory);
+    expect(first.session.sidebarLayout()).toBe("shelves");
+    first.session.saveSidebarLayout("tree");
+    expect(open(stateDirectory).session.sidebarLayout()).toBe("tree");
+    first.session.saveSidebarLayout("shelves");
+    expect(first.session.sidebarLayout()).toBe("shelves");
+  });
+
   it("shares favorite models between concurrent sessions and restores them", () => {
     const path = directory();
     const first = open(path);

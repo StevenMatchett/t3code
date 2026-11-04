@@ -45,6 +45,8 @@ function makeMemorySession() {
     saveComposer: () => undefined,
     terminal: () => undefined,
     saveTerminal: () => undefined,
+    sidebarLayout: () => "tree",
+    saveSidebarLayout: () => undefined,
     close: () => undefined,
   } satisfies TuiSessionState;
 }

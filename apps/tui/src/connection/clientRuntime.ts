@@ -65,6 +65,7 @@ import {
   type OrchestrationThreadSearchMatch,
   type ThreadId,
   type GitResolvedPullRequest,
+  type ExecutionEnvironmentCapabilities,
 } from "@t3tools/contracts";
 import { makeNewThreadActions, type NewThreadActions } from "../features/chat/newThread.ts";
 import { makeNewProjectActions, type NewProjectActions } from "../features/projects/newProject.ts";
@@ -117,6 +118,8 @@ export interface TuiClient {
   readonly newThreads: NewThreadActions;
   readonly newProjects: NewProjectActions;
   readonly threadManagement: ThreadManagementActions;
+  /** What the server supports. Empty until its descriptor loads, so features stay hidden. */
+  readonly threadCapabilities: Atom.Atom<ExecutionEnvironmentCapabilities>;
   readonly archivedThreads: Atom.Atom<{
     readonly status: "loading" | "live" | "error";
     readonly threads: readonly TuiThreadShell[];
@@ -136,6 +139,8 @@ export interface TuiClient {
     models: boolean,
   ) => Promise<boolean>;
 }
+
+const NO_CAPABILITIES: ExecutionEnvironmentCapabilities = { repositoryIdentity: false };
 
 const unsupported = () =>
   Effect.fail(
@@ -444,6 +449,10 @@ export function createTuiClient(
       get(server.configValueAtom(environmentId))?.environment.capabilities.projectCloneTracking ===
       true,
   );
+  const threadCapabilities = Atom.make(
+    (get): ExecutionEnvironmentCapabilities =>
+      get(server.configValueAtom(environmentId))?.environment.capabilities ?? NO_CAPABILITIES,
+  );
   const newThreads = makeNewThreadActions({
     shell: shellValue,
     connection,
@@ -607,6 +616,7 @@ export function createTuiClient(
     newThreads,
     newProjects,
     threadManagement,
+    threadCapabilities,
     archivedThreads,
     refreshArchivedThreads,
     threadSearch,

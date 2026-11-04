@@ -1,4 +1,5 @@
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import { SETTLED_FIRST_PAGE, SETTLED_NEXT_PAGE, type CollapsibleShelf } from "./threadShelves.ts";
 
 export const SHELL_ROUTES = ["projects", "threads", "conversation"] as const;
 export type ShellRoute = (typeof SHELL_ROUTES)[number];
@@ -9,6 +10,9 @@ export function nextSidebarView(view: SidebarView = "projects", offset = 1): Sid
     (SIDEBAR_VIEWS.indexOf(view) + offset + SIDEBAR_VIEWS.length) % SIDEBAR_VIEWS.length
   ]!;
 }
+
+/** "tree" is the TUI's project tree. "shelves" copies the GUI sidebar: one list across projects. */
+export type SidebarLayout = "tree" | "shelves";
 
 /** What sits above the workspace, bottom first. Esc removes exactly the top entry. */
 export type ShellOverlay =
@@ -38,7 +42,17 @@ export type ShellOverlay =
       readonly projectId: ProjectId;
       readonly x: number;
       readonly y: number;
-    };
+    }
+  | {
+      readonly type: "snooze-menu";
+      readonly threadIds: readonly ThreadId[];
+      readonly x: number;
+      readonly y: number;
+    }
+  | { readonly type: "snooze-custom"; readonly threadIds: readonly ThreadId[] }
+  | { readonly type: "bulk-menu"; readonly x: number; readonly y: number }
+  | { readonly type: "bulk-delete"; readonly x: number; readonly y: number }
+  | { readonly type: "project-scope" };
 
 export interface ShellState {
   readonly sidebarView?: SidebarView;
@@ -50,6 +64,17 @@ export interface ShellState {
   /** Projects showing their threads in the sidebar tree. */
   readonly expandedProjects?: readonly ProjectId[];
   readonly filter?: string;
+  readonly sidebarLayout?: SidebarLayout;
+  /** The highlighted row in the shelves layout, which may be a shelf header rather than a thread. */
+  readonly shelfCursor?: string;
+  readonly expandedShelves?: readonly CollapsibleShelf[];
+  /** The one project the shelves layout is narrowed to. Absent lists all of them. */
+  readonly projectScope?: ProjectId;
+  readonly settledLimit?: number;
+  /** Threads selected for a bulk action. Never saved: a selection belongs to one sitting. */
+  readonly markedThreads?: readonly ThreadId[];
+  /** Where a Shift range starts: the thread last added to the selection. */
+  readonly markAnchor?: ThreadId;
 }
 
 export interface ShellRows {
@@ -67,6 +92,10 @@ export function isSidebarThreadVisible(thread: ShellRows["threads"][number], sta
   return state.showSubagents || thread.lineage?.relationshipToParent !== "subagent";
 }
 
+/** The shelves list is on screen. Archived threads keep their flat list in either layout. */
+export const shelvesBrowsing = (state: ShellState) =>
+  state.sidebarLayout === "shelves" && state.sidebarView !== "archived";
+
 const textMatchesFilter = (title: string | undefined, filter: string | undefined) =>
   !filter || (title ?? "").toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase());
 
@@ -81,7 +110,8 @@ export function sidebarThreads<Thread extends ShellRows["threads"][number]>(
       thread.id === keepThreadId ||
       (Boolean(thread.archivedAt) === (state.sidebarView === "archived") &&
         isSidebarThreadVisible(thread, state) &&
-        textMatchesFilter(thread.title, state.filter)),
+        // The shelves layout also searches message text, which only the rows know about.
+        (shelvesBrowsing(state) || textMatchesFilter(thread.title, state.filter))),
   );
 }
 
@@ -99,6 +129,20 @@ export function sidebarProjects<Project extends ShellRows["projects"][number]>(
 }
 
 export type ShellCommand =
+  | { readonly type: "set-sidebar-layout"; readonly layout: SidebarLayout }
+  | {
+      readonly type: "select-shelf-row";
+      readonly rowId: string;
+      readonly thread?: { readonly id: ThreadId; readonly projectId: ProjectId };
+    }
+  | {
+      readonly type: "mark-threads";
+      readonly threadIds: readonly ThreadId[];
+      readonly anchor?: ThreadId;
+    }
+  | { readonly type: "toggle-shelf"; readonly shelf: CollapsibleShelf }
+  | { readonly type: "show-more-settled" }
+  | { readonly type: "set-project-scope"; readonly projectId: ProjectId | null }
   | { readonly type: "toggle-subagents" }
   | { readonly type: "set-sidebar-view"; readonly view: SidebarView }
   | { readonly type: "toggle-sidebar-view" }
@@ -146,12 +190,17 @@ function reconcile(state: ShellState, rows: ShellRows): ShellState {
     ),
   };
   if (state.sidebarView === "recent" || state.sidebarView === "archived") {
-    const threads = rows.threads.filter((thread) =>
-      rows.projects.some((project) => project.id === thread.projectId),
+    const scope = shelvesBrowsing(state) ? (state.projectScope ?? null) : null;
+    const threads = rows.threads.filter(
+      (thread) =>
+        rows.projects.some((project) => project.id === thread.projectId) &&
+        (scope === null ||
+          thread.projectId === scope ||
+          (state.route === "conversation" && thread.id === state.threadId)),
     );
     const selected = threads.find((thread) => thread.id === state.threadId) ?? threads[0];
     const threadId = selected?.id ?? null;
-    const projectId = selected?.projectId ?? rows.projects[0]?.id ?? null;
+    const projectId = selected?.projectId ?? scope ?? rows.projects[0]?.id ?? null;
     const route =
       state.route === "conversation" && threadId === state.threadId ? "conversation" : "threads";
     return threadId === state.threadId && projectId === state.projectId && route === state.route
@@ -177,6 +226,14 @@ function reconcile(state: ShellState, rows: ShellRows): ShellState {
     : { ...state, projectId, threadId, route };
 }
 
+function withoutMarks({
+  markedThreads: _marked,
+  markAnchor: _anchor,
+  ...rest
+}: ShellState): ShellState {
+  return rest;
+}
+
 function withExpanded(state: ShellState, projectId: ProjectId | null): ShellState {
   if (projectId === null || state.expandedProjects?.includes(projectId)) return state;
   return { ...state, expandedProjects: [...(state.expandedProjects ?? []), projectId] };
@@ -188,6 +245,60 @@ export function dispatchShellCommand(
   rows: ShellRows,
 ): ShellState {
   const state = reconcile(previous, rows);
+  if (command.type === "mark-threads") {
+    const rest = withoutMarks(state);
+    return command.threadIds.length === 0
+      ? rest
+      : {
+          ...rest,
+          markedThreads: command.threadIds,
+          ...(command.anchor ? { markAnchor: command.anchor } : {}),
+        };
+  }
+  if (command.type === "set-sidebar-layout") {
+    const { filter: _filter, shelfCursor: _cursor, ...rest } = withoutMarks(state);
+    const shelves = command.layout === "shelves";
+    return reconcile(
+      {
+        ...rest,
+        sidebarLayout: command.layout,
+        sidebarView: shelves ? "recent" : "projects",
+        route: state.route === "conversation" ? "conversation" : shelves ? "threads" : "projects",
+      },
+      rows,
+    );
+  }
+  if (command.type === "select-shelf-row")
+    return {
+      ...state,
+      shelfCursor: command.rowId,
+      ...(command.thread
+        ? { threadId: command.thread.id, projectId: command.thread.projectId }
+        : {}),
+    };
+  if (command.type === "toggle-shelf") {
+    const expanded = state.expandedShelves ?? [];
+    return {
+      ...state,
+      expandedShelves: expanded.includes(command.shelf)
+        ? expanded.filter((shelf) => shelf !== command.shelf)
+        : [...expanded, command.shelf],
+    };
+  }
+  if (command.type === "show-more-settled")
+    return {
+      ...state,
+      settledLimit: (state.settledLimit ?? SETTLED_FIRST_PAGE) + SETTLED_NEXT_PAGE,
+    };
+  if (command.type === "set-project-scope") {
+    const {
+      projectScope: _scope,
+      settledLimit: _limit,
+      shelfCursor: _cursor,
+      ...rest
+    } = withoutMarks(state);
+    return reconcile(command.projectId ? { ...rest, projectScope: command.projectId } : rest, rows);
+  }
   if (command.type === "set-sidebar-view") {
     return reconcile(
       {
@@ -201,6 +312,16 @@ export function dispatchShellCommand(
       rows,
     );
   }
+  if (command.type === "toggle-sidebar-view" && state.sidebarLayout === "shelves")
+    return reconcile(
+      {
+        ...withoutMarks(state),
+        sidebarView: state.sidebarView === "archived" ? "recent" : "archived",
+        route: "threads",
+        threadId: null,
+      },
+      rows,
+    );
   if (command.type === "toggle-sidebar-view")
     return reconcile(
       {
@@ -245,6 +366,23 @@ export function dispatchShellCommand(
       ? pushOverlay(reconcile({ ...state, projectId }, rows), { type: "new-thread" })
       : state;
   }
+  // The GUI has no project rows: choosing a project narrows the one list to it.
+  if (command.type === "open-project" && state.sidebarLayout === "shelves") {
+    if (!rows.projects.some((project) => project.id === command.projectId)) return state;
+    const { shelfCursor: _cursor, settledLimit: _limit, ...rest } = state;
+    return reconcile(
+      {
+        ...rest,
+        sidebarView: "recent",
+        route: "threads",
+        projectId: command.projectId,
+        projectScope: command.projectId,
+        threadId: null,
+        overlays: [],
+      },
+      rows,
+    );
+  }
   if (command.type === "open-project")
     return rows.projects.some((project) => project.id === command.projectId)
       ? withExpanded(
@@ -268,12 +406,13 @@ export function dispatchShellCommand(
     )
       ? withExpanded(
           {
-            ...state,
+            ...withoutMarks(state),
             ...(state.sidebarView === "archived" ? { sidebarView: "recent" as const } : {}),
             route: "conversation",
             projectId: command.projectId,
             threadId: command.threadId,
             overlays: [],
+            ...(state.sidebarLayout === "shelves" ? { shelfCursor: command.threadId } : {}),
           },
           command.projectId,
         )
@@ -288,6 +427,7 @@ export function dispatchShellCommand(
       ? { ...state, overlays: state.overlays.slice(0, -1) }
       : state;
   if (command.type === "back") {
+    if (state.markedThreads && state.route !== "conversation") return withoutMarks(state);
     if (state.filter && state.route !== "conversation") {
       const { filter: _cleared, ...rest } = state;
       return reconcile(rest, rows);

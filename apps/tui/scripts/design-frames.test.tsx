@@ -5,6 +5,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as Option from "effect/Option";
+import { Atom } from "effect/reactivity";
 import { act } from "react";
 
 import { AppShell } from "../src/renderer/AppShell.tsx";
@@ -53,6 +54,26 @@ const screens: Record<string, (harness: Harness) => Promise<void>> = {
   archived: async ({ driver }) => {
     await driver.input.pressKey("b", { ctrl: true });
     await driver.input.pressKey("b", { ctrl: true });
+  },
+  inbox: async ({ driver, fixture }) => {
+    await driver.input.pressKey("k", { ctrl: true });
+    await driver.input.typeText("inbox sidebar");
+    await driver.input.pressKey("RETURN");
+    await act(async () => {
+      const seen = { lastVisitedAt: "2026-03-02T15:00:00.000Z" };
+      updateShellThread(driver.registry, fixture, 0, (thread) => ({ ...thread, ...seen }));
+      updateShellThread(driver.registry, fixture, 1, (thread) => ({
+        ...thread,
+        latestTurn: runningTurn,
+      }));
+      updateShellThread(driver.registry, fixture, 2, (thread) => ({
+        ...thread,
+        hasPendingApprovals: true,
+        pinnedAt: "2026-03-02T15:00:00.000Z",
+        branch: "t3/keyboard-navigation-audit-with-a-long-name",
+      }));
+    });
+    await driver.flush();
   },
   conversation: openConversation,
   composer: async (harness) => {
@@ -308,7 +329,20 @@ async function withHarness(
   const fixture = makeDesignFixture();
   const driver = await createTuiTestDriver(
     <UiProvider capabilities={ascii ? basicTerminalCapabilities : richTerminalCapabilities}>
-      <AppShell client={fixture.client} searchDebounceMs={0} />
+      <AppShell
+        client={{
+          ...fixture.client,
+          threadCapabilities: Atom.make({
+            repositoryIdentity: true,
+            threadPinning: true,
+            threadPinReorder: true,
+            threadSettlement: true,
+            threadSnooze: true,
+            threadVisitedTracking: true,
+          }),
+        }}
+        searchDebounceMs={0}
+      />
     </UiProvider>,
     { width, height, kittyKeyboard: true },
   );

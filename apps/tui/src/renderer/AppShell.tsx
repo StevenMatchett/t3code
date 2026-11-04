@@ -4,6 +4,8 @@ import { useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentu
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import { useMemo, useContext, useEffect, useState, useCallback, useRef } from "react";
+import { resolveSnoozePresets, canSnooze } from "@t3tools/client-runtime/state/thread-settled";
+import { planPinnedMove } from "@t3tools/client-runtime/state/thread-sort";
 import { sortSidebarThreads } from "../app/threadOrder.ts";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { AppShellView, useAppShellState, type ShellOverlayView } from "../app/AppShell.tsx";
@@ -12,17 +14,33 @@ import { useToast } from "../ui/StatusLine.tsx";
 import { useUi } from "../ui/context.tsx";
 import { actionKeyLabel } from "../app/actions.ts";
 import {
+  createInitialShellState,
   nextSidebarView,
+  shelvesBrowsing,
+  sidebarThreads,
   topOverlay,
   type ShellOverlay,
   type ShellRoute,
   type ShellState,
 } from "../app/state.ts";
+import {
+  buildShelfRows,
+  createInboxTracker,
+  markRange,
+  resolveShelfCursor,
+  SETTLED_FIRST_PAGE,
+  threadRowsOf,
+  toggleMarked,
+  type ShelfRow,
+  type ShelfThreadRow,
+} from "../app/threadShelves.ts";
+import { planThreadUndo, type ThreadLifecycleChange } from "../features/threads/management.ts";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { Conversation } from "./Conversation.tsx";
 import { NewThreadForm } from "./NewThreadForm.tsx";
 import { NewProjectForm } from "./NewProjectForm.tsx";
 import { ActivityClockProvider } from "../ui/ThreadActivityIndicator.tsx";
+import { SnoozeCustomDialog } from "./SnoozeCustomDialog.tsx";
 import { ThreadActionsForm } from "./ThreadManagement.tsx";
 import { HelpPanel } from "./HelpPanel.tsx";
 import { ThemePicker } from "./ThemePicker.tsx";
@@ -37,6 +55,7 @@ import { PullRequestPanel } from "./PullRequestPanel.tsx";
 
 import { RenameThreadDialog } from "./RenameThreadDialog.tsx";
 import {
+  NavigationContextMenu,
   ThreadContextMenu,
   ProjectContextMenu,
   type ThreadMenuAction,
@@ -45,6 +64,31 @@ import { createSoundTracker } from "../features/chat/notificationSounds.ts";
 import { createNotificationAudio } from "../platform/notificationAudio.ts";
 
 const NO_SESSION_ERROR = Atom.make<string | null>(null);
+/** Ages and snooze wake times are derived from the clock, and none of them need finer than this. */
+const SHELF_CLOCK_MS = 30_000;
+const ACCEPTED_NOTHING = "The environment did not accept that change.";
+
+type ShelfMenuAction =
+  | "new-thread"
+  | "pin"
+  | "unpin"
+  | "settle"
+  | "unsettle"
+  | "snooze"
+  | "wake"
+  | "rename"
+  | "regenerate-title"
+  | "mark-unread"
+  | "toggle-scope"
+  | "toggle-auto-settle"
+  | "copy-path"
+  | "copy-branch"
+  | "copy-id"
+  | "archive"
+  | "restore"
+  | "delete";
+
+type BulkMenuAction = "unpin" | "settle" | "snooze" | "regenerate-title" | "mark-unread" | "delete";
 
 type PaletteEntry = CommandPaletteItem & {
   readonly target:
@@ -103,6 +147,8 @@ function AppShellContent({
   const [paletteSearchQuery, setPaletteSearchQuery] = useState("");
   const threadSearch = useAtomValue(client.threadSearch(paletteSearchQuery));
   const [notice, setNotice] = useToast();
+  const [undoNotice, setUndoNotice] = useToast(5_000);
+  const undoRef = useRef<(() => Promise<void>) | null>(null);
   useSelectionHandler((selection) => {
     const text = selection.getSelectedText();
     if (!text) return;
@@ -158,11 +204,123 @@ function AppShellContent({
     snapshot !== null,
     initialRoute,
     saveShell,
-    client.session?.shell,
+    useMemo(() => {
+      const saved = client.session?.shell;
+      return client.session?.sidebarLayout() === "shelves"
+        ? {
+            ...(saved ?? createInitialShellState(initialRoute)),
+            sidebarLayout: "shelves" as const,
+            sidebarView:
+              saved?.sidebarView === "archived" ? ("archived" as const) : ("recent" as const),
+          }
+        : saved;
+    }, [client, initialRoute]),
   );
+  const shelvesLayout = state.sidebarLayout === "shelves";
+  const shelvesActive = shelvesBrowsing(state);
+  const threadCapabilities = useAtomValue(client.threadCapabilities);
+  const live =
+    connection.phase === "connected" && shell.status === "live" && Option.isNone(shell.error);
+  const [shelfNow, setShelfNow] = useState(() => new Date().toISOString());
+  useEffect(() => {
+    if (!shelvesLayout) return;
+    setShelfNow(new Date().toISOString());
+    // @effect-diagnostics-next-line globalTimers:off - A view clock tied to this effect's lifetime.
+    const timer = setInterval(() => setShelfNow(new Date().toISOString()), SHELF_CLOCK_MS);
+    return () => clearInterval(timer);
+  }, [shelvesLayout]);
+  // Message search hits the server, so it waits for a pause in typing as the palette's does.
+  const [shelfSearchQuery, setShelfSearchQuery] = useState("");
+  useEffect(() => {
+    const query = shelvesActive ? (state.filter ?? "") : "";
+    if (query === "") {
+      setShelfSearchQuery("");
+      return;
+    }
+    // @effect-diagnostics-next-line globalTimers:off - Debounce tied to this effect's lifetime.
+    const timer = setTimeout(() => setShelfSearchQuery(query), searchDebounceMs);
+    return () => clearTimeout(timer);
+  }, [shelvesActive, state.filter, searchDebounceMs]);
+  const shelfSearch = useAtomValue(client.threadSearch(shelfSearchQuery));
+  const [inboxVersion, bumpInbox] = useState(0);
+  const [inboxTracker] = useState(() =>
+    createInboxTracker(() => bumpInbox((version) => version + 1)),
+  );
+  useEffect(() => () => inboxTracker.dispose(), [inboxTracker]);
+  const shelfRows = useMemo<readonly ShelfRow[]>(() => {
+    if (!shelvesActive) return [];
+    const threads = sidebarThreads(rows.threads, state);
+    // While disconnected nothing is known to be working, and nothing may reorder on stale data.
+    if (live) inboxTracker.observe(threads, threadCapabilities, Date.now());
+    return buildShelfRows({
+      threads,
+      capabilities: threadCapabilities,
+      isWorking: (id) => live && inboxTracker.isWorking(id),
+      returnedAt: inboxTracker.returnedAt,
+      now: shelfNow,
+      live,
+      projectScope: state.projectScope ?? null,
+      expandedShelves: state.expandedShelves ?? [],
+      settledLimit: state.settledLimit ?? SETTLED_FIRST_PAGE,
+      openThreadId: state.route === "conversation" ? state.threadId : null,
+      filter: state.filter ?? "",
+      searchMatches: shelfSearch.matches,
+    });
+    // Only what the rows read: a new `state` object alone must not rebuild them on every keystroke.
+  }, [
+    shelvesActive,
+    rows.threads,
+    state.showSubagents,
+    threadCapabilities,
+    shelfNow,
+    live,
+    state.projectScope,
+    state.expandedShelves,
+    state.settledLimit,
+    state.route,
+    state.threadId,
+    state.filter,
+    shelfSearch.matches,
+    inboxTracker,
+    inboxVersion,
+  ]);
+  const lastShelfCursor = useRef(0);
+  const shelfCursor = shelvesActive
+    ? resolveShelfCursor(shelfRows, state, lastShelfCursor.current)
+    : -1;
+  if (shelfCursor >= 0 && state.route !== "conversation") lastShelfCursor.current = shelfCursor;
+  const shelfRow = shelfCursor >= 0 ? shelfRows[shelfCursor] : undefined;
+  const shelfThreadRows = threadRowsOf(shelfRows);
+  // Everything that acts on "the selected thread" reads state.threadId, so it follows the cursor.
+  useEffect(() => {
+    if (shelfRow?.kind !== "thread" || state.route === "conversation") return;
+    if (shelfRow.id !== state.threadId || shelfRow.id !== state.shelfCursor) {
+      dispatch({
+        type: "select-shelf-row",
+        rowId: shelfRow.id,
+        thread: { id: shelfRow.id, projectId: shelfRow.thread.projectId },
+      });
+    }
+  }, [dispatch, shelfRow, state.route, state.threadId, state.shelfCursor]);
+  const visitTarget =
+    state.route === "conversation" && threadCapabilities.threadVisitedTracking === true
+      ? (rows.threads.find((thread) => thread.id === state.threadId) ?? null)
+      : null;
+  // Having a thread open counts as seeing it, which is what clears Done and Woke on every client.
+  useEffect(() => {
+    if (!visitTarget || !active) return;
+    void client.threadManagement.lifecycle(registry, visitTarget.id, {
+      type: "visit",
+      at: visitTarget.updatedAt,
+    });
+  }, [client, registry, active, visitTarget?.id, visitTarget?.latestTurn?.completedAt]);
   const overlays = state.overlays;
   const pushOverlay = (overlay: ShellOverlay) => dispatch({ type: "push-overlay", overlay });
   const popOverlay = useCallback(() => dispatch({ type: "pop-overlay" }), [dispatch]);
+  const offerUndo = (text: string, undo: () => Promise<void>) => {
+    undoRef.current = undo;
+    setUndoNotice({ text: `${text} Ctrl+Z undoes.`, failed: false });
+  };
   const chooseThreadAction = async (threadId: TuiThreadShell["id"], action: ThreadMenuAction) => {
     const thread = rows.threads.find((item) => item.id === threadId);
     popOverlay();
@@ -179,12 +337,413 @@ function AppShellContent({
       ? client.threadManagement.unarchive(registry, thread.id)
       : client.threadManagement.archive(registry, thread.id));
     if (!accepted) {
-      setNotice({ text: "The environment did not accept that change.", failed: true });
-    } else if (state.route === "conversation" && state.threadId === thread.id) {
-      dispatch({ type: "back" });
+      setNotice({ text: ACCEPTED_NOTHING, failed: true });
+      return;
+    }
+    if (!thread.archivedAt)
+      offerUndo(`Archived ${thread.title}.`, async () => {
+        await client.threadManagement.unarchive(registry, thread.id);
+      });
+    if (state.route === "conversation" && state.threadId === thread.id) dispatch({ type: "back" });
+  };
+  const selectedThread =
+    shelvesActive && state.route !== "conversation"
+      ? shelfRow?.kind === "thread"
+        ? shelfRow.thread
+        : null
+      : (rows.threads.find((thread) => thread.id === state.threadId) ?? null);
+  const openShelfRow = (row: ShelfThreadRow) =>
+    dispatch({ type: "open-thread", projectId: row.thread.projectId, threadId: row.id });
+  const changeThread = async (threadId: TuiThreadShell["id"], change: ThreadLifecycleChange) => {
+    const accepted = await client.threadManagement.lifecycle(registry, threadId, change);
+    if (!accepted) setNotice({ text: ACCEPTED_NOTHING, failed: true });
+    return accepted;
+  };
+  const undoLifecycle = (
+    threads: readonly TuiThreadShell[],
+    action: "settle" | "snooze" | "unpin",
+    text: string,
+  ) => {
+    // Captured now: by the time Undo runs, the threads' pins and snoozes are already gone.
+    const plans = threads.map((thread) => ({
+      id: thread.id,
+      plan: planThreadUndo(action, thread),
+    }));
+    offerUndo(text, async () => {
+      await Promise.all(
+        plans.map(async ({ id, plan }) => {
+          for (const step of plan) {
+            // A snooze can expire before Undo runs, and the server rejects an expired restore.
+            if (step.type === "snooze" && Date.parse(step.until) <= Date.now()) continue;
+            if (!(await changeThread(id, step))) return;
+          }
+        }),
+      );
+    });
+  };
+  /** Settling or snoozing the open thread moves on to the next card, as the GUI does. */
+  const parkThread = async (thread: TuiThreadShell, change: ThreadLifecycleChange) => {
+    const cards = shelfThreadRows.filter((row) => row.variant === "card");
+    const next = cards[cards.findIndex((row) => row.id === thread.id) + 1] ?? cards[0];
+    const wasOpen = state.route === "conversation" && state.threadId === thread.id;
+    if (!(await changeThread(thread.id, change))) return;
+    undoLifecycle(
+      [thread],
+      change.type === "snooze" ? "snooze" : "settle",
+      `${change.type === "snooze" ? "Snoozed" : "Settled"} ${thread.title}.`,
+    );
+    if (!wasOpen) return;
+    if (next && next.id !== thread.id) openShelfRow(next);
+    else dispatch({ type: "back" });
+  };
+  const clearMarks = () => dispatch({ type: "mark-threads", threadIds: [] });
+  /** Applies one change to the whole selection, reporting anything the server turned down. */
+  const changeMarked = async (
+    threads: readonly TuiThreadShell[],
+    change: ThreadLifecycleChange,
+    undo?: { readonly action: "settle" | "snooze" | "unpin"; readonly verb: string },
+  ) => {
+    clearMarks();
+    const results = await Promise.all(
+      threads.map((thread) => client.threadManagement.lifecycle(registry, thread.id, change)),
+    );
+    const accepted = threads.filter((_, index) => results[index]);
+    if (accepted.length < threads.length) {
+      setNotice({
+        text: `The environment did not accept ${threads.length - accepted.length} of ${threads.length} changes.`,
+        failed: true,
+      });
+    }
+    if (undo && accepted.length > 0) {
+      undoLifecycle(accepted, undo.action, `${undo.verb} ${accepted.length} threads.`);
     }
   };
-  const selectedThread = rows.threads.find((thread) => thread.id === state.threadId) ?? null;
+  const togglePin = async (thread: TuiThreadShell) => {
+    const unpinning = thread.pinnedAt != null;
+    const accepted = await changeThread(thread.id, { type: unpinning ? "unpin" : "pin" });
+    if (accepted && unpinning) undoLifecycle([thread], "unpin", `Unpinned ${thread.title}.`);
+  };
+  const toggleSettle = (thread: TuiThreadShell) => {
+    if (thread.settledOverride === "settled") void changeThread(thread.id, { type: "unsettle" });
+    else void parkThread(thread, { type: "settle" });
+  };
+  const threadIsSnoozed = (thread: TuiThreadShell) =>
+    shelfThreadRows.some((row) => row.id === thread.id && row.shelf === "snoozed");
+  const markedSet = useMemo(() => new Set(state.markedThreads ?? []), [state.markedThreads]);
+  // Rows can vanish while selected, so the selection is always read through the live list.
+  const markedThreads = useMemo(
+    () => (markedSet.size === 0 ? [] : rows.threads.filter((thread) => markedSet.has(thread.id))),
+    [markedSet, rows.threads],
+  );
+  const pinMarked = () => {
+    const pinned = markedThreads.filter((thread) => thread.pinnedAt != null);
+    if (pinned.length > 0)
+      void changeMarked(pinned, { type: "unpin" }, { action: "unpin", verb: "Unpinned" });
+    else void changeMarked(markedThreads, { type: "pin" });
+  };
+  const settleMarked = () => {
+    const unsettled = markedThreads.filter((thread) => thread.settledOverride !== "settled");
+    if (unsettled.length > 0)
+      void changeMarked(unsettled, { type: "settle" }, { action: "settle", verb: "Settled" });
+    else void changeMarked(markedThreads, { type: "unsettle" });
+  };
+  const openSnooze = (threads: readonly TuiThreadShell[], x = 2, y = 3) => {
+    if (threads.every(threadIsSnoozed)) {
+      if (threads.length === 1) void changeThread(threads[0]!.id, { type: "wake" });
+      else void changeMarked(threads, { type: "wake" });
+      return;
+    }
+    const now = new Date().toISOString();
+    if (threads.every((thread) => canSnooze(thread, { now }))) {
+      pushOverlay({ type: "snooze-menu", threadIds: threads.map((thread) => thread.id), x, y });
+    } else {
+      setNotice({
+        text: `${threads.length > 1 ? "A selected thread is" : "This thread is"} waiting on you, so it cannot be snoozed.`,
+        failed: true,
+      });
+    }
+  };
+  const snoozeThreads = (threads: readonly TuiThreadShell[], until: string) => {
+    if (threads.length === 1) void parkThread(threads[0]!, { type: "snooze", until });
+    else
+      void changeMarked(threads, { type: "snooze", until }, { action: "snooze", verb: "Snoozed" });
+  };
+  const deleteMarked = async () => {
+    const threads = markedThreads;
+    clearMarks();
+    const results = await Promise.all(
+      threads.map((thread) => client.threadManagement.delete(registry, thread.id)),
+    );
+    const refused = results.filter((accepted) => !accepted).length;
+    if (refused > 0) {
+      setNotice({
+        text: `The environment did not accept ${refused} of ${threads.length} deletions.`,
+        failed: true,
+      });
+    }
+  };
+  const openThreadMenu = (thread: TuiThreadShell, x = 2, y = 3) => {
+    if (markedSet.has(thread.id)) pushOverlay({ type: "bulk-menu", x, y });
+    else pushOverlay({ type: "thread-menu", threadId: thread.id, x, y });
+  };
+  const bulkMenuActions = () => {
+    const count = markedThreads.length;
+    const pinned = markedThreads.filter((thread) => thread.pinnedAt != null).length;
+    const now = new Date().toISOString();
+    const entries: ReadonlyArray<{
+      readonly action: BulkMenuAction;
+      readonly label: string;
+      readonly when?: boolean;
+      readonly disabled?: boolean;
+    }> = [
+      { action: "unpin", label: `Unpin (${pinned})`, when: pinned > 0 },
+      {
+        action: "settle",
+        label: `Settle (${count})`,
+        when: threadCapabilities.threadSettlement === true,
+        disabled: markedThreads.every((thread) => thread.settledOverride === "settled"),
+      },
+      {
+        action: "snooze",
+        label: `Snooze (${count})...`,
+        when:
+          threadCapabilities.threadSnooze === true &&
+          markedThreads.every((thread) => canSnooze(thread, { now })),
+      },
+      {
+        action: "regenerate-title",
+        label: `Regenerate titles (${count})`,
+        when: threadCapabilities.threadTitleRegeneration === true,
+      },
+      {
+        action: "mark-unread",
+        label: `Mark unread (${count})`,
+        when: threadCapabilities.threadVisitedTracking === true,
+      },
+      { action: "delete", label: `Delete (${count})...` },
+    ];
+    return entries.filter((entry) => entry.when !== false);
+  };
+  const chooseBulkMenuAction = (action: BulkMenuAction, x: number, y: number) => {
+    popOverlay();
+    switch (action) {
+      case "unpin":
+        pinMarked();
+        break;
+      case "settle":
+        settleMarked();
+        break;
+      case "snooze":
+        openSnooze(markedThreads, x, y);
+        break;
+      case "regenerate-title":
+        void changeMarked(markedThreads, { type: "regenerate-title" });
+        break;
+      case "mark-unread":
+        void changeMarked(markedThreads, { type: "mark-unread" });
+        break;
+      case "delete":
+        pushOverlay({ type: "bulk-delete", x, y });
+        break;
+    }
+  };
+  const copyToClipboard = (text: string) => {
+    const copied = renderer.copyToClipboardOSC52(text);
+    setNotice({
+      text: copied ? "Copied to clipboard." : "Copy unavailable in this terminal.",
+      failed: !copied,
+    });
+  };
+  const moveShelfThread = (direction: "up" | "down") => {
+    if (shelfRow?.kind !== "thread") return;
+    const { shelf } = shelfRow;
+    if (shelf !== "pinned") return;
+    const siblings = shelfThreadRows.filter((row) => row.shelf === shelf);
+    const writes = planPinnedMove({
+      orderedIds: siblings.map((row) => row.id),
+      keysById: new Map(siblings.map((row) => [row.id as string, row.thread.pinOrderKey])),
+      movedId: shelfRow.id,
+      direction,
+    });
+    for (const write of writes ?? []) {
+      void changeThread(write.id as TuiThreadShell["id"], {
+        type: "reorder",
+        shelf,
+        orderKey: write.orderKey,
+      });
+    }
+  };
+  const canMoveShelfThread =
+    shelfRow?.kind === "thread" &&
+    !state.filter &&
+    // The inbox orders itself by what came back to you, so only pins can be arranged.
+    shelfRow.shelf === "pinned" &&
+    threadCapabilities.threadPinReorder === true;
+  const toggleRowMark = (id: TuiThreadShell["id"]) =>
+    dispatch({
+      type: "mark-threads",
+      threadIds: toggleMarked(state.markedThreads ?? [], id),
+      anchor: id,
+    });
+  const markRowRange = (target: TuiThreadShell["id"], anchor?: TuiThreadShell["id"] | null) =>
+    dispatch({
+      type: "mark-threads",
+      threadIds: markRange(
+        state.markedThreads ?? [],
+        shelfRows,
+        anchor ?? state.markAnchor ?? null,
+        target,
+      ),
+      anchor: anchor ?? state.markAnchor ?? target,
+    });
+  const activateShelfRow = (
+    row: ShelfRow,
+    modifiers?: { readonly shift: boolean; readonly ctrl: boolean },
+  ) => {
+    if (row.kind === "thread" && modifiers?.ctrl) toggleRowMark(row.id);
+    else if (row.kind === "thread" && modifiers?.shift) markRowRange(row.id);
+    else if (row.kind === "thread") openShelfRow(row);
+    else if (row.kind === "shelf") dispatch({ type: "toggle-shelf", shelf: row.shelf });
+    else dispatch({ type: "show-more-settled" });
+  };
+  const stepOpenThread = (offset: number) => {
+    if (shelfThreadRows.length === 0) return;
+    const current = shelfThreadRows.findIndex((row) => row.id === state.threadId);
+    const next = (current + offset + shelfThreadRows.length) % shelfThreadRows.length;
+    openShelfRow(shelfThreadRows[next]!);
+  };
+  const shelfMenuActions = (thread: TuiThreadShell) => {
+    const settled = thread.settledOverride === "settled";
+    const entries: ReadonlyArray<{
+      readonly action: ShelfMenuAction;
+      readonly label: string;
+      readonly disabled?: boolean;
+      readonly when?: boolean;
+    }> = [
+      { action: "new-thread", label: "New thread" },
+      {
+        action: thread.pinnedAt != null ? "unpin" : "pin",
+        label: thread.pinnedAt != null ? "Unpin thread" : "Pin thread",
+        when: threadCapabilities.threadPinning === true,
+      },
+      {
+        action: settled ? "unsettle" : "settle",
+        label: settled ? "Un-settle thread" : "Settle thread",
+        when: threadCapabilities.threadSettlement === true,
+      },
+      {
+        action: threadIsSnoozed(thread) ? "wake" : "snooze",
+        label: threadIsSnoozed(thread) ? "Wake thread" : "Snooze...",
+        when: threadCapabilities.threadSnooze === true,
+      },
+      { action: "rename", label: "Rename thread" },
+      {
+        action: "regenerate-title",
+        label: thread.titleRegeneration ? "Regenerating..." : "Regenerate title",
+        disabled: Boolean(thread.titleRegeneration),
+        when: threadCapabilities.threadTitleRegeneration === true,
+      },
+      {
+        action: "mark-unread",
+        label: "Mark unread",
+        when: threadCapabilities.threadVisitedTracking === true,
+      },
+      {
+        action: "toggle-scope",
+        label: state.projectScope
+          ? "Show all projects"
+          : `Filter by ${rows.projects.find((item) => item.id === thread.projectId)?.title ?? "project"}`,
+      },
+      {
+        action: "toggle-auto-settle",
+        label: thread.autoSettleDisabledAt ? "Auto-settle: off" : "Auto-settle: on",
+        when: threadCapabilities.threadAutoSettleOptOut === true,
+      },
+      { action: "copy-path", label: "Copy path" },
+      { action: "copy-branch", label: "Copy branch", when: thread.branch !== null },
+      { action: "copy-id", label: "Copy thread ID" },
+      thread.archivedAt
+        ? { action: "restore", label: "Restore thread" }
+        : {
+            action: "archive",
+            label: "Archive thread",
+            disabled: thread.latestTurn?.state === "running",
+          },
+      { action: "delete", label: "Delete" },
+    ];
+    return entries.filter((entry) => entry.when !== false);
+  };
+  const chooseShelfMenuAction = (
+    thread: TuiThreadShell,
+    action: ShelfMenuAction,
+    x: number,
+    y: number,
+  ) => {
+    popOverlay();
+    switch (action) {
+      case "new-thread":
+        dispatch({ type: "new-thread", projectId: thread.projectId });
+        break;
+      case "pin":
+      case "unpin":
+        void togglePin(thread);
+        break;
+      case "settle":
+      case "unsettle":
+        toggleSettle(thread);
+        break;
+      case "snooze":
+      case "wake":
+        openSnooze([thread], x, y);
+        break;
+      case "rename":
+        pushOverlay({ type: "rename", threadId: thread.id });
+        break;
+      case "regenerate-title":
+        void changeThread(thread.id, { type: "regenerate-title" });
+        break;
+      case "mark-unread":
+        void changeThread(thread.id, { type: "mark-unread" });
+        break;
+      case "toggle-scope":
+        dispatch({
+          type: "set-project-scope",
+          projectId: state.projectScope ? null : thread.projectId,
+        });
+        break;
+      case "toggle-auto-settle":
+        void changeThread(thread.id, {
+          type: "auto-settle",
+          enabled: Boolean(thread.autoSettleDisabledAt),
+        });
+        break;
+      case "copy-path":
+        copyToClipboard(
+          thread.worktreePath ??
+            rows.projects.find((item) => item.id === thread.projectId)?.workspaceRoot ??
+            "",
+        );
+        break;
+      case "copy-branch":
+        copyToClipboard(thread.branch ?? "");
+        break;
+      case "copy-id":
+        copyToClipboard(thread.id);
+        break;
+      case "archive":
+      case "restore":
+        void chooseThreadAction(thread.id, "archive");
+        break;
+      case "delete":
+        pushOverlay({ type: "manage", threadId: thread.id, initialAction: "delete" });
+        break;
+    }
+  };
+  const toggleSidebarLayout = () => {
+    const layout = shelvesLayout ? "tree" : "shelves";
+    client.session?.saveSidebarLayout(layout);
+    dispatch({ type: "set-sidebar-layout", layout });
+  };
   useEffect(() => {
     if (state.sidebarView === "archived") client.refreshArchivedThreads(registry);
   }, [state.sidebarView, client, registry]);
@@ -234,6 +793,10 @@ function AppShellContent({
       },
       "favorites.open": () => pushOverlay({ type: "favorite-models" }),
       "theme.select": () => pushOverlay({ type: "theme" }),
+      "sidebar.layout": {
+        title: shelvesLayout ? "Turn inbox sidebar off" : "Turn inbox sidebar on",
+        run: toggleSidebarLayout,
+      },
     },
   });
   useKeyLayer("workspace", {
@@ -247,21 +810,111 @@ function AppShellContent({
         enabled: selectedThread !== null,
         title: selectedThread ? `Manage ${selectedThread.title}` : "Manage thread",
         run: () => {
-          if (selectedThread) pushOverlay({ type: "manage", threadId: selectedThread.id });
+          if (!selectedThread) return;
+          if (shelvesActive) openThreadMenu(selectedThread);
+          else pushOverlay({ type: "manage", threadId: selectedThread.id });
         },
       },
+      "thread.undo": {
+        enabled: undoNotice !== null,
+        run: () => {
+          const undo = undoRef.current;
+          undoRef.current = null;
+          setUndoNotice(null);
+          void undo?.();
+        },
+      },
+      ...(shelvesActive
+        ? {
+            "thread.pin": {
+              enabled:
+                (selectedThread !== null || markedThreads.length > 0) &&
+                threadCapabilities.threadPinning === true,
+              run: () => {
+                if (markedThreads.length > 0) pinMarked();
+                else if (selectedThread) void togglePin(selectedThread);
+              },
+            },
+            "thread.settle": {
+              enabled:
+                (selectedThread !== null || markedThreads.length > 0) &&
+                threadCapabilities.threadSettlement === true,
+              label:
+                markedThreads.length > 0
+                  ? markedThreads.every((thread) => thread.settledOverride === "settled")
+                    ? `Un-settle ${markedThreads.length}`
+                    : `Settle ${markedThreads.length}`
+                  : selectedThread?.settledOverride === "settled"
+                    ? "Un-settle"
+                    : "Settle",
+              run: () => {
+                if (markedThreads.length > 0) settleMarked();
+                else if (selectedThread) toggleSettle(selectedThread);
+              },
+            },
+            "thread.snooze": {
+              enabled:
+                (selectedThread !== null || markedThreads.length > 0) &&
+                threadCapabilities.threadSnooze === true,
+              label:
+                markedThreads.length > 0
+                  ? `${markedThreads.every(threadIsSnoozed) ? "Wake" : "Snooze"} ${markedThreads.length}`
+                  : selectedThread && threadIsSnoozed(selectedThread)
+                    ? "Wake"
+                    : "Snooze",
+              run: () => {
+                if (markedThreads.length > 0) openSnooze(markedThreads);
+                else if (selectedThread) openSnooze([selectedThread]);
+              },
+            },
+            "thread.markUnread": {
+              enabled:
+                (selectedThread !== null || markedThreads.length > 0) &&
+                threadCapabilities.threadVisitedTracking === true,
+              run: () => {
+                if (markedThreads.length > 0)
+                  void changeMarked(markedThreads, { type: "mark-unread" });
+                else if (selectedThread)
+                  void changeThread(selectedThread.id, { type: "mark-unread" });
+              },
+            },
+            "sidebar.projectScope": {
+              enabled: rows.projects.length > 0,
+              run: () => pushOverlay({ type: "project-scope" }),
+            },
+            "thread.previous": {
+              enabled: shelfThreadRows.length > 0,
+              run: () => stepOpenThread(-1),
+            },
+            "thread.next": { enabled: shelfThreadRows.length > 0, run: () => stepOpenThread(1) },
+            "thread.jump": {
+              enabled: shelfThreadRows.length > 0,
+              run: (key) => {
+                const row = shelfThreadRows[Number(key?.name) - 1];
+                if (row) openShelfRow(row);
+              },
+            },
+          }
+        : {}),
       "diff.toggle": {
-        enabled: state.threadId !== null,
+        enabled: selectedThread !== null,
         run: () => pushOverlay({ type: "diff" }),
       },
       "pullRequest.open": { enabled: selectedThread !== null, run: openPullRequest },
       "checkpoint.restore": {
-        enabled: state.threadId !== null,
+        enabled: selectedThread !== null,
         run: () => pushOverlay({ type: "restore" }),
       },
       "sidebar.showArchived": () => dispatch({ type: "set-sidebar-view", view: "archived" }),
       "sidebar.toggle": {
-        title: `Show ${nextSidebarView(state.sidebarView)} in sidebar`,
+        ...(shelvesLayout
+          ? { label: state.sidebarView === "archived" ? "Threads" : "Archived" }
+          : {}),
+        title: shelvesLayout
+          ? state.sidebarView === "archived"
+            ? "Show threads in sidebar"
+            : "Show archived in sidebar"
+          : `Show ${nextSidebarView(state.sidebarView)} in sidebar`,
         run: () => dispatch({ type: "toggle-sidebar-view" }),
       },
       "sidebar.toggleSubagents": {
@@ -277,7 +930,30 @@ function AppShellContent({
     },
   });
   const [filtering, setFiltering] = useState(false);
-  const moveSelection = (offset: number, wrap = false) => dispatch({ type: "move", offset, wrap });
+  const moveSelection = (offset: number, wrap = false) => {
+    if (!shelvesActive) {
+      dispatch({ type: "move", offset, wrap });
+      return;
+    }
+    if (shelfRows.length === 0) return;
+    const next = wrap
+      ? (shelfCursor + offset + shelfRows.length) % shelfRows.length
+      : Math.max(0, Math.min(shelfRows.length - 1, shelfCursor + offset));
+    const row = shelfRows[next]!;
+    dispatch({
+      type: "select-shelf-row",
+      rowId: row.id,
+      ...(row.kind === "thread" ? { thread: { id: row.id, projectId: row.thread.projectId } } : {}),
+    });
+  };
+  /** Shift+arrows: selects the row the cursor leaves and the one it lands on. */
+  const extendMarks = (offset: number) => {
+    const target = shelfRows[Math.max(0, Math.min(shelfRows.length - 1, shelfCursor + offset))];
+    if (target?.kind === "thread" && shelfRow?.kind === "thread") {
+      markRowRange(target.id, state.markAnchor ?? shelfRow.id);
+    }
+    moveSelection(offset);
+  };
   useKeyLayer("listFilter", {
     active: filtering && !inConversation,
     typing: true,
@@ -294,14 +970,16 @@ function AppShellContent({
   // Keys that act on a row are only offered while there is a row to act on.
   const hasRows =
     !inConversation &&
-    (browsingProjects
-      ? rows.projects.length > 0
-      : rows.threads.some(
-          (thread) =>
-            Boolean(thread.archivedAt) === (state.sidebarView === "archived") &&
-            ((state.sidebarView ?? "projects") !== "projects" ||
-              thread.projectId === state.projectId),
-        ));
+    (shelvesActive
+      ? shelfRows.length > 0
+      : browsingProjects
+        ? rows.projects.length > 0
+        : rows.threads.some(
+            (thread) =>
+              Boolean(thread.archivedAt) === (state.sidebarView === "archived") &&
+              ((state.sidebarView ?? "projects") !== "projects" ||
+                thread.projectId === state.projectId),
+          ));
   useKeyLayer("navigation", {
     active: !inConversation,
     context: browsingProjects ? "Projects" : "Threads",
@@ -314,29 +992,71 @@ function AppShellContent({
         enabled: hasRows,
         label: atArchivedRow ? "Manage" : "Open",
         run: () => {
-          if (atArchivedRow) pushOverlay({ type: "manage", threadId: atArchivedRow.id });
+          if (shelvesActive) {
+            if (shelfRow) activateShelfRow(shelfRow);
+          } else if (atArchivedRow) pushOverlay({ type: "manage", threadId: atArchivedRow.id });
           else dispatch({ type: "activate" });
         },
       },
       "list.back": {
         enabled:
           Boolean(state.filter) ||
+          markedThreads.length > 0 ||
+          (shelvesLayout && state.sidebarView === "archived") ||
           (!browsingProjects && state.sidebarView !== "recent" && state.sidebarView !== "archived"),
-        label: state.filter ? "Clear filter" : "Projects",
-        run: () => dispatch({ type: "back" }),
+        label:
+          markedThreads.length > 0
+            ? "Clear selection"
+            : state.filter
+              ? "Clear filter"
+              : shelvesLayout
+                ? "Threads"
+                : "Projects",
+        run: () => {
+          // Archived is a detour in this layout, so Esc comes back from it instead of being stuck.
+          if (shelvesLayout && !state.filter && markedThreads.length === 0)
+            dispatch({ type: "toggle-sidebar-view" });
+          else dispatch({ type: "back" });
+        },
       },
-      "list.filter": () => {
-        setFiltering(true);
-        dispatch({ type: "set-filter", filter: state.filter ?? "" });
+      "list.filter": {
+        ...(shelvesActive ? { label: "Search", title: "Search threads and messages" } : {}),
+        run: () => {
+          setFiltering(true);
+          dispatch({ type: "set-filter", filter: state.filter ?? "" });
+        },
       },
-      "project.toggleExpanded": {
-        enabled: browsingProjects && hasRows,
-        run: () => dispatch({ type: "toggle-project-expanded" }),
-      },
-      "sidebar.previousView": () =>
-        dispatch({ type: "set-sidebar-view", view: nextSidebarView(state.sidebarView, -1) }),
-      "sidebar.nextView": () =>
-        dispatch({ type: "set-sidebar-view", view: nextSidebarView(state.sidebarView, 1) }),
+      "project.toggleExpanded": shelvesActive
+        ? {
+            enabled: shelfRow !== undefined,
+            label: shelfRow?.kind === "thread" ? "Select" : "Expand",
+            title: shelfRow?.kind === "thread" ? "Select this thread" : "Open or close this shelf",
+            run: () => {
+              if (shelfRow?.kind === "thread") toggleRowMark(shelfRow.id);
+              else if (shelfRow) activateShelfRow(shelfRow);
+            },
+          }
+        : {
+            enabled: browsingProjects && hasRows,
+            run: () => dispatch({ type: "toggle-project-expanded" }),
+          },
+      ...(shelvesActive
+        ? {
+            "thread.selectUp": { enabled: hasRows, run: () => extendMarks(-1) },
+            "thread.selectDown": { enabled: hasRows, run: () => extendMarks(1) },
+            "thread.moveUp": { enabled: canMoveShelfThread, run: () => moveShelfThread("up") },
+            "thread.moveDown": { enabled: canMoveShelfThread, run: () => moveShelfThread("down") },
+          }
+        : {}),
+      // The GUI has no sidebar tabs, so in its layout the arrows have nothing to switch.
+      ...(shelvesLayout
+        ? {}
+        : {
+            "sidebar.previousView": () =>
+              dispatch({ type: "set-sidebar-view", view: nextSidebarView(state.sidebarView, -1) }),
+            "sidebar.nextView": () =>
+              dispatch({ type: "set-sidebar-view", view: nextSidebarView(state.sidebarView, 1) }),
+          }),
     },
   });
   const [recentChoices, setRecentChoices] = useState<readonly string[]>([]);
@@ -615,8 +1335,160 @@ function AppShellContent({
             }
           : null;
       }
+      case "project-scope":
+        return {
+          title: "Filter by project",
+          size: { width: 72, height: 18 },
+          content: (
+            <CommandPalette
+              items={[
+                {
+                  id: "all",
+                  label: "All projects",
+                  detail: state.projectScope ? "" : "Current",
+                  rank: 2_000,
+                },
+                ...rows.projects.map((project) => ({
+                  id: project.id,
+                  label: project.title,
+                  detail: `${project.id === state.projectScope ? "Current · " : ""}${project.workspaceRoot}`,
+                  rank: project.id === state.projectScope ? 1_000 : 0,
+                })),
+              ]}
+              height={contentRows(18)}
+              active={overlayActive}
+              searching={false}
+              searchFailed={false}
+              searchedQuery=""
+              searchDebounceMs={0}
+              onSearchQueryChange={() => undefined}
+              onChoose={(id) => {
+                popOverlay();
+                dispatch({
+                  type: "set-project-scope",
+                  projectId: rows.projects.find((project) => project.id === id)?.id ?? null,
+                });
+              }}
+              onClose={popOverlay}
+            />
+          ),
+        };
+      case "snooze-menu": {
+        const threads = rows.threads.filter((item) => overlay.threadIds.includes(item.id));
+        const presets = resolveSnoozePresets(new Date());
+        return threads.length > 0
+          ? {
+              floating: true,
+              content: (
+                <NavigationContextMenu
+                  id="snooze"
+                  x={overlay.x}
+                  y={overlay.y}
+                  width={width}
+                  height={height}
+                  actions={[
+                    ...presets.map((preset) => ({
+                      action: preset.id as string,
+                      label: `${preset.label} (${preset.whenLabel})`,
+                    })),
+                    { action: "custom", label: "Custom..." },
+                  ]}
+                  onChoose={(id) => {
+                    popOverlay();
+                    if (id === "custom") {
+                      pushOverlay({ type: "snooze-custom", threadIds: overlay.threadIds });
+                      return;
+                    }
+                    const preset = presets.find((candidate) => candidate.id === id);
+                    if (preset) snoozeThreads(threads, preset.snoozedUntil);
+                  }}
+                  onClose={popOverlay}
+                />
+              ),
+            }
+          : null;
+      }
+      case "snooze-custom": {
+        const threads = rows.threads.filter((item) => overlay.threadIds.includes(item.id));
+        return threads.length > 0
+          ? {
+              floating: true,
+              content: (
+                <SnoozeCustomDialog
+                  count={threads.length}
+                  onSnooze={(until) => {
+                    popOverlay();
+                    snoozeThreads(threads, until);
+                  }}
+                  onClose={popOverlay}
+                />
+              ),
+            }
+          : null;
+      }
+      case "bulk-menu":
+        return markedThreads.length > 0
+          ? {
+              floating: true,
+              content: (
+                <NavigationContextMenu
+                  id="bulk-thread"
+                  x={overlay.x}
+                  y={overlay.y}
+                  width={width}
+                  height={height}
+                  actions={bulkMenuActions()}
+                  onChoose={(action) => chooseBulkMenuAction(action, overlay.x, overlay.y)}
+                  onClose={popOverlay}
+                />
+              ),
+            }
+          : null;
+      case "bulk-delete":
+        return {
+          floating: true,
+          content: (
+            <NavigationContextMenu
+              id="bulk-delete"
+              x={overlay.x}
+              y={overlay.y}
+              width={width}
+              height={height}
+              // Cancel comes first, so Enter on a menu that just opened can never delete.
+              actions={[
+                { action: "cancel", label: "Cancel" },
+                {
+                  action: "delete",
+                  label: `Delete ${markedThreads.length} ${markedThreads.length === 1 ? "thread" : "threads"}`,
+                },
+              ]}
+              onChoose={(action) => {
+                popOverlay();
+                if (action === "delete") void deleteMarked();
+              }}
+              onClose={popOverlay}
+            />
+          ),
+        };
       case "thread-menu": {
         const thread = rows.threads.find((item) => item.id === overlay.threadId);
+        if (thread && shelvesLayout)
+          return {
+            floating: true,
+            content: (
+              <NavigationContextMenu
+                key={thread.id}
+                id="thread-context"
+                x={overlay.x}
+                y={overlay.y}
+                width={width}
+                height={height}
+                actions={shelfMenuActions(thread)}
+                onChoose={(action) => chooseShelfMenuAction(thread, action, overlay.x, overlay.y)}
+                onClose={popOverlay}
+              />
+            ),
+          };
         return thread
           ? {
               floating: true,
@@ -672,12 +1544,28 @@ function AppShellContent({
         onThreadContextMenu={(thread, position) => {
           if (!active || overlays.length > 0) return;
           renderer.clearSelection();
-          pushOverlay({ type: "thread-menu", threadId: thread.id, ...position });
+          if (shelvesLayout) openThreadMenu(thread, position.x, position.y);
+          else pushOverlay({ type: "thread-menu", threadId: thread.id, ...position });
         }}
         onToggleSidebarView={() => dispatch({ type: "toggle-sidebar-view" })}
         environmentId={client.environmentId}
-        live={
-          connection.phase === "connected" && shell.status === "live" && Option.isNone(shell.error)
+        live={live}
+        shelves={
+          shelvesActive
+            ? {
+                rows: shelfRows,
+                cursor: shelfCursor,
+                marked: markedSet,
+                scopeTitle:
+                  rows.projects.find((project) => project.id === state.projectScope)?.title ?? null,
+                onActivate: activateShelfRow,
+                onSearch: () => {
+                  setFiltering(true);
+                  dispatch({ type: "set-filter", filter: state.filter ?? "" });
+                },
+                onChooseScope: () => pushOverlay({ type: "project-scope" }),
+              }
+            : null
         }
         state={state}
         label={client.label}
@@ -691,7 +1579,7 @@ function AppShellContent({
         error={Option.isSome(shell.error) || connection.phase === "blocked"}
         width={width}
         height={height}
-        notice={sessionError ? { text: sessionError, failed: true } : notice}
+        notice={sessionError ? { text: sessionError, failed: true } : (undoNotice ?? notice)}
         overlays={overlayViews}
         behindDialog={!active && !capabilities.color}
         filtering={filtering}

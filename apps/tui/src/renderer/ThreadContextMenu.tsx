@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useKeyLayer } from "../ui/keymap.ts";
+import { listWindowStart } from "../ui/ListView.tsx";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { Stack } from "../ui/primitives.tsx";
@@ -48,7 +49,7 @@ export function ProjectContextMenu(
   );
 }
 
-function NavigationContextMenu<Action extends string>({
+export function NavigationContextMenu<Action extends string>({
   x,
   y,
   width,
@@ -59,11 +60,21 @@ function NavigationContextMenu<Action extends string>({
   onClose,
 }: MenuPositionProps & {
   readonly id: string;
-  readonly actions: readonly { readonly action: Action; readonly label: string }[];
+  readonly actions: readonly {
+    readonly action: Action;
+    readonly label: string;
+    readonly disabled?: boolean;
+  }[];
   readonly onChoose: (action: Action) => void;
 }) {
   const [selected, setSelected] = useState(0);
-  const menuHeight = actions.length + 2;
+  // A short terminal scrolls the menu, so the selection is always on screen.
+  const menuHeight = Math.min(actions.length + 2, height);
+  const visible = Math.max(1, menuHeight - 2);
+  const first = listWindowStart(selected, visible, actions.length);
+  const choose = (index: number) => {
+    if (!actions[index]!.disabled) onChoose(actions[index]!.action);
+  };
   const move = (offset: number) =>
     setSelected((current) => (current + offset + actions.length) % actions.length);
   useKeyLayer("contextMenu", {
@@ -72,10 +83,11 @@ function NavigationContextMenu<Action extends string>({
       "contextMenu.close": onClose,
       "contextMenu.up": () => move(-1),
       "contextMenu.down": () => move(1),
-      "contextMenu.choose": () => onChoose(actions[selected]!.action),
+      "contextMenu.choose": () => choose(selected),
     },
   });
-  const menuWidth = Math.min(20, width);
+  const longest = Math.max(...actions.map(({ label }) => label.length));
+  const menuWidth = Math.min(Math.max(20, longest + 6), width);
   return (
     <Stack
       id={`${id}-backdrop`}
@@ -105,23 +117,29 @@ function NavigationContextMenu<Action extends string>({
           event.stopPropagation();
         }}
       >
-        {actions.map(({ action, label }, index) => (
-          <Stack
-            key={action}
-            id={`${id}-${action}`}
-            height={1}
-            width="100%"
-            onMouseOver={() => setSelected(index)}
-            onMouseMove={() => setSelected(index)}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              if (event.button === 0) onChoose(action);
-            }}
-          >
-            <SelectionRow label={label} selected={selected === index} />
-          </Stack>
-        ))}
+        {actions.slice(first, first + visible).map(({ action, label, disabled }, offset) => {
+          const index = first + offset;
+          return (
+            <Stack
+              key={action}
+              id={`${id}-${action}`}
+              height={1}
+              width="100%"
+              onMouseOver={() => setSelected(index)}
+              onMouseMove={() => setSelected(index)}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (event.button === 0) choose(index);
+              }}
+            >
+              <SelectionRow
+                label={disabled ? `${label} (running)` : label}
+                selected={selected === index}
+              />
+            </Stack>
+          );
+        })}
       </Panel>
     </Stack>
   );

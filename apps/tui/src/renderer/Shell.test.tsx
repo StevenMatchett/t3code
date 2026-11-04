@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import type { CapturedFrame } from "@opentui/core";
 import * as Option from "effect/Option";
+import { Atom } from "effect/reactivity";
 import { act } from "react";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
 import {
@@ -680,5 +681,147 @@ describe("states", () => {
     expect(footer).not.toContain("Expand");
     await driver.input.pressKey("p");
     expect(driver.captureFrame()).toContain("Add a project");
+  });
+});
+
+describe("inbox sidebar", () => {
+  const CAPABILITIES = {
+    repositoryIdentity: true,
+    threadSettlement: true,
+    threadSnooze: true,
+    threadPinning: true,
+    threadPinReorder: true,
+    threadVisitedTracking: true,
+  };
+
+  async function setupInbox() {
+    const fixture = makeDesignFixture();
+    const client = { ...fixture.client, threadCapabilities: Atom.make(CAPABILITIES) };
+    const driver = await createTuiTestDriver(<AppShell client={client} searchDebounceMs={0} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("k", { ctrl: true });
+    await driver.input.typeText("inbox sidebar");
+    await driver.input.pressKey("RETURN");
+    return { driver, fixture };
+  }
+
+  it("turns on from Ctrl+K, lists threads across projects, and turns back off", async () => {
+    const { driver } = await setupInbox();
+    expect(driver.captureFrame()).toContain("[All projects");
+    expect(driver.captureFrame()).toContain("> Add project search");
+    expect(driver.captureFrame()).toContain("  Improve onboarding copy");
+    expect(driver.captureFrame()).not.toContain("Projects (2)");
+    expect(rowOf(driver, "thread-0")).toBeDefined();
+    expect(rowOf(driver, "thread-2")).toBeDefined();
+
+    await driver.input.pressKey("k", { ctrl: true });
+    await driver.input.typeText("inbox sidebar");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Projects (2)");
+  });
+
+  it("settles from the keyboard, keeps the cursor in place, and Ctrl+Z undoes it", async () => {
+    const { driver, fixture } = await setupInbox();
+    const first = fixture.threads[0]!;
+    const row = () => driver.renderer.root.findDescendantById(`navigation-${first.id}`);
+    expect(row()).toBeDefined();
+    await act(async () => {
+      await driver.input.pressKey("x");
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(row()).toBeUndefined();
+    expect(driver.captureFrame()).toContain("Settled (1)");
+    expect(driver.captureFrame()).toContain("Ctrl+Z undoes");
+
+    await act(async () => {
+      await driver.input.pressKey("z", { ctrl: true });
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(row()).toBeDefined();
+  });
+
+  it("selects threads with Space, settles them together, and undoes them together", async () => {
+    const { driver } = await setupInbox();
+    await driver.input.pressKey(" ");
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey(" ");
+    expect(driver.captureFrame()).toContain("2 selected");
+    await act(async () => {
+      await driver.input.pressKey("x");
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Settled (2)");
+    expect(driver.captureFrame()).toContain("Settled 2 threads");
+    expect(driver.captureFrame()).not.toContain("selected");
+    await act(async () => {
+      await driver.input.pressKey("z", { ctrl: true });
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Settled (0)");
+  });
+
+  it("clears the selection with Esc before anything else", async () => {
+    const { driver } = await setupInbox();
+    await driver.input.pressKey(" ");
+    expect(driver.captureFrame()).toContain("1 selected");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).not.toContain("selected");
+  });
+
+  it("snoozes from a typed time, and refuses one it cannot read", async () => {
+    const { driver, fixture } = await setupInbox();
+    await driver.input.pressKey("z");
+    expect(driver.captureFrame()).toContain("Custom...");
+    await driver.input.pressKey("ARROW_UP");
+    await driver.input.pressKey("RETURN");
+    await driver.input.typeText("soon");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Enter a future time");
+    for (let index = 0; index < 4; index += 1) await driver.input.pressKey("BACKSPACE");
+    await driver.input.typeText("2h");
+    expect(driver.captureFrame()).toContain("Wakes ");
+    await act(async () => {
+      await driver.input.pressKey("RETURN");
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Snoozed (1)");
+    expect(fixture.threads.find((item) => item.snoozedUntil)).toBeDefined();
+  });
+
+  it("asks before deleting a selection, and Enter alone cancels", async () => {
+    const { driver } = await setupInbox();
+    await driver.input.pressKey(" ");
+    await driver.input.typeText("m");
+    expect(driver.captureFrame()).toContain("Delete (1)...");
+    await driver.input.pressKey("ARROW_UP");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Delete 1 thread");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("1 selected");
+    expect(rowOf(driver, "thread-0")).toBeDefined();
+  });
+
+  it("opens a shelf from its header with Enter", async () => {
+    const { driver, fixture } = await setupInbox();
+    const registry = driver.registry;
+    updateShellThread(registry, fixture, 2, (thread) => ({
+      ...thread,
+      settledOverride: "settled",
+      settledAt: "2026-03-02T15:01:00.000Z",
+    }));
+    await driver.flush();
+    expect(rowOf(driver, "thread-2")).toBeUndefined();
+    for (let index = 0; index < 5; index += 1) await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+    expect(rowOf(driver, "thread-2")).toBeDefined();
   });
 });

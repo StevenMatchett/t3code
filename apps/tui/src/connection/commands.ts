@@ -39,6 +39,17 @@ export type TuiCommand =
   | Intent<"thread.archive", Commands.ArchiveThreadInput>
   | Intent<"thread.unarchive", Commands.UnarchiveThreadInput>
   | Intent<"thread.delete", Commands.DeleteThreadInput>
+  | Intent<"thread.settle", Commands.SettleThreadInput>
+  | Intent<"thread.unsettle", Commands.UnsettleThreadInput>
+  | Intent<"thread.snooze", Commands.SnoozeThreadInput>
+  | Intent<"thread.unsnooze", Commands.UnsnoozeThreadInput>
+  | Intent<"thread.pin", Commands.PinThreadInput>
+  | Intent<"thread.unpin", Commands.UnpinThreadInput>
+  | Intent<"thread.pin.reorder", Commands.ReorderPinnedThreadInput>
+  | Intent<"thread.active.reorder", Commands.ReorderActiveThreadInput>
+  | Intent<"thread.auto-settle.set", Commands.SetThreadAutoSettleInput>
+  | Intent<"thread.visit", Commands.VisitThreadInput>
+  | Intent<"thread.mark-unread", Commands.MarkThreadUnreadInput>
   | Intent<"thread.runtime-mode.set", Commands.SetThreadRuntimeModeInput>
   | Intent<"thread.interaction-mode.set", Commands.SetThreadInteractionModeInput>
   | Intent<"thread.turn.interrupt", Commands.InterruptThreadTurnInput>
@@ -69,6 +80,28 @@ export const executeTuiCommand = Effect.fn("tui.executeCommand")(function* (comm
       return yield* Commands.unarchiveThread(command);
     case "thread.delete":
       return yield* Commands.deleteThread(command);
+    case "thread.settle":
+      return yield* Commands.settleThread(command);
+    case "thread.unsettle":
+      return yield* Commands.unsettleThread(command);
+    case "thread.snooze":
+      return yield* Commands.snoozeThread(command);
+    case "thread.unsnooze":
+      return yield* Commands.unsnoozeThread(command);
+    case "thread.pin":
+      return yield* Commands.pinThread(command);
+    case "thread.unpin":
+      return yield* Commands.unpinThread(command);
+    case "thread.pin.reorder":
+      return yield* Commands.reorderPinnedThread(command);
+    case "thread.active.reorder":
+      return yield* Commands.reorderActiveThread(command);
+    case "thread.auto-settle.set":
+      return yield* Commands.setThreadAutoSettle(command);
+    case "thread.visit":
+      return yield* Commands.visitThread(command);
+    case "thread.mark-unread":
+      return yield* Commands.markThreadUnread(command);
     case "thread.runtime-mode.set":
       return yield* Commands.setThreadRuntimeMode(command);
     case "thread.interaction-mode.set":

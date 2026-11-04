@@ -6,6 +6,10 @@ export type GlyphName =
   | "error"
   | "info"
   | "pending"
+  | "pin"
+  | "pullRequest"
+  | "stack"
+  | "worktree"
   | "success"
   | "warning";
 
@@ -17,6 +21,10 @@ const unicodeGlyphs: Readonly<Record<GlyphName, string>> = Object.freeze({
   error: "×",
   info: "ℹ",
   pending: "…",
+  pin: "◆",
+  pullRequest: "#",
+  stack: "≡",
+  worktree: "⑂",
   success: "✓",
   warning: "!",
 });
@@ -29,6 +37,10 @@ const asciiGlyphs: Readonly<Record<GlyphName, string>> = Object.freeze({
   error: "X",
   info: "i",
   pending: "...",
+  pin: "^",
+  pullRequest: "#",
+  stack: "=",
+  worktree: "wt",
   success: "OK",
   warning: "!",
 });

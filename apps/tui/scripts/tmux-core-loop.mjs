@@ -121,7 +121,7 @@ let failed = false;
 try {
   tmux("new-session", "-d", "-s", "core", "-x", "80", "-y", "24", launch);
   await waitFor(
-    /No projects in this environment/,
+    /No projects yet[\s\S]*Press P to add one/,
     "the empty state naming the next action",
     60_000,
   );
@@ -141,11 +141,11 @@ try {
   await sleep(300);
   capture("folder-opened");
   send("Enter");
-  await waitFor(/Threads \(0\)/, "the new project");
+  await waitFor(/Inbox \(0\)/, "the new project");
   capture("project-added");
 
   // The empty project says to press N.
-  await waitFor(/N starts one/, "the empty project naming the next action");
+  await waitFor(/Press N to start one/, "the empty project naming the next action");
   await timed("open form", () => send("n"), /New thread in/);
   capture("new-thread");
   await waitFor(/Model\s+(?!No provider)\S+/, "a provider model", 45_000);
@@ -208,6 +208,37 @@ try {
     await waitFor(/THREADS/, "the form to close");
     await sleep(30);
   }
+  // The inbox against a real server: each of these is a command the server has to accept.
+  await waitFor(/Inbox \(1\)/, "the thread in the inbox");
+  await timed("settle thread", () => send("x"), /Settled \(1\)/);
+  capture("inbox-settled");
+  await timed("undo settle", () => send("C-z"), /Settled \(0\)/);
+  await timed("pin thread", () => send("P"), /◆/);
+  await timed("unpin thread", () => send("P"), /^(?![\s\S]*◆)/);
+  await timed("open snooze menu", () => send("z"), /Custom\.\.\./);
+  send("Up");
+  send("Enter");
+  await waitFor(/Snooze thread/, "the custom snooze dialog");
+  tmux("send-keys", "-t", "core", "-l", "2h");
+  await waitFor(/Wakes /, "the wake time");
+  capture("inbox-custom-snooze");
+  await timed("snooze thread", () => send("Enter"), /Snoozed \(1\)/);
+  await timed("undo snooze", () => send("C-z"), /Inbox \(1\)/);
+  await timed("select thread", () => send("Space"), /1 selected/);
+  await timed("clear selection", () => send("Escape"), /Inbox \(1\)(?! - )/);
+  send("C-k");
+  await waitFor(/Search and commands/, "the palette");
+  tmux("send-keys", "-t", "core", "-l", "inbox sidebar");
+  await waitFor(/Turn inbox sidebar off/, "the sidebar setting");
+  send("Enter");
+  await waitFor(/Projects \(1\)/, "the project tree");
+  capture("tree-layout");
+  send("C-k");
+  await waitFor(/Search and commands/, "the palette");
+  tmux("send-keys", "-t", "core", "-l", "inbox sidebar");
+  await waitFor(/Turn inbox sidebar on/, "the sidebar setting");
+  send("Enter");
+  await waitFor(/Inbox \(1\)/, "the inbox again");
   send("Enter");
   await waitFor(/CONVERSATION/, "the conversation");
   // An idle client must not repaint: output and CPU both stay flat while nothing changes.
@@ -220,7 +251,7 @@ try {
   await sleep(5_000);
   process.stdout.write(`idle CPU over 5s: ${(cpuTicks() - idleStart) * 10}ms\n`);
   tmux("resize-window", "-t", "core", "-x", "120", "-y", "40");
-  await waitFor(/Threads \(1\)/, "the sidebar at 120 columns");
+  await waitFor(/Inbox \(1\)/, "the sidebar at 120 columns");
   capture("resized");
   send("C-c");
   await waitFor(/Close T3 TUI\?/, "the quit confirmation");

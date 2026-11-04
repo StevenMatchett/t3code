@@ -266,12 +266,28 @@ If creation is not confirmed, Retry reuses the same thread ID and checks for the
 Close hides the form without cancelling an in-flight server operation. Start over requires
 confirmation and retains any created thread, branch, or worktree; it never deletes them.
 
-Use `Ctrl+B` or the sidebar's view toggle to cycle through Projects, Recent, and Archived.
+In the project tree, use `Ctrl+B` or the sidebar's view toggle to cycle through Projects, Recent, and Archived.
+In the inbox, `Ctrl+B` switches between threads and Archived.
 Recent and archived threads are ordered by last update and show their project underneath.
 While browsing the sidebar, Left/Right cycles views, Up/Down selects a row, and Enter opens it.
 In Archived, Enter opens management actions so you can restore or delete a thread; `R` refreshes
 the list. Switching to Archived leaves the conversation view without discarding its draft.
 The view toggle and archived list are also available in `Ctrl+K` search.
+
+The sidebar works like an inbox, with a single list across projects. Threads that came back to you
+sit on top, newest first, while busy threads wait in **Working** until they finish, fail, or need
+you. Press `X` to settle a thread, `Z` to snooze or wake it (**Custom...** takes `90m`, `2h`, `18:30`,
+or `2026-11-05 09:00`), `Shift+P` to pin it, and `Shift+U` to mark it unread; `Ctrl+Z` undoes a
+settle, snooze, unpin, or archive for five seconds. `F` narrows the list to one project, `/` also
+searches message text, `M` opens the full thread menu, and `Alt+Up`, `Alt+Down`, and `Alt+1`-`9` jump
+between threads.
+
+To act on several threads, press Space on each one or hold Shift with the arrows, then use the same
+keys or `M`. Ctrl+click and Shift+click also work where your terminal passes them through. Esc
+clears the selection.
+
+To use the project tree instead, search `Ctrl+K` for “inbox sidebar”. The choice is saved for every
+TUI on this machine.
 
 In an open conversation, Enter or `i` focuses the composer. Enter sends; Shift+Enter inserts a
 newline. Terminals that cannot distinguish Shift+Enter from Enter can use Ctrl+J as a fallback.
