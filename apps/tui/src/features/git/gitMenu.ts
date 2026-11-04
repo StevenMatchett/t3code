@@ -108,6 +108,26 @@ export function gitMenuRows(status: VcsStatusResult, busy: boolean): readonly Gi
   ];
 }
 
+/** The same rows before the status is known. None can run yet, and each says why. */
+export function gitMenuPlaceholderRows(): readonly GitMenuRow[] {
+  const disabledReason = "Reading the Git status...";
+  const stacked = (id: string, label: string, action: GitStackedAction, commits: boolean) => ({
+    id,
+    label,
+    action: { kind: "stacked", action, commits } as const,
+    disabledReason,
+  });
+  return [
+    stacked("commit", "Commit", "commit", true),
+    stacked("commit-push", "Commit & push", "commit_push", true),
+    stacked("commit-push-pr", "Commit, push & create PR", "commit_push_pr", true),
+    stacked("push", "Push", "push", false),
+    stacked("pr", "Create PR", "create_pr", false),
+    { id: "pull", label: "Pull", action: { kind: "pull" }, disabledReason },
+    { id: "branches", label: "Switch branch...", action: { kind: "branches" }, disabledReason },
+  ];
+}
+
 /** The warning to show before this action publishes from the default branch, if it needs one. */
 export function defaultBranchWarning(
   status: VcsStatusResult,

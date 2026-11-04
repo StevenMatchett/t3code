@@ -3,13 +3,18 @@ import { useRenderer } from "@opentui/react";
 import type { GitStackedAction, ProjectId, ThreadId, VcsStatusResult } from "@t3tools/contracts";
 import { useCallback, useContext, useEffect, useState } from "react";
 import type { TuiClient, TuiGit } from "../connection/clientRuntime.ts";
-import { defaultBranchWarning, gitMenuRows, gitStatusSummary } from "../features/git/gitMenu.ts";
+import {
+  defaultBranchWarning,
+  gitMenuPlaceholderRows,
+  gitMenuRows,
+  gitStatusSummary,
+} from "../features/git/gitMenu.ts";
 import { FormInput } from "../ui/FormField.tsx";
 import { useKeyLayer } from "../ui/keymap.ts";
 import { ListView } from "../ui/ListView.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
-import { EmptyState, ErrorState, LoadingState } from "../ui/StateMessage.tsx";
+import { EmptyState, ErrorState } from "../ui/StateMessage.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 
 type Step =
@@ -98,7 +103,8 @@ function GitActions({
   }, [git, registry, cwd]);
   useEffect(reload, [reload, active]);
   const busy = running || progress.isRunning;
-  const rows = status ? gitMenuRows(status, busy) : [];
+  // The rows paint at once and light up when the status arrives, so nothing jumps.
+  const rows = status ? gitMenuRows(status, busy) : gitMenuPlaceholderRows();
   const index = Math.min(cursor, Math.max(0, rows.length - 1));
   const selected = rows[index];
   const run = async (action: GitStackedAction, commitMessage: string, featureBranch: boolean) => {
@@ -237,8 +243,7 @@ function GitActions({
   });
   if (loadError && !status)
     return <ErrorState title={loadError} description="Press R to try again." />;
-  if (!status) return <LoadingState title="Reading the Git status..." />;
-  if (!status.isRepo) return <EmptyState title="This folder is not a Git repository." />;
+  if (status && !status.isRepo) return <EmptyState title="This folder is not a Git repository." />;
   const progressLine = [progress.currentLabel, progress.hookName, progress.lastOutputLine]
     .filter(Boolean)
     .join(" · ");
@@ -248,7 +253,7 @@ function GitActions({
   return (
     <Stack flexDirection="column" height="100%" overflow="hidden">
       <Text height={1} flexShrink={0} wrapMode="none" truncate strong>
-        {inlineTerminalText(gitStatusSummary(status))}
+        {status ? inlineTerminalText(gitStatusSummary(status)) : " "}
       </Text>
       <Text height={1} flexShrink={0}>
         {" "}

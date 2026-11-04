@@ -1,5 +1,5 @@
 import { createTuiTestDriver } from "../../testing/driver.tsx";
-import { richTerminalCapabilities } from "../../ui/capabilities.ts";
+import { basicTerminalCapabilities, richTerminalCapabilities } from "../../ui/capabilities.ts";
 import { UiProvider } from "../../ui/context.tsx";
 import { lightTheme } from "../../ui/theme.ts";
 import { EmbeddedTerminalRenderable } from "@opentui/core";
@@ -331,6 +331,26 @@ describeWithNativeFfi("EmbeddedTerminalSurface", () => {
   it("paints the shell with the active theme instead of the emulator's black", async () => {
     const driver = await createTuiTestDriver(
       <UiProvider capabilities={richTerminalCapabilities} theme={lightTheme}>
+        <EmbeddedTerminalSurface
+          output={outputState("hi")}
+          focused={false}
+          onWrite={() => undefined}
+          onResize={() => undefined}
+          onReleaseFocus={() => undefined}
+          onCopy={() => undefined}
+        />
+      </UiProvider>,
+      { width: 30, height: 6 },
+    );
+    await driver.flush();
+    const blank = driver.captureSpans().lines[3]!.spans[0]!.bg.toInts().slice(0, 3);
+    await driver.close();
+    expect(blank).toEqual([255, 255, 255]);
+  });
+
+  it("paints a light shell in plain black and white when color is off", async () => {
+    const driver = await createTuiTestDriver(
+      <UiProvider capabilities={basicTerminalCapabilities} theme={lightTheme}>
         <EmbeddedTerminalSurface
           output={outputState("hi")}
           focused={false}

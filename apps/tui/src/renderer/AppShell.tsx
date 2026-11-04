@@ -475,7 +475,12 @@ function AppShellContent({
         enabled: selectedThread !== null,
         run: () => pushOverlay({ type: "restore" }),
       },
-      "sidebar.showArchived": () => dispatch({ type: "set-sidebar-view", view: "archived" }),
+      // The inbox has one detour to Archived, and sidebar.toggle is it.
+      ...(shelvesLayout
+        ? {}
+        : {
+            "sidebar.showArchived": () => dispatch({ type: "set-sidebar-view", view: "archived" }),
+          }),
       "sidebar.toggle": {
         ...(shelvesLayout
           ? { label: state.sidebarView === "archived" ? "Threads" : "Archived" }

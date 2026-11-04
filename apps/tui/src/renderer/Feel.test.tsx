@@ -204,6 +204,20 @@ describe("honest labels", () => {
     expect(frame).not.toContain("Approval needed");
   });
 
+  it("shows the whole breadcrumb at 80 columns by dropping header buttons", async () => {
+    const fixture = makeDesignFixture();
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 80,
+      height: 24,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    const header = driver.captureFrame().split("\n")[0]!;
+    expect(header).toContain("Atlas › Add project search");
+    expect(header).toContain("Connected");
+  });
+
   it("gives the breadcrumb priority over the environment label", async () => {
     const { driver } = await setup(120, 40);
     await openThread(driver);

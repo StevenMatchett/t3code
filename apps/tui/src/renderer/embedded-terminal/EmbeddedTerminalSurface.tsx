@@ -1,4 +1,7 @@
-import { useThemeColor } from "../../ui/context.tsx";
+import { useThemeColor, useUi } from "../../ui/context.tsx";
+import { lightTheme } from "../../ui/theme.ts";
+
+const MONOCHROME_LIGHT = { background: "#ffffff", foreground: "#000000" };
 import type { TuiEmbeddedTerminalRenderable } from "./register.ts";
 import {
   EmbeddedTerminalRenderable,
@@ -165,8 +168,13 @@ export const EmbeddedTerminalSurface = forwardRef<
     releaseFocusRef.current();
   }, []);
 
-  const background = useThemeColor("panel");
-  const foreground = useThemeColor("text");
+  const { theme } = useUi();
+  const themedBackground = useThemeColor("panel");
+  const themedForeground = useThemeColor("text");
+  // Without color the emulator would still paint black, which is wrong on a light terminal.
+  const monochrome = theme === lightTheme ? MONOCHROME_LIGHT : null;
+  const background = themedBackground ?? monochrome?.background;
+  const foreground = themedForeground ?? monochrome?.foreground;
   useLayoutEffect(() => {
     if (!background || !foreground) return;
     (terminalRef.current as TuiEmbeddedTerminalRenderable | null)?.setDefaultColors(

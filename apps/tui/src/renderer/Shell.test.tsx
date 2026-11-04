@@ -738,6 +738,40 @@ describe("git panel", () => {
     expect(driver.captureFrame()).toContain("Done");
   });
 
+  it("paints its rows before the status arrives, and they cannot run yet", async () => {
+    const fixture = makeClientFixture();
+    const pending = Promise.withResolvers<VcsStatusResult>();
+    const git = { ...fixture.client.git!, status: () => pending.promise };
+    const driver = await createTuiTestDriver(<AppShell client={{ ...fixture.client, git }} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await step(driver, "n", { ctrl: true });
+    expect(driver.captureFrame()).toContain("> Commit");
+    expect(driver.captureFrame()).toContain("Reading the Git status...");
+    const rowOfCommit = () =>
+      driver
+        .captureFrame()
+        .split("\n")
+        .findIndex((line) => line.includes("> Commit"));
+    const row = rowOfCommit();
+    await step(driver, "RETURN");
+    expect(fixture.gitRuns).toEqual([]);
+    expect(driver.captureFrame()).not.toContain("leave empty");
+
+    await act(async () => {
+      pending.resolve(fixture.gitStatus.current);
+      await pending.promise;
+    });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("feature · 1 file changed");
+    expect(rowOfCommit()).toBe(row);
+  });
+
   it("explains a disabled action instead of running it", async () => {
     const { driver, fixture } = await setupGit();
     await moveTo(driver, "Push");

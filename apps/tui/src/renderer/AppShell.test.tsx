@@ -413,6 +413,10 @@ describeWithNativeFfi("connected AppShell", () => {
       expect(driver.captureFrame()).toContain("Message / Enter to write");
       expect(driver.captureFrame()).not.toContain("connected / live");
       expect(driver.captureFrame()).not.toContain("Creation, Git, and terminal UI");
+      // At 80 columns the location takes the header's room, so New project moves to the palette.
+      expect(driver.captureFrame()).toContain("Alpha › Second conversation");
+      await driver.input.pressKey("k", { ctrl: true });
+      await driver.input.typeText(">new project");
       expect(driver.captureFrame()).toContain("New project");
     },
   );
@@ -450,7 +454,7 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.input.pressKey("i");
     expect(driver.captureFrame()).toContain("MESSAGE");
     expect(driver.captureFrame()).toContain("Send");
-    expect(driver.captureFrame()).toContain("Skills");
+    expect(driver.captureFrame()).toContain("Commands");
 
     await driver.input.typeText("/");
     expect(driver.captureFrame()).toContain("MENU");

@@ -247,7 +247,8 @@ function Header({
         ? "warning"
         : "pending";
   // Buttons appear in priority order as width allows, and their order never changes.
-  const available = width - 8 - STATUS_WIDTH - 1 - 16;
+  // The location comes first: a button only appears once the breadcrumb has its room.
+  const available = width - 8 - STATUS_WIDTH - 1 - Math.max(16, Math.min(breadcrumb.length, 32));
   const candidates = [
     { id: "new-thread-action", label: "[+ New thread]", onPress: onNewThread },
     { id: "new-project-action", label: "[+ New project]", onPress: onNewProject },

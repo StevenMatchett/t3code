@@ -149,7 +149,7 @@ export function useComposerChoices({
         ? files.entries.map((entry) => ({
             id: entry.path,
             label: `@${entry.path}${entry.kind === "directory" ? "/" : ""}`,
-            detail: entry.kind === "directory" ? "Folder" : "File",
+            detail: `Enter adds this ${entry.kind === "directory" ? "folder" : "file"}. Esc keeps your text.`,
           }))
         : menu === "skills"
           ? [

@@ -603,9 +603,9 @@ export const ACTIONS = {
   },
   "composer.skills": {
     scope: "composer",
-    title: "Search skills",
+    title: "Search commands and skills",
     keys: ["/"],
-    label: "Skills",
+    label: "Commands",
     hint: 68,
     ...keyOnly,
   },
