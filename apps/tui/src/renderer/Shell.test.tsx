@@ -1,3 +1,4 @@
+import { PlanId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import type { CapturedFrame } from "@opentui/core";
 import * as Option from "effect/Option";
@@ -9,6 +10,7 @@ import {
   makeDesignFixture,
   runningTurn,
   updateShellThread,
+  updateThread,
 } from "../testing/designFixture.ts";
 import { projectRecordedThreadTimeline } from "../features/chat/timeline.ts";
 import { basicTerminalCapabilities } from "../ui/capabilities.ts";
@@ -681,6 +683,138 @@ describe("states", () => {
     expect(footer).not.toContain("Expand");
     await driver.input.pressKey("p");
     expect(driver.captureFrame()).toContain("Add a project");
+  });
+});
+
+describe("proposed plan", () => {
+  const MARKDOWN = "# Add search\n\n- Index the projects\n- Add the filter\n";
+  const PLAN = { id: PlanId.make("plan-1"), markdown: MARKDOWN, status: "active" as const };
+
+  async function setupPlan(plan: { readonly status: "active" | "completed" } = PLAN) {
+    const fixture = makeDesignFixture();
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await act(async () =>
+      updateThread(driver.registry, fixture, 0, (thread) => ({
+        ...thread,
+        proposedPlan: { ...PLAN, ...plan },
+      })),
+    );
+    await driver.flush();
+    return { driver, fixture };
+  }
+  const press = async (
+    driver: TuiTestDriver,
+    ...args: Parameters<TuiTestDriver["input"]["pressKey"]>
+  ) => {
+    await act(async () => {
+      await driver.input.pressKey(...args);
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+  };
+
+  it("offers a ready plan and implements it in this thread", async () => {
+    const { driver, fixture } = await setupPlan();
+    expect(driver.captureFrame()).toContain("Plan ready: Ctrl+L to review");
+    await press(driver, "l", { ctrl: true });
+    expect(driver.captureFrame()).toContain("Proposed plan");
+    expect(driver.captureFrame()).toContain("Index the projects");
+
+    await press(driver, "RETURN");
+    expect(driver.captureFrame()).not.toContain("Index the projects");
+    expect(fixture.commands.at(-1)).toMatchObject({
+      type: "thread.turn.start",
+      interactionMode: "default",
+      sourceProposedPlan: { threadId: fixture.threads[0]!.id, planId: "plan-1" },
+      message: { text: `PLEASE IMPLEMENT THIS PLAN:\n${MARKDOWN.trim()}` },
+    });
+  });
+
+  it("implements in a new thread that keeps the source's checkout and opens it", async () => {
+    const { driver, fixture } = await setupPlan();
+    await press(driver, "l", { ctrl: true });
+    await press(driver, "n");
+    const [create, start] = fixture.planThreadStarts;
+    expect(create).toMatchObject({
+      type: "thread.create",
+      title: "Implement Add search",
+      projectId: fixture.threads[0]!.projectId,
+      branch: fixture.threads[0]!.branch,
+      worktreePath: fixture.threads[0]!.worktreePath,
+    });
+    expect(start).toMatchObject({
+      type: "thread.turn.start",
+      threadId: (create as { threadId: string }).threadId,
+      sourceProposedPlan: { planId: "plan-1" },
+    });
+  });
+
+  it("saves to a path the user can change, and Esc cancels", async () => {
+    const { driver, fixture } = await setupPlan();
+    await press(driver, "l", { ctrl: true });
+    await press(driver, "s");
+    expect(driver.captureFrame()).toContain("add-search.md");
+    await press(driver, "ESCAPE");
+    expect(driver.captureFrame()).toContain("Proposed plan");
+    expect(fixture.writtenFiles).toEqual([]);
+
+    await press(driver, "s");
+    await press(driver, "RETURN");
+    expect(fixture.writtenFiles).toEqual([
+      {
+        cwd: expect.any(String),
+        relativePath: "add-search.md",
+        contents: MARKDOWN,
+      },
+    ]);
+    expect(driver.captureFrame()).toContain("Saved to add-search.md.");
+  });
+
+  it("refines by returning to the composer in plan mode", async () => {
+    const { driver, fixture } = await setupPlan();
+    await press(driver, "l", { ctrl: true });
+    await press(driver, "r");
+    expect(driver.captureFrame()).not.toContain("Index the projects");
+    const thread = fixture.threads[0]!;
+    expect(driver.registry.get(fixture.client.actions.state(thread.id)).interactionMode).toBe(
+      "plan",
+    );
+    await driver.input.typeText("smaller");
+    await driver.flush();
+    expect(driver.registry.get(fixture.client.actions.state(thread.id)).draft).toBe("smaller");
+  });
+
+  it("shows an implemented plan without offering to run it again", async () => {
+    const { driver, fixture } = await setupPlan({ status: "completed" });
+    expect(driver.captureFrame()).not.toContain("Plan ready");
+    await press(driver, "l", { ctrl: true });
+    expect(driver.captureFrame()).toContain("Already implemented.");
+    const sent = fixture.commands.length;
+    await press(driver, "RETURN");
+    await press(driver, "n");
+    expect(fixture.commands.length).toBe(sent);
+    expect(fixture.planThreadStarts).toEqual([]);
+  });
+
+  it("does nothing while the thread has no plan", async () => {
+    const fixture = makeDesignFixture();
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await press(driver, "l", { ctrl: true });
+    expect(driver.captureFrame()).not.toContain("Proposed plan");
   });
 });
 

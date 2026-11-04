@@ -124,11 +124,36 @@ export interface TuiThreadShell extends ThreadMetadata {
   readonly lastErrorClass?: string | null | undefined;
   readonly pendingBackgroundTasks?: OrchestrationV2ThreadShell["pendingBackgroundTasks"];
 }
+/** How full the provider's context is. `percent` is null when the provider reports no limit. */
+export interface TuiContextUsage {
+  readonly usedTokens: number;
+  readonly maxTokens: number | null;
+  readonly percent: number | null;
+}
+/** The latest plan the agent proposed in plan mode. */
+export interface TuiProposedPlan {
+  readonly id: import("@t3tools/contracts").PlanId;
+  readonly markdown: string;
+  readonly status: "draft" | "active" | "completed" | "superseded";
+}
+/** A secret the agent is waiting on, answerable from this thread. */
+export interface TuiSecretRequest {
+  readonly id: import("@t3tools/contracts").TurnItemId;
+  readonly threadId: import("@t3tools/contracts").ThreadId;
+  readonly label: string;
+  readonly reason: string;
+  readonly placeholder?: string | undefined;
+}
 export interface TuiThread extends ThreadMetadata {
   readonly messages: readonly TuiMessage[];
   readonly activities: readonly TuiActivity[];
   readonly checkpoints: readonly TuiCheckpoint[];
   readonly requests: PendingThreadRequests;
+  /** Absent on servers that cannot ask for secrets. */
+  readonly secretRequests?: readonly TuiSecretRequest[];
+  /** Absent on servers without plan mode artifacts, and until a plan exists. */
+  readonly proposedPlan?: TuiProposedPlan | null;
+  readonly contextUsage?: TuiContextUsage | null;
   readonly rollbackFailure?:
     | { readonly requestId: import("@t3tools/contracts").CommandId; readonly message: string }
     | null

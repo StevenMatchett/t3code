@@ -6,6 +6,7 @@ import {
   EventId,
   TurnId,
   type UploadChatImageAttachment,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { act } from "react";
@@ -63,6 +64,119 @@ async function request(
   );
   await driver.flush();
 }
+
+describe("secret requests", () => {
+  const SECRET = "hunter2-very-secret";
+  async function askForSecret(
+    driver: TuiTestDriver,
+    fixture: ReturnType<typeof makeClientFixture>,
+  ) {
+    const detail = fixture.details[0]!;
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({
+          ...detail,
+          secretRequests: [
+            {
+              id: TurnItemId.make("secret-1"),
+              threadId: detail.id,
+              label: "GitHub token",
+              reason: "To open the pull request.",
+            },
+          ],
+        }),
+      }),
+    );
+    await driver.flush();
+  }
+
+  it("takes focus, hides what is typed, and saves it", async () => {
+    const { driver, fixture } = await setup();
+    await askForSecret(driver, fixture);
+    expect(driver.captureFrame()).toContain("Secret needed: GitHub token");
+    expect(driver.captureFrame()).toContain("Stored securely, never shown to the agent");
+
+    await driver.input.typeText(SECRET);
+    await driver.flush();
+    expect(driver.captureFrame()).not.toContain(SECRET);
+    expect(driver.captureFrame()).toContain("•".repeat(SECRET.length));
+
+    await act(async () => {
+      await driver.input.pressKey("RETURN");
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(fixture.secretAnswers).toEqual([
+      {
+        threadId: fixture.details[0]!.id,
+        turnItemId: "secret-1",
+        answer: { type: "save", secret: SECRET },
+      },
+    ]);
+    expect(driver.captureFrame()).not.toContain(SECRET);
+  });
+
+  it.each([true, false])(
+    "keeps capitals and symbols exactly (kitty keyboard: %s)",
+    async (kitty) => {
+      const { driver, fixture } = await setup(kitty);
+      await askForSecret(driver, fixture);
+      await driver.input.typeText("AbC-!9");
+      await act(async () => {
+        await driver.input.pressKey("RETURN");
+        await new Promise((resolve) => setImmediate(resolve));
+      });
+      await driver.flush();
+      expect(fixture.secretAnswers.at(-1)?.answer).toEqual({ type: "save", secret: "AbC-!9" });
+    },
+  );
+
+  it("takes a paste into the masked field and never into the composer", async () => {
+    const { driver, fixture } = await setup();
+    await askForSecret(driver, fixture);
+    await driver.input.paste(`${SECRET}\n`);
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("•".repeat(SECRET.length));
+    expect(driver.captureFrame()).not.toContain(SECRET);
+    expect(driver.registry.get(fixture.client.actions.state(fixture.details[0]!.id)).draft).toBe(
+      "",
+    );
+  });
+
+  it("refuses a blank save, and Ctrl+D declines", async () => {
+    const { driver, fixture } = await setup();
+    await askForSecret(driver, fixture);
+    await driver.input.pressKey("RETURN");
+    expect(fixture.secretAnswers).toEqual([]);
+
+    await act(async () => {
+      await driver.input.pressKey("d", { ctrl: true });
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(fixture.secretAnswers).toEqual([
+      {
+        threadId: fixture.details[0]!.id,
+        turnItemId: "secret-1",
+        answer: { type: "decline" },
+      },
+    ]);
+  });
+
+  it("lets Esc step away and A come back with the value intact", async () => {
+    const { driver, fixture } = await setup();
+    await askForSecret(driver, fixture);
+    await driver.input.typeText("abc");
+    await driver.input.pressKey("ESCAPE");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("A responds");
+    await driver.input.typeText("a");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("•••");
+    expect(driver.captureFrame()).not.toContain("••••");
+  });
+});
 
 describe("conversation interaction", () => {
   it("shows a timer while the session starts before a turn is projected", async () => {

@@ -1,4 +1,5 @@
 // Opt-in design feedback loop. Run through scripts/design-frames.mjs, never as part of the suite.
+import { PlanId, TurnItemId } from "@t3tools/contracts";
 import { it } from "@effect/vitest";
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 import * as NodeChildProcess from "node:child_process";
@@ -96,6 +97,51 @@ const screens: Record<string, (harness: Harness) => Promise<void>> = {
   question: async (harness) => {
     await openConversation(harness);
     await set(harness, 0, (thread) => ({ ...thread, requests: designQuestion() }));
+  },
+  plan: async (harness) => {
+    await openConversation(harness);
+    await set(harness, 0, (thread) => ({
+      ...thread,
+      proposedPlan: {
+        id: PlanId.make("plan-1"),
+        status: "active",
+        markdown:
+          "# Add project search\n\n## Summary\n\nIndex the projects and filter them as you type.\n\n## Steps\n\n1. Build the index in `src/projects/search.ts`.\n2. Add the filter input with Up and Down to move.\n3. Keep the query when switching threads.\n\n## Risks\n\n- Large workspaces may need the index built in the background.\n",
+      },
+    }));
+    await harness.driver.input.pressKey("l", { ctrl: true });
+  },
+  mention: async (harness) => {
+    await openConversation(harness);
+    await harness.driver.input.pressKey("i");
+    await harness.driver.input.typeText("Check @search");
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await harness.driver.flush();
+  },
+  slash: async (harness) => {
+    await openConversation(harness);
+    await harness.driver.input.pressKey("i");
+    await harness.driver.input.typeText("/");
+    await harness.driver.flush();
+  },
+  secret: async (harness) => {
+    await openConversation(harness);
+    await set(harness, 0, (thread) => ({
+      ...thread,
+      secretRequests: [
+        {
+          id: TurnItemId.make("secret-1"),
+          threadId: thread.id,
+          label: "GitHub token",
+          reason:
+            "The agent needs a token with repo scope to open the pull request for this branch.",
+        },
+      ],
+    }));
+    await harness.driver.input.typeText("ghp_example");
+    await harness.driver.flush();
   },
   queue: async (harness) => {
     await openConversation(harness);

@@ -38,6 +38,7 @@ export function Conversation({
   onBack,
   onOpenThread,
   onDiff,
+  onPlan,
   composerFocusRequest = 0,
   onTerminalFocusChange,
 }: {
@@ -51,6 +52,7 @@ export function Conversation({
   readonly onOpenThread?: (threadId: ThreadId) => boolean;
   readonly composerFocusRequest?: number;
   readonly onDiff?: () => void;
+  readonly onPlan?: () => void;
   readonly onTerminalFocusChange?: (focused: boolean) => void;
 }) {
   const { height: terminalHeight } = useTerminalDimensions();
@@ -68,9 +70,9 @@ export function Conversation({
   const readOnly =
     thread?.lineage?.relationshipToParent === "subagent" && thread.creationSource === "provider";
   const [savedView] = useState(() => client.session?.conversation(threadId));
-  const [mode, setMode] = useState<"history" | "composer" | "requests" | "questions" | "agents">(
-    savedView?.mode ?? "history",
-  );
+  const [mode, setMode] = useState<
+    "history" | "composer" | "requests" | "questions" | "secret" | "agents"
+  >(savedView?.mode ?? "history");
   const previousComposerFocusRequest = useRef(composerFocusRequest);
   useEffect(() => {
     if (previousComposerFocusRequest.current === composerFocusRequest) return;
@@ -98,7 +100,8 @@ export function Conversation({
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   useEffect(() => {
     client.session?.saveConversation(threadId, {
-      mode,
+      // A restored thread focuses a waiting request itself, so this mode never needs saving.
+      mode: mode === "secret" ? "history" : mode,
       anchor,
       terminalOpen,
       showDetails,
@@ -137,8 +140,9 @@ export function Conversation({
       ),
   );
   const focusedRequest = useRef<string | null>(null);
-  const requestId = approval?.requestId ?? question?.requestId ?? null;
-  const requestMode = approval ? "requests" : "questions";
+  const secretRequest = approval || question ? undefined : thread?.secretRequests?.[0];
+  const requestId = approval?.requestId ?? question?.requestId ?? secretRequest?.id ?? null;
+  const requestMode = approval ? "requests" : question ? "questions" : "secret";
   const agents = useMemo(() => thread?.agents ?? [], [thread?.agents]);
   const resolvedAgentCursor = Math.max(-1, Math.min(agentCursor, agents.length - 1));
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? null;
@@ -150,7 +154,7 @@ export function Conversation({
     } else if (!requestId) {
       focusedRequest.current = null;
       // oxlint-disable-next-line react/set-state-in-effect -- Return focus when a request is resolved or its response is accepted.
-      if (mode === "questions" || mode === "requests") setMode("composer");
+      if (mode === "questions" || mode === "requests" || mode === "secret") setMode("composer");
     }
   }, [active, terminalOpen, selectedAgent, requestId, requestMode, mode]);
   const selectedAgentLines = useMemo(
@@ -207,6 +211,7 @@ export function Conversation({
       selectedAgent ||
       mode === "questions" ||
       mode === "requests" ||
+      mode === "secret" ||
       terminalOpen ||
       search
     )
@@ -253,9 +258,11 @@ export function Conversation({
       1
     : question
       ? question.questions.reduce((largest, item) => Math.max(largest, item.options.length), 0) + 8
-      : 0;
+      : secretRequest
+        ? Math.min(4, wrapTerminalWords(secretRequest.reason, Math.max(1, width - 4)).length) + 3
+        : 0;
   const requestHeight =
-    approval || question
+    approval || question || secretRequest
       ? requestPanelHeight(height, composerHeight, agentPanelHeight, requestContent)
       : 0;
   const rowLayout = conversationRows({
@@ -336,6 +343,10 @@ export function Conversation({
   const regionOpen = !terminalOpen && !selectedAgent;
   useKeyLayer("conversation", {
     bindings: {
+      "thread.openPlan": {
+        enabled: Boolean(thread?.proposedPlan),
+        run: () => onPlan?.(),
+      },
       "terminal.toggle": {
         enabled: Boolean(client.terminals) && !terminalOpen,
         run: () => setTerminalOpen(true),
@@ -483,7 +494,7 @@ export function Conversation({
         setExpandedToolGroups(new Map());
       },
       "thread.openRequests": {
-        enabled: Boolean(approval || question),
+        enabled: Boolean(approval || question || secretRequest),
         run: () => setMode(requestMode),
       },
       "thread.openParent": { enabled: parentThreadId !== null, run: openParent },
@@ -652,7 +663,8 @@ export function Conversation({
         <RequestDock
           approval={approval}
           question={question}
-          focused={mode === (approval ? "requests" : "questions")}
+          secret={secretRequest}
+          focused={mode === requestMode}
           active={active && !selectedAgent}
           client={client}
           threadId={threadId}
@@ -679,17 +691,21 @@ export function Conversation({
           message={
             answered
               ? "Response sent."
-              : approval || question
-                ? mode === "requests" || mode === "questions"
+              : approval || question || secretRequest
+                ? mode === requestMode
                   ? ""
                   : "A: respond to requests"
                 : interaction.pending
                   ? "Sending command..."
                   : queued?.status === "queued"
                     ? "Sends after next tool call / turn end"
-                    : (interaction.notice ?? "")
+                    : (interaction.notice ??
+                      (thread?.proposedPlan?.status === "active" &&
+                      thread.latestTurn?.state !== "running"
+                        ? "Plan ready: Ctrl+L to review"
+                        : ""))
           }
-          messageTone={approval || question ? "warning" : "muted"}
+          messageTone={approval || question || secretRequest ? "warning" : "muted"}
           detail={[
             linkMenu.notice,
             mode === "history" ? vim.status : "",

@@ -17,6 +17,13 @@ import {
   type SkillCompletion,
 } from "../../features/chat/skillCompletion.ts";
 import { useUi } from "../../ui/context.tsx";
+import { composerCommands } from "../../features/chat/composerCommands.ts";
+import {
+  completePathDraft,
+  pathCompletionAt,
+  type PathCompletion,
+} from "../../features/chat/pathCompletion.ts";
+import { useProjectPathSearch } from "./useProjectPathSearch.ts";
 import type { PromptEditorControl } from "../PromptEditor.tsx";
 import type { ComposerMenuRow } from "./ComposerMenu.tsx";
 
@@ -35,11 +42,13 @@ export function useComposerChoices({
   cursor,
   cwd,
   completion,
+  pathTrigger,
   refreshing,
   editor,
   menuGeneration,
   mounted,
   close,
+  openMenu,
 }: {
   readonly client: TuiClient;
   readonly threadId: ThreadId;
@@ -54,11 +63,13 @@ export function useComposerChoices({
   readonly cursor: number;
   readonly cwd: string | null;
   readonly completion: SkillCompletion | null;
+  readonly pathTrigger: PathCompletion | null;
   readonly refreshing: boolean;
   readonly editor: RefObject<PromptEditorControl | null>;
   readonly menuGeneration: RefObject<number>;
   readonly mounted: RefObject<boolean>;
   readonly close: () => void;
+  readonly openMenu: (id: string) => void;
 }) {
   const registry = useContext(RegistryContext);
   const { capabilities } = useUi();
@@ -86,6 +97,14 @@ export function useComposerChoices({
     },
   ];
   const needle = (menu === "skills" ? (completion?.query ?? "") : query).toLocaleLowerCase();
+  const commands = composerCommands(provider).filter((command) =>
+    `${command.name} ${command.detail}`.toLocaleLowerCase().includes(needle),
+  );
+  const files = useProjectPathSearch({
+    client,
+    cwd,
+    query: menu === "files" ? (pathTrigger?.query ?? null) : null,
+  });
   const skills = provider
     ? selectableSkills(provider, cwd).filter((skill) =>
         `${skill.name} ${skill.displayName ?? ""} ${skill.description ?? ""}`
@@ -126,26 +145,39 @@ export function useComposerChoices({
           ...item,
           label: `${item.id === (menu === "permissions" ? runtimeMode : interactionMode) ? "* " : ""}${item.label}`,
         }))
-      : menu === "skills"
-        ? skills.map((skill) => ({
-            id: skill.path,
-            label: `/${skill.name}  ${formatProviderSkillDisplayName(skill)}`,
-            detail: skill.shortDescription ?? skill.description ?? skill.path,
+      : menu === "files"
+        ? files.entries.map((entry) => ({
+            id: entry.path,
+            label: `@${entry.path}${entry.kind === "directory" ? "/" : ""}`,
+            detail: entry.kind === "directory" ? "Folder" : "File",
           }))
-        : menu === "models"
-          ? models.map((item) => ({
-              id: item.slug,
-              label: `${item.slug === thread?.modelSelection.model ? "* " : ""}${item.name}  [${item.slug}]`,
-              detail:
-                thread?.latestTurn?.state === "running" || thread?.session?.status === "starting"
-                  ? "Applies to the next turn."
-                  : item.slug,
-            }))
-          : choices.map((item, rowIndex) => ({
-              id: String(rowIndex),
-              label: item.label,
-              detail: descriptor?.description ?? "",
-            }));
+        : menu === "skills"
+          ? [
+              ...commands.map((command) => ({
+                id: `command:${command.name}`,
+                label: `/${command.name}`,
+                detail: command.detail,
+              })),
+              ...skills.map((skill) => ({
+                id: skill.path,
+                label: `/${skill.name}  ${formatProviderSkillDisplayName(skill)}`,
+                detail: skill.shortDescription ?? skill.description ?? skill.path,
+              })),
+            ]
+          : menu === "models"
+            ? models.map((item) => ({
+                id: item.slug,
+                label: `${item.slug === thread?.modelSelection.model ? "* " : ""}${item.name}  [${item.slug}]`,
+                detail:
+                  thread?.latestTurn?.state === "running" || thread?.session?.status === "starting"
+                    ? "Applies to the next turn."
+                    : item.slug,
+              }))
+            : choices.map((item, rowIndex) => ({
+                id: String(rowIndex),
+                label: item.label,
+                detail: descriptor?.description ?? "",
+              }));
   const index = Math.max(0, Math.min(cursor, rows.length - 1));
   const busy =
     refreshing ||
@@ -153,14 +185,52 @@ export function useComposerChoices({
     interaction.modelPending !== null ||
     catalogStatus !== "live";
   const choose = (selected: number) => {
+    if (menu === "files") {
+      const entry = files.entries[selected];
+      const live = editor.current?.snapshot();
+      const trigger = live ? pathCompletionAt(live.text, live.cursor) : null;
+      if (!entry || !live || !trigger) return;
+      const replacement = completePathDraft(live.text, trigger, entry.path);
+      close();
+      editor.current?.replace(replacement.text, replacement.cursor);
+      return;
+    }
     if (busy || !thread || !provider || !rows[selected]) return;
+    if (menu === "skills" && selected < commands.length) {
+      const live = editor.current?.snapshot();
+      const trigger = live ? skillCompletionAt(live.text, live.cursor) : null;
+      if (!live || !trigger) return;
+      const command = commands[selected]!;
+      if (command.kind === "text") {
+        const replacement = `${live.text.slice(0, trigger.start)}/${command.name} ${live.text.slice(trigger.end).replace(/^ /u, "")}`;
+        close();
+        editor.current?.replace(replacement, trigger.start + command.name.length + 2);
+        return;
+      }
+      const remaining = completeSkillDraft(live.text, "", trigger);
+      close();
+      editor.current?.replace(remaining.text, remaining.cursor);
+      if (command.kind === "model") openMenu("models");
+      else if (command.kind === "mode")
+        client.actions.setInteractionMode(registry, threadId, command.mode);
+      else void client.actions.sendCommand(registry, threadId, `/${command.name}`);
+      return;
+    }
     if (menu === "skills") {
       const live = editor.current?.snapshot();
       const trigger = live ? skillCompletionAt(live.text, live.cursor) : null;
       if (!trigger || trigger.query !== completion?.query || trigger.text !== interaction.draft)
         return;
       const previousPrefix = interaction.skill?.prefix;
-      if (!client.actions.selectSkill(registry, threadId, skills[selected]!, trigger)) return;
+      if (
+        !client.actions.selectSkill(
+          registry,
+          threadId,
+          skills[selected - commands.length]!,
+          trigger,
+        )
+      )
+        return;
       const current = registry.get(client.actions.state(threadId));
       const replacement = completeSkillDraft(
         trigger.text,
@@ -207,14 +277,16 @@ export function useComposerChoices({
     });
   };
   const title =
-    menu === "skills"
-      ? "Skills"
-      : menu === "models"
-        ? "Models"
-        : menu === "permissions"
-          ? "Permissions — next message"
-          : menu === "mode"
-            ? "Mode — next message"
-            : (descriptor?.label ?? "Options");
-  return { buttons, rows, index, choose, title };
+    menu === "files"
+      ? "Files"
+      : menu === "skills"
+        ? "Commands and skills"
+        : menu === "models"
+          ? "Models"
+          : menu === "permissions"
+            ? "Permissions — next message"
+            : menu === "mode"
+              ? "Mode — next message"
+              : (descriptor?.label ?? "Options");
+  return { buttons, rows, index, choose, title, filesEmpty: files.status };
 }

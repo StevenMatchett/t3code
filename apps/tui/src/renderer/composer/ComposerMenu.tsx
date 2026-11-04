@@ -55,7 +55,7 @@ export function ComposerMenu({
       title={title}
       flexDirection="column"
     >
-      {menu !== "skills" ? (
+      {menu !== "skills" && menu !== "files" ? (
         <FormInput
           id="composer-filter"
           width="100%"

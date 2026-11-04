@@ -39,6 +39,141 @@ async function clickLabel(driver: TuiTestDriver, label: string) {
   await driver.mouse.click(lines[row]!.indexOf(label) + 1, row, MouseButtons.LEFT, { delayMs: 0 });
 }
 
+describe("composer commands and file mentions", () => {
+  const settle = async (driver: TuiTestDriver) => {
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+  };
+
+  it("completes an @ query from the project and keeps typing after it", async () => {
+    const { driver, fixture, id } = await setup(true);
+    await driver.input.typeText("see @search.test");
+    await settle(driver);
+    expect(driver.captureFrame()).toContain("@src/projects/search.test.ts");
+    expect(fixture.pathSearches.at(-1)).toMatchObject({ query: "search.test" });
+
+    await driver.input.pressKey("RETURN");
+    await driver.input.typeText("please");
+    await driver.flush();
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe(
+      "see @src/projects/search.test.ts please",
+    );
+    expect(fixture.commands).toHaveLength(0);
+  });
+
+  it("does not send on Enter while the file menu is open, and Esc keeps the text", async () => {
+    const { driver, fixture, id } = await setup(true);
+    await driver.input.typeText("@nothing-matches");
+    await settle(driver);
+    expect(driver.captureFrame()).toContain("No matching files");
+    await driver.input.pressKey("RETURN");
+    expect(fixture.commands).toHaveLength(0);
+
+    await driver.input.pressKey("ESCAPE");
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(fixture.commands.at(-1)).toMatchObject({
+      type: "thread.turn.start",
+      message: { text: "@nothing-matches" },
+    });
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe("");
+  });
+
+  it("switches mode with /plan and /default, removing the command from the draft", async () => {
+    const { driver, fixture, id } = await setup(true);
+    const state = () => driver.registry.get(fixture.client.actions.state(id));
+    await driver.input.typeText("/plan");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Commands and skills");
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(state()).toMatchObject({ draft: "", interactionMode: "plan" });
+
+    await driver.input.typeText("/default");
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(state()).toMatchObject({ draft: "", interactionMode: "default" });
+    expect(fixture.commands).toHaveLength(0);
+  });
+
+  it("opens the model menu from /model", async () => {
+    const { driver } = await setup(true);
+    await driver.input.typeText("/model");
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    const dropdown = driver.renderer.root.findDescendantById("composer-dropdown");
+    expect(dropdown).toBeDefined();
+    expect(driver.captureFrame()).toContain("Models");
+  });
+});
+
+describe("provider commands and the context meter", () => {
+  async function setupWithCommands() {
+    const fixture = makeClientFixture();
+    Object.assign(fixture.provider, {
+      slashCommands: [
+        { name: "compact", description: "Compact the conversation" },
+        { name: "review", description: "Review the changes" },
+        { name: "plan", description: "Should not replace the app's own" },
+      ],
+    });
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 100,
+      height: 28,
+      kittyKeyboard: true,
+    });
+    drivers.add(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("i");
+    return { fixture, driver, id: fixture.details[0]!.id };
+  }
+
+  it("runs /compact as its own turn and leaves the rest of the draft alone", async () => {
+    const { driver, fixture, id } = await setupWithCommands();
+    await driver.input.typeText("keep this /compact");
+    await act(async () => {
+      await driver.input.pressKey("RETURN");
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(fixture.commands.at(-1)).toMatchObject({
+      type: "thread.turn.start",
+      message: { text: "/compact" },
+    });
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft.trim()).toBe("keep this");
+  });
+
+  it("puts a provider command in the draft so it can take arguments", async () => {
+    const { driver, fixture, id } = await setupWithCommands();
+    await driver.input.typeText("/review");
+    await driver.input.pressKey("RETURN");
+    await driver.input.typeText("the auth change");
+    await driver.flush();
+    expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe(
+      "/review the auth change",
+    );
+    expect(fixture.commands).toHaveLength(0);
+  });
+
+  it("shows how full the context is beside the composer title", async () => {
+    const { driver, fixture } = await setupWithCommands();
+    await act(async () =>
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({
+          ...fixture.details[0]!,
+          contextUsage: { usedTokens: 84_000, maxTokens: 200_000, percent: 42 },
+        }),
+      }),
+    );
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Message · Context 42%");
+  });
+});
+
 describe("composer dropdowns and slash skills", () => {
   it("selects plan and permissions with the mouse while preserving the draft", async () => {
     const { driver, fixture, id } = await setup(true);

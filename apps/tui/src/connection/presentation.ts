@@ -7,6 +7,8 @@ import {
   type OrchestrationV2RunStatus,
 } from "@t3tools/contracts";
 import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
+import { deriveContextUsage } from "../features/chat/contextUsage.ts";
+import { secretRequestDisplay } from "@t3tools/client-runtime/secret-request";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import { deriveThreadCheckpointSummaries } from "@t3tools/client-runtime/state/thread-checkpoints";
 import type { EnvironmentShellState } from "@t3tools/client-runtime/state/shell";
@@ -93,7 +95,39 @@ export function presentShell(source: OrchestrationV2ThreadShell): TuiThreadShell
   return result;
 }
 const itemCache = new WeakMap<OrchestrationV2TurnItem, TuiActivity>();
-function presentActivity(item: OrchestrationV2TurnItem, agentId: string | undefined): TuiActivity {
+/** The latest run's plan when it has one, otherwise the thread's newest. */
+function latestProposedPlan(
+  projection: OrchestrationV2ThreadProjection,
+  latestRunId: string | null,
+) {
+  const plans = projection.plans.filter((plan) => plan.kind === "proposed_plan");
+  const fromLatestRun = plans.filter((plan) => plan.runId === latestRunId);
+  const updatedAt = (planId: string) => {
+    const item = projection.turnItems.findLast(
+      (candidate) => candidate.type === "proposed_plan" && candidate.planId === planId,
+    );
+    return iso(item?.updatedAt ?? projection.updatedAt);
+  };
+  const plan = (fromLatestRun.length > 0 ? fromLatestRun : plans)
+    .toSorted(
+      (left, right) =>
+        updatedAt(left.id).localeCompare(updatedAt(right.id)) || left.id.localeCompare(right.id),
+    )
+    .at(-1);
+  return plan ? { id: plan.id, markdown: plan.markdown, status: plan.status } : null;
+}
+function secretRequestSummary(
+  item: Extract<OrchestrationV2TurnItem, { type: "secret_request" }>,
+  visibility: "local" | "inherited" | "synthetic",
+) {
+  const display = secretRequestDisplay(item, visibility);
+  return display.kind === "pending" ? item.label : `${item.label} · ${display.label}`;
+}
+function presentActivity(
+  item: OrchestrationV2TurnItem,
+  agentId: string | undefined,
+  visibility: "local" | "inherited" | "synthetic",
+): TuiActivity {
   const cached = itemCache.get(item);
   if (cached && (cached.payload as { agentId?: string }).agentId === agentId) return cached;
   const tool = [
@@ -120,14 +154,16 @@ function presentActivity(item: OrchestrationV2TurnItem, agentId: string | undefi
                     .join("\n")
                 : undefined;
   const summary =
-    item.title ??
-    (item.type === "command_execution"
-      ? item.input
-      : item.type === "error"
-        ? item.failure.message
-        : item.type === "file_change"
-          ? item.fileName
-          : detail || item.type.replaceAll("_", " "));
+    item.type === "secret_request"
+      ? secretRequestSummary(item, visibility)
+      : (item.title ??
+        (item.type === "command_execution"
+          ? item.input
+          : item.type === "error"
+            ? item.failure.message
+            : item.type === "file_change"
+              ? item.fileName
+              : detail || item.type.replaceAll("_", " ")));
   const result: TuiActivity = {
     id: EventId.make(item.id),
     tone:
@@ -241,9 +277,32 @@ export function presentThread(projection: OrchestrationV2ThreadProjection): TuiT
     pinnedAt: nullableIso(source.pinnedAt),
     latestTurn,
     messages,
-    activities: visible
-      .filter((item) => !["user_message", "assistant_message", "checkpoint"].includes(item.type))
-      .map((item) => presentActivity(item, agentForItem(item))),
+    activities: projection.visibleTurnItems
+      .filter(
+        ({ item, visibility }) =>
+          !["user_message", "assistant_message", "checkpoint"].includes(item.type) &&
+          // A secret request still waiting is the dock's to show, not the transcript's.
+          !(
+            item.type === "secret_request" &&
+            secretRequestDisplay(item, visibility).kind === "pending"
+          ),
+      )
+      .map(({ item, visibility }) => presentActivity(item, agentForItem(item), visibility)),
+    contextUsage: deriveContextUsage(projection),
+    proposedPlan: latestProposedPlan(projection, run?.id ?? null),
+    secretRequests: projection.visibleTurnItems.flatMap(({ item, visibility }) =>
+      item.type === "secret_request" && secretRequestDisplay(item, visibility).kind === "pending"
+        ? [
+            {
+              id: item.id,
+              threadId: item.threadId,
+              label: item.label,
+              reason: item.reason,
+              placeholder: item.placeholder,
+            },
+          ]
+        : [],
+    ),
     checkpoints: deriveThreadCheckpointSummaries(projection)
       .filter((checkpoint) => retainedRunIds.has(checkpoint.runId))
       .map((checkpoint) => ({ ...checkpoint, turnId: TurnId.make(checkpoint.runId) })),

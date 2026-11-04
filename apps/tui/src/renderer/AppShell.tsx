@@ -753,6 +753,7 @@ function AppShellContent({
             }}
             composerFocusRequest={composerFocusRequest}
             onDiff={() => pushOverlay({ type: "diff" })}
+            onPlan={() => pushOverlay({ type: "plan", threadId: state.threadId! })}
             {...(onTerminalFocusChange ? { onTerminalFocusChange } : {})}
           />
         ) : null}

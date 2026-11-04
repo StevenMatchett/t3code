@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   MessageId,
+  PlanId,
   RunId,
   TurnItemId,
   type OrchestrationV2Run,
@@ -188,6 +189,73 @@ describe("native orchestration presentation", () => {
     expect(thread.messages).toEqual([]);
     expect(thread.latestTurn).toBeNull();
     expect(thread.session).toBeNull();
+  });
+
+  it("presents the latest run's proposed plan over a newer one from an older run", () => {
+    const plan = (id: string, runId: string | null, status: "active" | "superseded") =>
+      ({
+        id: PlanId.make(id),
+        threadId: v2ThreadId,
+        runId: runId === null ? null : RunId.make(runId),
+        nodeId: run.rootNodeId,
+        status,
+        kind: "proposed_plan",
+        markdown: `# ${id}`,
+      }) as OrchestrationV2ThreadProjection["plans"][number];
+    const thread = presentThread({
+      ...v2Projection,
+      runs: [run],
+      plans: [plan("current", run.id, "active"), plan("old", "older-run", "superseded")],
+    });
+    expect(thread.proposedPlan).toEqual({ id: "current", markdown: "# current", status: "active" });
+    expect(presentThread({ ...v2Projection, plans: [] }).proposedPlan).toBeNull();
+  });
+
+  it("reports context use from the active provider thread only", () => {
+    const providerThreadId = "provider-1";
+    const projection = {
+      ...v2Projection,
+      thread: { ...v2Projection.thread, activeProviderThreadId: providerThreadId },
+      providerThreads: [
+        { id: "provider-0", contextUsage: { usedTokens: 1 } },
+        { id: providerThreadId, contextUsage: { usedTokens: 50_000, maxTokens: 200_000 } },
+      ],
+    } as unknown as OrchestrationV2ThreadProjection;
+    expect(presentThread(projection).contextUsage).toEqual({
+      usedTokens: 50_000,
+      maxTokens: 200_000,
+      percent: 25,
+    });
+    expect(presentThread(v2Projection).contextUsage).toBeNull();
+  });
+
+  it("keeps a waiting secret request out of the transcript and answers show their outcome", () => {
+    const secret = (
+      id: string,
+      secretStatus: "pending" | "saved",
+    ): Extract<OrchestrationV2TurnItem, { type: "secret_request" }> =>
+      ({
+        ...tool,
+        id: TurnItemId.make(id),
+        type: "secret_request",
+        label: "GitHub token",
+        reason: "To open the pull request",
+        secretStatus,
+      }) as Extract<OrchestrationV2TurnItem, { type: "secret_request" }>;
+    const thread = presentThread({
+      ...v2Projection,
+      turnItems: [secret("waiting", "pending"), secret("done", "saved")],
+      visibleTurnItems: [
+        row(secret("waiting", "pending"), 0),
+        row(secret("done", "saved"), 1),
+        { ...row(secret("forked", "pending"), 2), visibility: "inherited" },
+      ],
+    });
+    expect(thread.secretRequests?.map((request) => request.id)).toEqual(["waiting"]);
+    expect(thread.activities.map((activity) => activity.summary)).toEqual([
+      "GitHub token · Saved securely and kept private",
+      "GitHub token · Waiting for an answer in the original thread",
+    ]);
   });
 
   it("uses native shell request state and timestamps", () => {

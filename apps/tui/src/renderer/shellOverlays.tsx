@@ -11,6 +11,7 @@ import { FavoriteModelsPanel } from "./FavoriteModelsPanel.tsx";
 import { HelpPanel } from "./HelpPanel.tsx";
 import { NewProjectForm } from "./NewProjectForm.tsx";
 import { NewThreadForm } from "./NewThreadForm.tsx";
+import { ProposedPlanPanel } from "./ProposedPlanPanel.tsx";
 import { PullRequestPanel } from "./PullRequestPanel.tsx";
 import { RenameThreadDialog } from "./RenameThreadDialog.tsx";
 import { SnoozeCustomDialog } from "./SnoozeCustomDialog.tsx";
@@ -191,6 +192,41 @@ export function renderShellOverlay(
           />
         ),
       };
+    case "plan": {
+      const thread = rows.threads.find((item) => item.id === overlay.threadId);
+      return {
+        title: "Proposed plan",
+        size: { width: 110, height: 40 },
+        content: (
+          <ProposedPlanPanel
+            client={client}
+            threadId={overlay.threadId}
+            cwd={
+              thread?.worktreePath ??
+              rows.projects.find((project) => project.id === thread?.projectId)?.workspaceRoot ??
+              null
+            }
+            active={overlayActive}
+            width={Math.max(1, Math.min(110, width - 6) - 2)}
+            height={contentRows(40)}
+            onClose={popOverlay}
+            onRefine={() => {
+              popOverlay();
+              void client.actions.setInteractionMode(registry, overlay.threadId, "plan");
+              focusComposer();
+            }}
+            onOpenThread={(threadId) => {
+              const next = rows.threads.find((item) => item.id === threadId);
+              dispatch({
+                type: "open-thread",
+                projectId: next?.projectId ?? thread?.projectId ?? state.projectId!,
+                threadId,
+              });
+            }}
+          />
+        ),
+      };
+    }
     case "new-project":
       return {
         title: "New project",

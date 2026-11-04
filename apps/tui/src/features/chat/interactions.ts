@@ -1,4 +1,10 @@
-import type { TuiThread, TuiThreadState, TuiShellState } from "../../connection/models.ts";
+import type {
+  TuiProposedPlan,
+  TuiThread,
+  TuiThreadState,
+  TuiShellState,
+} from "../../connection/models.ts";
+import { planImplementationPrompt, planSource } from "./proposedPlan.ts";
 import type { TuiCommand } from "../../connection/commands.ts";
 import {
   CommandId,
@@ -499,6 +505,40 @@ export function makeThreadInteractions(options: {
     });
     return accepted;
   };
+  const startStandaloneTurn = async (
+    registry: AtomRegistry.AtomRegistry,
+    threadId: ThreadId,
+    text: string,
+    interactionMode: ProviderInteractionMode,
+    sourceProposedPlan?: PromptCommand["sourceProposedPlan"],
+  ) => {
+    const current = registry.get(state(threadId));
+    const thread = currentThread(registry, threadId);
+    if (!thread || current.pending) return false;
+    if (thread.latestTurn?.state === "running")
+      return error(registry, threadId, "Wait for the agent to finish first.");
+    return run(
+      registry,
+      {
+        type: "thread.turn.start",
+        ...metadata(),
+        threadId,
+        message: {
+          messageId: MessageId.make(
+            Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16))),
+          ),
+          role: "user",
+          text,
+          attachments: [],
+        },
+        modelSelection: thread.modelSelection,
+        runtimeMode: current.runtimeMode ?? thread.runtimeMode,
+        interactionMode,
+        ...(sourceProposedPlan ? { sourceProposedPlan } : {}),
+      },
+      "send",
+    );
+  };
   return {
     state,
     queuedThreads,
@@ -534,6 +574,32 @@ export function makeThreadInteractions(options: {
     },
 
     flushQueue,
+    /** Approves the plan: a new default-mode turn that tells the server which plan it carries out. */
+    implementPlan: async (
+      registry: AtomRegistry.AtomRegistry,
+      threadId: ThreadId,
+      plan: TuiProposedPlan,
+    ) => {
+      const accepted = await startStandaloneTurn(
+        registry,
+        threadId,
+        planImplementationPrompt(plan.markdown),
+        "default",
+        planSource(threadId, plan),
+      );
+      if (accepted) update(registry, threadId, { interactionMode: "default", notice: null });
+      return accepted;
+    },
+    /** Runs a provider command such as /compact as its own turn. The draft stays as it is. */
+    sendCommand: (registry: AtomRegistry.AtomRegistry, threadId: ThreadId, text: string) => {
+      const thread = currentThread(registry, threadId);
+      return startStandaloneTurn(
+        registry,
+        threadId,
+        text,
+        registry.get(state(threadId)).interactionMode ?? thread?.interactionMode ?? "default",
+      );
+    },
     restoreCheckpoint: async (
       registry: AtomRegistry.AtomRegistry,
       threadId: ThreadId,

@@ -7,6 +7,8 @@ import stringWidth from "string-width";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TuiClient } from "../../connection/clientRuntime.ts";
 import { skillCompletionAt } from "../../features/chat/skillCompletion.ts";
+import { contextUsageLabel } from "../../features/chat/contextUsage.ts";
+import { pathCompletionAt } from "../../features/chat/pathCompletion.ts";
 import {
   buildComposerPromptHistoryEntries,
   stepComposerPromptHistory,
@@ -125,8 +127,15 @@ export function Composer({
   const completionKey = completion
     ? JSON.stringify([completion.start, completion.end, completion.query])
     : null;
+  const pathTrigger =
+    snapshot.text === interaction.draft ? pathCompletionAt(snapshot.text, snapshot.cursor) : null;
+  const pathKey = pathTrigger
+    ? JSON.stringify(["path", pathTrigger.start, pathTrigger.end, pathTrigger.query])
+    : null;
   const slashOpen = focused && focus === 0 && completion !== null && completionKey !== dismissed;
-  const menu = active && focused ? (dropdown ?? (slashOpen ? "skills" : null)) : null;
+  const pathOpen = focused && focus === 0 && pathTrigger !== null && pathKey !== dismissed;
+  const menu =
+    active && focused ? (dropdown ?? (pathOpen ? "files" : slashOpen ? "skills" : null)) : null;
   const refresh = (models: boolean) => {
     const generation = ++refreshGeneration.current;
     setRefreshing(true);
@@ -178,7 +187,7 @@ export function Composer({
     menuGeneration.current += 1;
     onActivate();
     setFocus(index);
-    setDismissed(completionKey);
+    setDismissed(pathKey ?? completionKey);
     setQuery("");
     setCursor(0);
     setDropdown((current) => (current === id ? null : id));
@@ -187,7 +196,7 @@ export function Composer({
   const close = () => {
     menuGeneration.current += 1;
     setDropdown(null);
-    setDismissed(completionKey);
+    setDismissed(pathKey ?? completionKey);
     setFocus(0);
   };
   const editPastes = () => {
@@ -217,11 +226,13 @@ export function Composer({
     cursor,
     cwd,
     completion,
+    pathTrigger,
     refreshing,
     editor,
     menuGeneration,
     mounted,
     close,
+    openMenu: (id) => open(id, 1),
   });
   const { buttons, rows, index, choose } = menuHandlers;
   const controlWidths = fitControlWidths(
@@ -248,7 +259,14 @@ export function Composer({
       historyPosition.current = step.position;
       // A recalled slash command is a draft, not a request to open the skills menu.
       const trigger = skillCompletionAt(step.prompt, step.prompt.length);
-      setDismissed(trigger ? JSON.stringify([trigger.start, trigger.end, trigger.query]) : null);
+      const recalledPath = pathCompletionAt(step.prompt, step.prompt.length);
+      setDismissed(
+        recalledPath
+          ? JSON.stringify(["path", recalledPath.start, recalledPath.end, recalledPath.query])
+          : trigger
+            ? JSON.stringify([trigger.start, trigger.end, trigger.query])
+            : null,
+      );
     } finally {
       recalling.current = false;
     }
@@ -354,7 +372,7 @@ export function Composer({
   const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;
   const height = editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4;
   const menuHeight = Math.max(4, Math.min(10, availableHeight - height));
-  const count = Math.max(1, menuHeight - (menu === "skills" ? 3 : 4));
+  const count = Math.max(1, menuHeight - (menu === "skills" || menu === "files" ? 3 : 4));
   return (
     <Stack
       id="conversation-composer"
@@ -364,13 +382,13 @@ export function Composer({
       overflow="visible"
     >
       <Panel
-        title={
+        title={`${
           focused
             ? "Message"
             : interaction.draft
               ? "Draft / Enter to edit"
               : "Message / Enter to write"
-        }
+        }${thread?.contextUsage ? ` · ${contextUsageLabel(thread.contextUsage)}` : ""}`}
         width="100%"
         height={height}
         borderTone={focused ? "borderFocused" : "border"}
@@ -434,8 +452,10 @@ export function Composer({
           onSubmit={() => {
             const live = editor.current?.snapshot();
             const trigger = live ? skillCompletionAt(live.text, live.cursor) : null;
+            const path = live ? pathCompletionAt(live.text, live.cursor) : null;
             if (
               dropdown ||
+              (path && JSON.stringify(["path", path.start, path.end, path.query]) !== dismissed) ||
               (trigger && JSON.stringify([trigger.start, trigger.end, trigger.query]) !== dismissed)
             ) {
               if (live) updateSnapshot(live);
@@ -445,7 +465,7 @@ export function Composer({
           }}
           focused={active && focused && focus === 0 && dropdown === null}
           height={editorHeight}
-          placeholder="Message the agent, or / for skills..."
+          placeholder="Message the agent, / for commands, @ for files..."
         />
         {suggestedReplies.length > 0 ? (
           <Stack height={1} flexShrink={0} flexDirection="row" width="100%" overflow="hidden">
@@ -574,11 +594,13 @@ export function Composer({
           }
           statusFailed={Boolean(interaction.error || refreshError)}
           empty={
-            catalog.status === "loading" || refreshing
-              ? "Loading..."
-              : catalog.status === "error"
-                ? "Catalog unavailable. Reconnect from history."
-                : "No matches. Esc keeps the text."
+            menu === "files"
+              ? menuHandlers.filesEmpty
+              : catalog.status === "loading" || refreshing
+                ? "Loading..."
+                : catalog.status === "error"
+                  ? "Catalog unavailable. Reconnect from history."
+                  : "No matches. Esc keeps the text."
           }
         />
       ) : null}

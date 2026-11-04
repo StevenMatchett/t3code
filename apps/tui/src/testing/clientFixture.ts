@@ -19,6 +19,10 @@ import {
   ThreadId,
   type OrchestrationProjectShell,
   type UploadChatImageAttachment,
+  type ProjectEntry,
+  type ProjectSearchEntriesInput,
+  type ProjectWriteFileInput,
+  type SecretRequestAnswerInput,
 } from "@t3tools/contracts";
 import {
   AVAILABLE_CONNECTION_STATE,
@@ -27,6 +31,8 @@ import {
 
 import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
 import * as Option from "effect/Option";
+import { planThreadCommands } from "../features/chat/proposedPlan.ts";
+import type { TuiCommand } from "../connection/commands.ts";
 import * as DateTime from "effect/DateTime";
 import { AsyncResult, Atom } from "effect/reactivity";
 import {
@@ -424,6 +430,15 @@ export function makeClientFixture(
     }),
   );
   const managementCommands: ThreadManagementCommand[] = [];
+  const secretAnswers: SecretRequestAnswerInput[] = [];
+  const writtenFiles: ProjectWriteFileInput[] = [];
+  const pathSearches: ProjectSearchEntriesInput[] = [];
+  const projectEntries: ProjectEntry[] = [
+    { path: "src/projects/search.ts", kind: "file" },
+    { path: "src/projects/search.test.ts", kind: "file" },
+    { path: "src/projects", kind: "directory" },
+  ];
+  const planThreadStarts: TuiCommand[] = [];
   const threadManagement = makeThreadManagementActions({
     dispatch: async (registry, command) => {
       managementCommands.push(command);
@@ -480,6 +495,26 @@ export function makeClientFixture(
   });
   const client: TuiClient = {
     ...(session ? { session } : {}),
+    pathSearchDebounceMs: 0,
+    searchProjectEntries: async (_registry, input) => {
+      pathSearches.push(input);
+      return {
+        entries: projectEntries.filter((entry) => entry.path.includes(input.query)),
+        truncated: false,
+      };
+    },
+    writeProjectFile: async (_registry, input) => {
+      writtenFiles.push(input);
+      return true;
+    },
+    implementPlanInNewThread: async (_registry, source, plan) => {
+      const [create, start] = planThreadCommands(source, plan);
+      planThreadStarts.push(create, start);
+      return create.threadId;
+    },
+    answerSecretRequest: async (_registry, input) => {
+      secretAnswers.push(input);
+    },
     resolvePullRequest: async (_registry, target) => ({
       number: 42,
       title: "Fixture pull request",
@@ -569,6 +604,10 @@ export function makeClientFixture(
     terminalCloseInputs,
     projectCloneRequests,
     managementCommands,
+    secretAnswers,
+    writtenFiles,
+    pathSearches,
+    planThreadStarts,
     archivedRows,
     archivedThreads,
   };

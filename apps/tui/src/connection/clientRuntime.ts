@@ -6,7 +6,8 @@ import {
 import { makeV1ProtocolClient } from "./v1/rpc.ts";
 import { createV1State } from "./v1/state.ts";
 import { executeV1Command } from "./v1/commands.ts";
-import type { TuiShellState, TuiThreadState, TuiThreadShell } from "./models.ts";
+import type { TuiProposedPlan, TuiShellState, TuiThreadState, TuiThreadShell } from "./models.ts";
+import { planThreadCommands, type PlanSourceThread } from "../features/chat/proposedPlan.ts";
 import {
   Connection,
   ConnectionBlockedError,
@@ -66,6 +67,10 @@ import {
   type ThreadId,
   type GitResolvedPullRequest,
   type ExecutionEnvironmentCapabilities,
+  type ProjectSearchEntriesInput,
+  type ProjectSearchEntriesResult,
+  type ProjectWriteFileInput,
+  type SecretRequestAnswerInput,
 } from "@t3tools/contracts";
 import { makeNewThreadActions, type NewThreadActions } from "../features/chat/newThread.ts";
 import { makeNewProjectActions, type NewProjectActions } from "../features/projects/newProject.ts";
@@ -86,6 +91,7 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as HttpBody from "effect/http/HttpBody";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
+import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
@@ -97,6 +103,28 @@ import type { ReattachedAuthenticatedTuiEnvironment } from "./authenticatedEnvir
 
 export interface TuiClient {
   readonly session?: TuiSessionState;
+  /** Rejects with the server's failure, which never echoes the secret. */
+  /** Waits this long after a keystroke before searching. Tests set it to 0. */
+  readonly pathSearchDebounceMs?: number;
+  /** Files and folders under a directory, best matches first. Rejects when the search failed. */
+  readonly searchProjectEntries: (
+    registry: AtomRegistry.AtomRegistry,
+    input: ProjectSearchEntriesInput,
+  ) => Promise<ProjectSearchEntriesResult>;
+  readonly writeProjectFile: (
+    registry: AtomRegistry.AtomRegistry,
+    input: ProjectWriteFileInput,
+  ) => Promise<boolean>;
+  /** Creates a thread like the source that starts on the plan. Null if either step failed. */
+  readonly implementPlanInNewThread: (
+    registry: AtomRegistry.AtomRegistry,
+    source: PlanSourceThread,
+    plan: TuiProposedPlan,
+  ) => Promise<ThreadId | null>;
+  readonly answerSecretRequest: (
+    registry: AtomRegistry.AtomRegistry,
+    input: SecretRequestAnswerInput,
+  ) => Promise<void>;
   readonly resolvePullRequest: (
     registry: AtomRegistry.AtomRegistry,
     target: { readonly cwd: string; readonly branch: string | null },
@@ -420,6 +448,14 @@ export function createTuiClient(
     label: "tui.create-worktree",
     tag: WS_METHODS.vcsCreateWorktree,
   });
+  const searchProjectEntries = createEnvironmentRpcCommand(runtime, {
+    label: "tui.search-project-entries",
+    tag: WS_METHODS.projectsSearchEntries,
+  });
+  const writeProjectFile = createEnvironmentRpcCommand(runtime, {
+    label: "tui.write-project-file",
+    tag: WS_METHODS.projectsWriteFile,
+  });
   const listRefs = createEnvironmentRpcCommand(runtime, {
     label: "tui.recover-worktree",
     tag: WS_METHODS.vcsListRefs,
@@ -622,6 +658,23 @@ export function createTuiClient(
     threadSearch,
     diffs: orchestration,
     review: createReviewEnvironmentAtoms(runtime),
+    searchProjectEntries: async (registry, input) => {
+      const result = await searchProjectEntries.run(registry, { environmentId, input });
+      if (!AsyncResult.isSuccess(result)) throw new Error("Could not search this project.");
+      return result.value;
+    },
+    writeProjectFile: async (registry, input) =>
+      AsyncResult.isSuccess(await writeProjectFile.run(registry, { environmentId, input })),
+    implementPlanInNewThread: async (registry, source, plan) => {
+      const [create, start] = planThreadCommands(source, plan);
+      const dispatched = async (input: TuiCommand) =>
+        AsyncResult.isSuccess(await command.run(registry, { environmentId, input }));
+      return (await dispatched(create)) && (await dispatched(start)) ? create.threadId : null;
+    },
+    answerSecretRequest: async (registry, input) => {
+      const result = await server.answerSecretRequest.run(registry, { environmentId, input });
+      if (AsyncResult.isFailure(result)) throw Cause.squash(result.cause);
+    },
     resolvePullRequest: async (registry, target) => {
       let branch = target.branch;
       if (!branch) {

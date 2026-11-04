@@ -1,6 +1,7 @@
 import {
   CommandId,
   MessageId,
+  PlanId,
   ThreadId,
   RuntimeMode,
   ProviderInteractionMode,
@@ -27,6 +28,7 @@ export const PromptCommand = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  sourceProposedPlan: Schema.optionalKey(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
 });
 type Intent<K extends string, V> = V & { readonly type: K };
 export type TuiCommand =

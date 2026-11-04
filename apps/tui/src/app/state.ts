@@ -26,6 +26,7 @@ export type ShellOverlay =
   | { readonly type: "restore" }
   | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
   | { readonly type: "rename"; readonly threadId: ThreadId }
+  | { readonly type: "plan"; readonly threadId: ThreadId }
   | {
       readonly type: "manage";
       readonly threadId: ThreadId;

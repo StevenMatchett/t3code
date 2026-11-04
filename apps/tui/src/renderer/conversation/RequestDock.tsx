@@ -4,14 +4,17 @@ import type {
   ThreadPendingUserInput,
 } from "@t3tools/client-runtime/state/thread-requests";
 import type { TuiClient } from "../../connection/clientRuntime.ts";
+import type { TuiSecretRequest } from "../../connection/models.ts";
 import { inlineTerminalText } from "../../ui/textLayout.ts";
 import { Panel } from "../../ui/Panel.tsx";
 import { Approval, Questions } from "../RequestsPanel.tsx";
+import { SecretRequestForm } from "./SecretRequestForm.tsx";
 
-/** The approval or question the agent is waiting on, docked above the composer. */
+/** The approval, question, or secret request the agent is waiting on, docked above the composer. */
 export function RequestDock({
   approval,
   question,
+  secret,
   focused,
   active,
   client,
@@ -23,6 +26,7 @@ export function RequestDock({
 }: {
   readonly approval: ThreadPendingApproval | undefined;
   readonly question: ThreadPendingUserInput | undefined;
+  readonly secret?: TuiSecretRequest | undefined;
   readonly focused: boolean;
   readonly active: boolean;
   readonly client: TuiClient;
@@ -32,13 +36,15 @@ export function RequestDock({
   readonly onFocus: () => void;
   readonly onBack: () => void;
 }) {
-  if (!approval && !question) return null;
+  if (!approval && !question && !secret) return null;
   const heading = approval
     ? `Approval needed: ${inlineTerminalText(approval.appName ?? approval.requestKind)}`
-    : "Agent question";
+    : question
+      ? "Agent question"
+      : `Secret needed: ${inlineTerminalText(secret?.label ?? "")}`;
   return (
     <Panel
-      id={approval ? "inline-approval" : "inline-question"}
+      id={approval ? "inline-approval" : question ? "inline-question" : "inline-secret"}
       title={focused ? heading : `${heading} · A responds`}
       height={height}
       flexShrink={0}
@@ -69,6 +75,16 @@ export function RequestDock({
           request={question}
           client={client}
           threadId={threadId}
+          active={active && focused}
+          width={Math.max(1, width - 4)}
+          height={height - 2}
+          onBack={onBack}
+        />
+      ) : secret ? (
+        <SecretRequestForm
+          key={secret.id}
+          request={secret}
+          client={client}
           active={active && focused}
           width={Math.max(1, width - 4)}
           height={height - 2}
