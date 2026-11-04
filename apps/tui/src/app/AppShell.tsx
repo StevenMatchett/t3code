@@ -192,6 +192,9 @@ function ThreadRowTrailing({
   );
 }
 
+// Fits the longest status with the widest glyph, "... Reconnecting", so it never clips or shifts.
+const STATUS_WIDTH = 16;
+
 function Header({
   width,
   breadcrumb,
@@ -225,7 +228,7 @@ function Header({
         ? "warning"
         : "pending";
   // Buttons appear in priority order as width allows, and their order never changes.
-  const available = width - 8 - 16 - 16;
+  const available = width - 8 - STATUS_WIDTH - 1 - 16;
   const candidates = [
     { id: "new-thread-action", label: "[+ New thread]", onPress: onNewThread },
     { id: "new-project-action", label: "[+ New project]", onPress: onNewProject },
@@ -241,7 +244,11 @@ function Header({
     used += candidate.label.length + 1;
     shown.add(candidate.id);
   }
-  const showLabel = width >= BREAKPOINTS.wide && label.length > 0;
+  // Where you are matters more than which environment this is, so the label takes only spare room.
+  const showLabel =
+    width >= BREAKPOINTS.wide &&
+    label.length > 0 &&
+    width - 8 - STATUS_WIDTH - 1 - used - breadcrumb.length - 1 >= label.length;
   return (
     <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
       <Text strong tone="accent" flexShrink={0} height={1}>
@@ -284,7 +291,13 @@ function Header({
           />
         ) : null,
       )}
-      <StatusBadge id="connection-status" label={status} tone={tone} width={15} flexShrink={0} />
+      <StatusBadge
+        id="connection-status"
+        label={status}
+        tone={tone}
+        width={STATUS_WIDTH}
+        flexShrink={0}
+      />
     </Stack>
   );
 }

@@ -202,6 +202,16 @@ describe("honest labels", () => {
     expect(frame).not.toContain("Approval needed");
   });
 
+  it("gives the breadcrumb priority over the environment label", async () => {
+    const { driver } = await setup(120, 40);
+    await openThread(driver);
+    expect(driver.captureFrame().split("\n")[0]).toContain("Atlas › Add project search");
+    await driver.resize(200, 60);
+    const wide = driver.captureFrame().split("\n")[0]!;
+    expect(wide).toContain("Atlas › Add project search");
+    expect(wide).toContain("Local workspace");
+  });
+
   it.each([60, 80, 104])("keeps the connection status readable at width %i", async (width) => {
     const { driver } = await setup(width, 24);
     await openThread(driver);

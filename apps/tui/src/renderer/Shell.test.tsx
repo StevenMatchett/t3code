@@ -491,6 +491,27 @@ Then run the focused tests and report what changed.`;
   });
 });
 
+describe("connection status", () => {
+  it("shows the whole status in ASCII mode", async () => {
+    const fixture = makeDesignFixture();
+    const driver = await createTuiTestDriver(
+      <UiProvider capabilities={basicTerminalCapabilities}>
+        <AppShell client={fixture.client} />
+      </UiProvider>,
+      { width: 80, height: 24, kittyKeyboard: true },
+    );
+    drivers.push(driver);
+    await act(async () =>
+      driver.registry.update(fixture.client.connection as never, (state: object) => ({
+        ...state,
+        phase: "backoff",
+      })),
+    );
+    await driver.flush();
+    expect(driver.captureFrame().split("\n")[0]).toContain("... Reconnecting");
+  });
+});
+
 describe("ascii mode", () => {
   it.each([
     "projects",

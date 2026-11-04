@@ -1,4 +1,5 @@
 import * as NodeAssert from "node:assert/strict";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
@@ -200,7 +201,14 @@ if (NodeProcess.platform === "win32") {
           NodeFSP.writeFile(applicationFile, "TUI_APP_FIXTURE\nSecond line\n"),
         );
         const quotedFile = `'${applicationFile.replaceAll("'", "'\\''")}'`;
-        yield* send(`vi -u NONE -i NONE -n -N ${quotedFile}; printf '__%s__\\n' 'VIM_EXIT'\n`);
+        // Some systems ship only Neovim, which takes the same flags for this check.
+        const editor = ["vi", "vim", "nvim"].find(
+          (name) => NodeChildProcess.spawnSync("which", [name]).status === 0,
+        );
+        NodeAssert.ok(editor, "This test needs vi, vim, or nvim.");
+        yield* send(
+          `${editor} -u NONE -i NONE -n -N ${quotedFile}; printf '__%s__\\n' 'VIM_EXIT'\n`,
+        );
         yield* show(yield* received("TUI_APP_FIXTURE"));
         NodeAssert.ok(emulator().screen().text.includes("TUI_APP_FIXTURE"));
         yield* Effect.promise(async () => {
