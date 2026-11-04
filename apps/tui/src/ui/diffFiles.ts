@@ -72,6 +72,7 @@ export type DiffTreeRow =
 export function diffFileTree(files: readonly DiffFile[]): readonly DiffTreeRow[] {
   const rows: DiffTreeRow[] = [];
   let open: readonly string[] = [];
+  let headingDepth = 0;
   files.forEach((file, fileIndex) => {
     const parts = file.path.split("/");
     const name = parts.pop()!;
@@ -80,11 +81,12 @@ export function diffFileTree(files: readonly DiffFile[]): readonly DiffTreeRow[]
     open = open.slice(0, shared);
     // One heading for the directories this file newly enters, so deep paths do not stair-step.
     if (parts.length > shared) {
+      headingDepth = shared === 0 ? 0 : headingDepth + 1;
       rows.push({
         kind: "directory",
         id: `directory:${parts.join("/")}`,
         label: `${parts.slice(shared).join("/")}/`,
-        depth: shared === 0 ? 0 : 1,
+        depth: headingDepth,
       });
       open = parts;
     }
@@ -92,7 +94,7 @@ export function diffFileTree(files: readonly DiffFile[]): readonly DiffTreeRow[]
       kind: "file",
       id: file.id,
       label: `${name} +${file.additions} -${file.deletions}`,
-      depth: parts.length === 0 ? 0 : shared === 0 ? 1 : 2,
+      depth: parts.length === 0 ? 0 : headingDepth + 1,
       fileIndex,
     });
   });

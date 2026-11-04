@@ -92,6 +92,8 @@ describe("diff file tree", () => {
       "test/",
       "d.ts +1 -0",
     ]);
+    // Files in one directory line up, and a subdirectory sits one level inside its parent.
+    expect(rows.map((row) => row.depth)).toEqual([0, 0, 1, 1, 1, 2, 0, 1]);
     expect(rows.flatMap((row) => (row.kind === "file" ? [row.fileIndex] : []))).toEqual([
       0, 1, 2, 3, 4,
     ]);
