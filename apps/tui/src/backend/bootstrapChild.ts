@@ -298,6 +298,8 @@ const spawnAndWriteBootstrap = Effect.fn("tui.backend.spawnAndWriteBootstrap")(f
           if (settled) return;
           settled = true;
           cleanup();
+          // The descriptor is duplex; a child that exits resets its read side long after the write.
+          bootstrapInput?.on("error", () => undefined);
           resume(
             Effect.succeed(new OwnedBootstrapChild(child, input.options.delivery, input.secret)),
           );

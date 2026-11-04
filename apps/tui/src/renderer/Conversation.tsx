@@ -295,13 +295,13 @@ export function Conversation({
               { key: "Esc", label: "History" },
             ]
           : [
-              markdownHint,
-              ...pasteHint,
+              ...terminalHint,
               {
                 key: "Enter",
                 label: thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send",
               },
-              ...terminalHint,
+              ...pasteHint,
+              markdownHint,
               { key: "Shift+Enter", label: "New line" },
               { key: "/", label: "Skills" },
               { key: "Tab", label: agents.length ? "Options/agents" : "Options" },
@@ -330,11 +330,11 @@ export function Conversation({
         { key: "Tab/Esc", label: "Back" },
       ];
     return [
-      markdownHint,
-      ...pasteHint,
-      ...(readOnly ? [] : [{ key: "Enter", label: "Write" }]),
-      ...(parentThreadId ? [{ key: "U", label: "Parent" }] : []),
       ...terminalHint,
+      ...(readOnly ? [] : [{ key: "Enter", label: "Write" }]),
+      ...pasteHint,
+      ...(parentThreadId ? [{ key: "U", label: "Parent" }] : []),
+      markdownHint,
       { key: "hjkl", label: "Move" },
       { key: "v/V", label: "Select" },
       { key: "y/yy", label: "Yank" },
@@ -1005,7 +1005,7 @@ export function Conversation({
             toggleMarkdown();
           }}
         >
-          {renderMarkdown ? " [Ctrl+R Markdown]" : " [Ctrl+R Raw]"}
+          {renderMarkdown ? " [MD]" : " [Raw]"}
         </Text>
         <Text
           tone={requestCount ? "warning" : "muted"}
@@ -1051,6 +1051,7 @@ export function Conversation({
           onTogglePastes={togglePastes}
           suggestedReplies={suggestedReplies}
           availableHeight={height - 1}
+          width={width}
           onActivate={() => {
             vim.reset();
             activateComposer();

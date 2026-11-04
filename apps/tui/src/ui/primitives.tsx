@@ -12,15 +12,24 @@ export function Stack(props: StackProps) {
 export interface TextProps extends OpenTuiTextProps {
   readonly tone?: ThemeToken;
   readonly strong?: boolean;
+  readonly dim?: boolean;
 }
 
-export function Text({ tone = "text", strong = false, attributes, ...props }: TextProps) {
+export function Text({
+  tone = "text",
+  strong = false,
+  dim = false,
+  attributes,
+  ...props
+}: TextProps) {
   const color = useThemeColor(tone);
   return (
     <text
       {...(color ? { fg: color } : {})}
       {...props}
-      attributes={(attributes ?? 0) | (strong ? TextAttributes.BOLD : 0)}
+      attributes={
+        (attributes ?? 0) | (strong ? TextAttributes.BOLD : 0) | (dim ? TextAttributes.DIM : 0)
+      }
     />
   );
 }

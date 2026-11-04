@@ -969,8 +969,8 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.input.pressKey("ESCAPE");
     await driver.input.pressKey("TAB");
     await driver.input.pressKey("RETURN");
-    await driver.input.pressKey("TAB");
-    await driver.input.pressKey("TAB");
+    // Tab walks Model, Mode, and Permissions before leaving the composer.
+    for (let index = 0; index < 4; index += 1) await driver.input.pressKey("TAB");
     expect(driver.captureFrame()).toContain("Enter opens");
     await driver.input.pressKey("ESCAPE");
     expect(driver.captureFrame()).toContain("Tab focus");
@@ -993,7 +993,7 @@ describeWithNativeFfi("connected AppShell", () => {
             creationSource,
             lineage: {
               parentThreadId: parent.id,
-              relationshipToParent: "subagent",
+              relationshipToParent: "subagent" as const,
               rootThreadId: parent.id,
             },
           }),
@@ -1073,8 +1073,8 @@ describeWithNativeFfi("connected AppShell", () => {
     expect(cancel!.height).toBe(model!.height);
 
     await driver.input.pressKey("RETURN");
-    await driver.input.pressKey("TAB");
-    await driver.input.pressKey("TAB");
+    // Tab walks Model, Mode, and Permissions before reaching Cancel.
+    for (let index = 0; index < 4; index += 1) await driver.input.pressKey("TAB");
     await driver.input.pressKey("RETURN");
     await driver.flush();
 

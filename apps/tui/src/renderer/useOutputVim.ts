@@ -136,6 +136,7 @@ export function useOutputVim({
       const gg = pendingG.current && name === "g" && !key.shift;
       pendingG.current = false;
       if (key.ctrl) {
+        // Half-page and page keys start the cursor; plain arrows scroll until a cursor exists.
         move(
           index +
             (["u", "b"].includes(name) ? -1 : 1) *
@@ -148,10 +149,10 @@ export function useOutputVim({
           pendingG.current = true;
           move(index);
         }
-      } else if (name === "j" || name === "down") move(index + 1);
-      else if (name === "k" || name === "up") move(index - 1);
-      else if (name === "h" || name === "left") move(index, column - 1);
-      else if (name === "l" || name === "right") move(index, column + 1);
+      } else if (name === "j" || (cursor && name === "down")) move(index + 1);
+      else if (name === "k" || (cursor && name === "up")) move(index - 1);
+      else if (name === "h" || (cursor && name === "left")) move(index, column - 1);
+      else if (name === "l" || (cursor && name === "right")) move(index, column + 1);
       else if (name === "0" || (cursor && name === "home")) move(index, 0);
       else if (name === "$" || (name === "4" && key.shift)) move(index, Infinity);
       else if (cursor && name === "pageup") move(index - count);

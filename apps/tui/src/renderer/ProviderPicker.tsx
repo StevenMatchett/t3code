@@ -34,6 +34,7 @@ export function ComposerControls({
   onTogglePastes,
   suggestedReplies,
   availableHeight,
+  width,
   onActivate,
   onDraftChange,
   onBlur,
@@ -53,6 +54,7 @@ export function ComposerControls({
   readonly onTogglePastes?: () => void;
   readonly suggestedReplies: readonly string[];
   readonly availableHeight: number;
+  readonly width: number;
   readonly onActivate: () => void;
   readonly onDraftChange?: () => void;
   readonly onBlur: () => void;
@@ -223,6 +225,11 @@ export function ComposerControls({
       label: `${permissionChoices.find((choice) => choice.id === runtimeMode)?.label ?? "Permissions"} ▼`,
     },
   ];
+  // Whole cells keep every control the same size; flex rounding would make them differ by one.
+  const controlWidth = Math.max(
+    1,
+    Math.floor(Math.max(1, width - 4) / (buttons.length + (onCancel ? 1 : 0))),
+  );
   const cancelIndex = suggestedReplies.length + buttons.length + 1;
   const focusCount = cancelIndex + (onCancel ? 1 : 0);
   const needle = (menu === "skills" ? (completion?.query ?? "") : query).toLocaleLowerCase();
@@ -639,9 +646,8 @@ export function ComposerControls({
             <Stack
               key={button.id}
               id={`composer-${button.id}`}
-              flexGrow={1}
-              flexBasis={0}
-              minWidth={0}
+              width={controlWidth}
+              flexShrink={0}
               height={1}
               {...(focused &&
               focus === suggestedReplies.length + buttonIndex + 1 &&
@@ -674,9 +680,8 @@ export function ComposerControls({
             <Stack
               id="conversation-cancel-turn"
               height={1}
-              flexGrow={1}
-              flexBasis={0}
-              minWidth={0}
+              width={controlWidth}
+              flexShrink={0}
               {...(focused && focus === cancelIndex && selectedBackground
                 ? { backgroundColor: selectedBackground }
                 : {})}

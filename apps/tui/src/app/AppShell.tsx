@@ -1,7 +1,6 @@
 import type { TuiLatestTurn, TuiThreadShell } from "../connection/models.ts";
 /** @jsxImportSource react */
 import { useEffect, useReducer, useCallback, type ReactNode } from "react";
-import { TextAttributes } from "@opentui/core";
 import type {
   EnvironmentId,
   OrchestrationProjectShell,
@@ -178,7 +177,7 @@ function List({
               <Text
                 height={1}
                 tone="muted"
-                attributes={TextAttributes.DIM}
+                dim
                 wrapMode="none"
                 truncate
               >{`    ${inlineTerminalText(item.subline)}`}</Text>
@@ -238,6 +237,10 @@ function Help() {
       </Text>
     </Stack>
   );
+}
+
+function withSoundHint(hints: readonly HotkeyHint[], sound: HotkeyHint | undefined) {
+  return sound ? [...hints.slice(0, 2), sound, ...hints.slice(2)] : hints;
 }
 
 export function AppShellView({
@@ -333,7 +336,7 @@ export function AppShellView({
     waiting_for_input: 6,
     waiting_for_approval: 7,
   };
-  const projectActivity = new Map<string, ThreadActivityPhase>();
+  const projectActivity = new Map<ProjectId, ThreadActivityPhase>();
   const phases = new Map(
     threads.map((thread) => {
       const phase = threadActivityPhase(environmentId, thread, live);
@@ -680,9 +683,8 @@ export function AppShellView({
                       ? "Projects"
                       : "Threads")
           }
-          hints={[
-            ...(soundShortcut ? [soundShortcut] : []),
-            ...(managementOverlay?.hints ??
+          hints={withSoundHint(
+            managementOverlay?.hints ??
               (state.modal === "new-thread" || state.modal === "new-project"
                 ? [
                     { key: "Tab", label: "Next field" },
@@ -696,8 +698,9 @@ export function AppShellView({
                         { key: "Enter", label: "Write" },
                         { key: "Esc", label: "Threads" },
                       ])
-                    : navigationHints)),
-          ]}
+                    : navigationHints),
+            soundShortcut,
+          )}
         />
       )}
       {contextMenu}

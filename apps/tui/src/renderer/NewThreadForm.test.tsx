@@ -110,7 +110,7 @@ describe("new thread form", () => {
     await driver.input.pressKey("RETURN");
     await driver.input.pressKey("RETURN");
     await act(async () => {
-      driver.registry.set(fixture.client.providers, {
+      driver.registry.set(fixture.providers, {
         providers: [{ ...fixture.provider, enabled: false }],
         status: "live",
       });
