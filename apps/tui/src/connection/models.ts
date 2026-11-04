@@ -1,5 +1,6 @@
 import type {
   OrchestrationV2AppThreadLineage,
+  OrchestrationV2CreationSource,
   ChatAttachment,
   ModelSelection,
   RuntimeMode,
@@ -75,6 +76,8 @@ export interface TuiSession {
 }
 interface ThreadMetadata {
   readonly lineage?: OrchestrationV2AppThreadLineage | undefined;
+  /** Who created the thread; V2 only. A provider-created subagent thread takes no messages. */
+  readonly creationSource?: OrchestrationV2CreationSource | undefined;
   readonly id: ThreadId;
   readonly projectId: ProjectId;
   readonly title: string;
@@ -117,8 +120,12 @@ export interface TuiThread extends ThreadMetadata {
     | { readonly requestId: import("@t3tools/contracts").CommandId; readonly message: string }
     | null
     | undefined;
-  readonly agents: readonly import("@t3tools/client-runtime/state/subagentRuntime").RuntimeSubagent[];
+  readonly agents: readonly TuiAgent[];
 }
+/** A subagent row; `childThreadId` names its own thread when the server keeps one. */
+export type TuiAgent = import("@t3tools/client-runtime/state/subagentRuntime").RuntimeSubagent & {
+  readonly childThreadId?: ThreadId | null | undefined;
+};
 export interface TuiThreadState {
   readonly data: Option.Option<TuiThread>;
   readonly status: "empty" | "cached" | "synchronizing" | "live" | "deleted";

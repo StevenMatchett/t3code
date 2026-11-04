@@ -880,6 +880,12 @@ export function AppShell({
             onBack={() => dispatch({ type: "back" })}
             onHelp={() => dispatch({ type: "toggle-help" })}
             onNewThread={() => dispatch({ type: "new-thread" })}
+            onOpenThread={(threadId) => {
+              const thread = rows.threads.find((item) => item.id === threadId);
+              if (!thread) return false;
+              dispatch({ type: "open-thread", projectId: thread.projectId, threadId });
+              return true;
+            }}
             composerFocusRequest={composerFocusRequest}
             onRestore={() => setThreadOverlay({ type: "restore" })}
             onDiff={() => setThreadOverlay({ type: "diff" })}

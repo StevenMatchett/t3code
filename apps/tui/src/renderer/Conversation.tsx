@@ -9,6 +9,7 @@ import { AgentOutputOverlay, AgentSwarmPanel, agentOutputLines } from "./AgentSw
 import { Approval, Questions } from "./RequestsPanel.tsx";
 import { ComposerControls } from "./ProviderPicker.tsx";
 import type { TuiClient } from "../connection/clientRuntime.ts";
+import type { TuiAgent } from "../connection/models.ts";
 import { projectRecordedThreadTimeline } from "../features/chat/timeline.ts";
 import { threadActivityPhase } from "../features/chat/threadActivity.ts";
 import { pastedImagePaths } from "../features/chat/imageAttachments.ts";
@@ -36,6 +37,7 @@ export function Conversation({
   onBack,
   onHelp,
   onNewThread,
+  onOpenThread,
   onDiff,
   onRestore,
   composerFocusRequest = 0,
@@ -50,6 +52,8 @@ export function Conversation({
   readonly onBack: () => void;
   readonly onHelp: () => void;
   readonly onNewThread?: () => void;
+  /** Opens another thread in this environment; false when it is not known yet. */
+  readonly onOpenThread?: (threadId: ThreadId) => boolean;
   readonly composerFocusRequest?: number;
   readonly onRestore?: () => void;
   readonly onDiff?: () => void;
@@ -65,6 +69,11 @@ export function Conversation({
   const queued = interaction.queue[0];
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
+  const parentThreadId =
+    thread?.lineage?.relationshipToParent === "subagent" ? thread.lineage.parentThreadId : null;
+  // The provider runs its own subagents, so their threads take no messages; steer the parent.
+  const readOnly =
+    thread?.lineage?.relationshipToParent === "subagent" && thread.creationSource === "provider";
   const [savedView] = useState(() => client.session?.conversation(threadId));
   const [mode, setMode] = useState<"history" | "composer" | "requests" | "questions" | "agents">(
     savedView?.mode ?? "history",
@@ -119,6 +128,10 @@ export function Conversation({
     selectedAgentId,
     expandedToolGroups,
   ]);
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- A restored or requested composer focus cannot land on a read-only thread.
+    if (readOnly && mode === "composer") setMode("history");
+  }, [readOnly, mode]);
   const requests = useMemo(() => thread?.requests ?? { approvals: [], userInputs: [] }, [thread]);
   const question = requests.userInputs.find(
     (request) =>
@@ -172,6 +185,7 @@ export function Conversation({
       ? parseSuggestedReplies(latestMessage.text)
       : [];
   const activateComposer = () => {
+    if (readOnly) return;
     setSearch(null);
     setAnchor(null);
     setMode("composer");
@@ -185,9 +199,19 @@ export function Conversation({
     setAgentCursor(-1);
     setMode("agents");
   };
+  // Agents with their own thread open it in full; the rest show their output in an overlay.
+  const openAgent = (agent: TuiAgent) => {
+    if (agent.childThreadId && onOpenThread?.(agent.childThreadId)) return;
+    setSelectedAgentId(agent.id);
+    setAgentOutputStart(0);
+  };
+  const openParent = () => {
+    if (parentThreadId) onOpenThread?.(parentThreadId);
+  };
   usePaste((event) => {
     if (
       !active ||
+      readOnly ||
       linkMenu.isOpen ||
       selectedAgent ||
       mode === "questions" ||
@@ -308,12 +332,13 @@ export function Conversation({
     return [
       markdownHint,
       ...pasteHint,
-      { key: "Enter", label: "Write" },
+      ...(readOnly ? [] : [{ key: "Enter", label: "Write" }]),
+      ...(parentThreadId ? [{ key: "U", label: "Parent" }] : []),
       ...terminalHint,
       { key: "hjkl", label: "Move" },
       { key: "v/V", label: "Select" },
       { key: "y/yy", label: "Yank" },
-      { key: "p", label: "Paste" },
+      ...(readOnly ? [] : [{ key: "p", label: "Paste" }]),
       { key: "/", label: "Find text" },
       { key: "A", label: "Requests" },
       ...(agents.length ? [{ key: "Tab", label: "Agents" }] : []),
@@ -335,7 +360,9 @@ export function Conversation({
     client.terminals,
     composerMenuOpen,
     mode,
+    parentThreadId,
     queued,
+    readOnly,
     selectedAgent,
     search,
     suggestedReplies.length,
@@ -377,6 +404,9 @@ export function Conversation({
     [interaction.draft, width],
   );
   const editorHeight = Math.min(Math.max(3, editorLines), maxEditorHeight);
+  const composerHeight = readOnly
+    ? 3
+    : editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4;
   const agentPanelHeight =
     agents.length > 0 ? (agentsExpanded ? Math.min(6, agents.length + 3) : 3) : 0;
   const gap = height >= 12 ? 1 : 0;
@@ -388,7 +418,7 @@ export function Conversation({
             15,
             Math.floor(height / 2),
             height -
-              (editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4) -
+              composerHeight -
               agentPanelHeight -
               gap -
               (interaction.error ? 1 : 0) -
@@ -401,7 +431,7 @@ export function Conversation({
     1,
     height -
       1 -
-      (editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4) -
+      composerHeight -
       gap -
       agentPanelHeight -
       requestHeight -
@@ -477,6 +507,7 @@ export function Conversation({
       setAnchor(line ? { id: line.id, line: line.line } : null);
     },
     onPaste: (text) => {
+      if (readOnly) return;
       if (!client.actions.addPaste(registry, threadId, text)) {
         client.actions.setDraft(
           registry,
@@ -615,7 +646,7 @@ export function Conversation({
       else if (client.actions.editQueued(registry, threadId)) activateComposer();
       return;
     }
-    if (key.ctrl && key.name === "x") {
+    if (key.ctrl && key.name === "x" && !readOnly) {
       key.preventDefault();
       key.stopPropagation();
       cancelTurn();
@@ -634,10 +665,7 @@ export function Conversation({
         if (resolvedAgentCursor === -1) setAgentsExpanded((current) => !current);
         else {
           const agent = agents[resolvedAgentCursor];
-          if (agent) {
-            setSelectedAgentId(agent.id);
-            setAgentOutputStart(0);
-          }
+          if (agent) openAgent(agent);
         }
       } else if (key.name === "escape" || key.name === "tab") setMode(agentReturnMode);
       else return;
@@ -663,6 +691,10 @@ export function Conversation({
         break;
       case "n":
         onNewThread?.();
+        break;
+      case "u":
+        if (!parentThreadId) return;
+        openParent();
         break;
       case "a":
         if (approval || question) setMode(requestMode);
@@ -941,6 +973,21 @@ export function Conversation({
         >
           [D Changes]{" "}
         </Text>
+        {parentThreadId ? (
+          <Text
+            id="thread-parent-action"
+            tone="accent"
+            flexShrink={0}
+            onMouseDown={(event) => {
+              if (!active || event.button !== 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+              openParent();
+            }}
+          >
+            [U Parent]{" "}
+          </Text>
+        ) : null}
         <ThreadActivityIndicator phase={phase} visible={active} />
         <TurnTiming turn={timingTurn} runningSince={runningSince} />
         <Text
@@ -986,36 +1033,44 @@ export function Conversation({
           {anchor !== null ? "History / End: live" : ""}
         </Text>
       </Stack>
-      <ComposerControls
-        client={client}
-        threadId={threadId}
-        active={active && !linkMenu.isOpen}
-        focused={mode === "composer"}
-        editorHeight={editorHeight}
-        showPastes={showPastes}
-        pastePreviewHeight={pastePreviewHeight}
-        onTogglePastes={togglePastes}
-        suggestedReplies={suggestedReplies}
-        availableHeight={height - 1}
-        onActivate={() => {
-          vim.reset();
-          activateComposer();
-        }}
-        onDraftChange={() => setAnchor(null)}
-        onBlur={() => {
-          vim.reset();
-          setMode("history");
-        }}
-        onMenuChange={setComposerMenuOpen}
-        {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
-        onSubmit={() => {
-          setAnchor(null);
-          void client.actions.send(registry, threadId);
-        }}
-        {...(thread?.latestTurn?.state === "running" || queued
-          ? { onCancel: cancelTurn, cancelPending: interaction.pending === "stop" }
-          : {})}
-      />
+      {readOnly ? (
+        <Panel id="provider-subagent-bar" height={composerHeight} flexShrink={0} width="100%">
+          <Text height={1} tone="muted" wrapMode="none" truncate>
+            {`${inlineTerminalText(thread?.modelSelection.model ?? "Provider")} subagent · Runs on its own; steer it from the parent thread`}
+          </Text>
+        </Panel>
+      ) : (
+        <ComposerControls
+          client={client}
+          threadId={threadId}
+          active={active && !linkMenu.isOpen}
+          focused={mode === "composer"}
+          editorHeight={editorHeight}
+          showPastes={showPastes}
+          pastePreviewHeight={pastePreviewHeight}
+          onTogglePastes={togglePastes}
+          suggestedReplies={suggestedReplies}
+          availableHeight={height - 1}
+          onActivate={() => {
+            vim.reset();
+            activateComposer();
+          }}
+          onDraftChange={() => setAnchor(null)}
+          onBlur={() => {
+            vim.reset();
+            setMode("history");
+          }}
+          onMenuChange={setComposerMenuOpen}
+          {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
+          onSubmit={() => {
+            setAnchor(null);
+            void client.actions.send(registry, threadId);
+          }}
+          {...(thread?.latestTurn?.state === "running" || queued
+            ? { onCancel: cancelTurn, cancelPending: interaction.pending === "stop" }
+            : {})}
+        />
+      )}
       {agents.length > 0 ? (
         <AgentSwarmPanel
           agents={agents}
@@ -1026,8 +1081,8 @@ export function Conversation({
           onSelect={setAgentCursor}
           onToggle={() => setAgentsExpanded((current) => !current)}
           onOpen={(agentId) => {
-            setSelectedAgentId(agentId);
-            setAgentOutputStart(0);
+            const agent = agents.find((candidate) => candidate.id === agentId);
+            if (agent) openAgent(agent);
           }}
         />
       ) : null}

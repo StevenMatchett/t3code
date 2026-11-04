@@ -222,6 +222,7 @@ function Help() {
       <Text>v/V Visual/line selection · y/yy Yank · p Paste into prompt</Text>
       <Text>Esc Clear selection/back · Ctrl+U/D Half page · Tab Agents</Text>
       <Text>A Requests T Tool detail Ctrl+X Stop turn</Text>
+      <Text>Tab Agents, Enter opens a subagent's thread · U Back to the parent thread</Text>
       <Text>E Edit from checkpoint: rewind chat, optionally revert files</Text>
       <Text>Ctrl+T Open thread shell Ctrl+\ Release shell focus</Text>
       <Text>N New thread (from navigation or history)</Text>

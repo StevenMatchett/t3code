@@ -25,6 +25,8 @@ export function outputMouseLinks(selection: Selection | null, lines: readonly Co
   const links = new Set<string>();
   let hasOutput = false;
   for (const renderable of selection.selectedRenderables) {
+    // A selection outlives its renderables, e.g. when the shell replaces the conversation.
+    if (renderable.isDestroyed) continue;
     const line = outputLines.get(renderable);
     if (!line || !lines.includes(line) || !(renderable instanceof TextRenderable)) continue;
     const range = renderable.getSelection();

@@ -1,5 +1,4 @@
-import type { TuiActivity } from "../connection/models.ts";
-import type { RuntimeSubagent } from "@t3tools/client-runtime/state/subagentRuntime";
+import type { TuiActivity, TuiAgent } from "../connection/models.ts";
 
 import { conversationLines } from "../ui/conversationLines.ts";
 import { markdownLines } from "../ui/markdownLines.ts";
@@ -22,7 +21,7 @@ export function activityBelongsToAgent(activity: TuiActivity, agentId: string): 
 }
 
 export function agentOutputLines(
-  agent: RuntimeSubagent,
+  agent: TuiAgent,
   activities: readonly TuiActivity[],
   width: number,
   renderMarkdown = true,
@@ -47,7 +46,7 @@ export function agentOutputLines(
       ).map((line, index) => ({ ...line, id: `agent:${agent.id}`, line: index }));
 }
 
-const statusTone = (status: RuntimeSubagent["status"]) =>
+const statusTone = (status: TuiAgent["status"]) =>
   status === "failed"
     ? ("danger" as const)
     : status === "completed"
@@ -66,7 +65,7 @@ export function AgentSwarmPanel({
   onToggle,
   onOpen,
 }: {
-  readonly agents: readonly RuntimeSubagent[];
+  readonly agents: readonly TuiAgent[];
   readonly height: number;
   readonly cursor: number;
   readonly active: boolean;
@@ -82,7 +81,7 @@ export function AgentSwarmPanel({
   return (
     <Panel
       id="agent-swarm"
-      title={`Agent swarm${active ? " · Enter selects" : " · Tab focus"}`}
+      title={`Agent swarm${active ? " · Enter opens" : " · Tab focus"}`}
       height={height}
       flexShrink={0}
       width="100%"
@@ -173,7 +172,7 @@ export function AgentOutputOverlay({
   renderMarkdown,
   onToggleMarkdown,
 }: {
-  readonly agent: RuntimeSubagent;
+  readonly agent: TuiAgent;
   readonly activities: readonly TuiActivity[];
   readonly width: number;
   readonly height: number;

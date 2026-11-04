@@ -650,4 +650,24 @@ describe("Vim output navigation", () => {
     expect(copy).toHaveBeenLastCalledWith("Visible line 59\n");
     expect(driver.captureFrame()).toContain("Visible line 59");
   });
+
+  it("keeps rendering after a mouse selection's output lines unmount", async () => {
+    const { driver, fixture } = await setup("Selected before the shell opened");
+    await driver.input.typeText("i");
+    const row = driver
+      .captureFrame()
+      .split("\n")
+      .findIndex((line) => line.includes("Selected"));
+    await driver.mouse.drag(4, row, 12, row);
+    expect(driver.renderer.getSelection()?.getSelectedText()).not.toBe("");
+    await driver.input.pressKey("t", { ctrl: true });
+    await act(async () =>
+      driver.registry.update(fixture.states[0]!, (state) => ({
+        ...state,
+        data: Option.map(state.data, (thread) => ({ ...thread, title: "Renamed" })),
+      })),
+    );
+    await driver.flush();
+    expect(driver.captureFrame()).not.toContain("Selected before the shell opened");
+  });
 });

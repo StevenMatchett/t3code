@@ -957,7 +957,7 @@ describeWithNativeFfi("connected AppShell", () => {
     expect(driver.renderer.root.findDescendantById("agent-output-overlay")).toBeUndefined();
 
     await driver.input.pressKey("TAB");
-    expect(driver.captureFrame()).toContain("Enter selects");
+    expect(driver.captureFrame()).toContain("Enter opens");
     await driver.input.pressKey("TAB", { shift: true });
     expect(driver.captureFrame()).toContain("Tab focus");
     await driver.input.pressKey("TAB");
@@ -971,9 +971,71 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.input.pressKey("RETURN");
     await driver.input.pressKey("TAB");
     await driver.input.pressKey("TAB");
-    expect(driver.captureFrame()).toContain("Enter selects");
+    expect(driver.captureFrame()).toContain("Enter opens");
     await driver.input.pressKey("ESCAPE");
     expect(driver.captureFrame()).toContain("Tab focus");
+  });
+
+  it("opens a subagent's own thread and returns to its parent", async () => {
+    const { driver, fixture } = await renderShell({ width: 96, height: 30 });
+    const parent = fixture.details[0]!;
+    const child = fixture.details[1]!;
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    // Keep the unopened child's atom alive so the lineage set below survives.
+    const release = driver.registry.mount(fixture.states[1]!);
+    const setChild = async (creationSource: "provider" | "mcp") =>
+      act(async () => {
+        driver.registry.set(fixture.states[1]!, {
+          ...driver.registry.get(fixture.states[1]!),
+          data: Option.some({
+            ...child,
+            creationSource,
+            lineage: {
+              parentThreadId: parent.id,
+              relationshipToParent: "subagent",
+              rootThreadId: parent.id,
+            },
+          }),
+        });
+      });
+    await setChild("provider");
+    await act(async () => {
+      driver.registry.set(fixture.states[0]!, {
+        ...driver.registry.get(fixture.states[0]!),
+        data: Option.some({
+          ...parent,
+          agents: [{ ...agentFixture("child-agent", "Child"), childThreadId: child.id }],
+        }),
+      });
+    });
+    await driver.flush();
+
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+    // A provider-run subagent is readable but takes no messages.
+    expect(driver.captureFrame()).toContain("reply-1");
+    expect(driver.captureFrame()).toContain("Runs on its own");
+    expect(driver.renderer.root.findDescendantById("conversation-composer")).toBeUndefined();
+    expect(driver.renderer.root.findDescendantById("agent-output-overlay")).toBeUndefined();
+    await driver.input.pressKey("i");
+    expect(driver.renderer.root.findDescendantById("conversation-composer")).toBeUndefined();
+
+    await driver.input.pressKey("u");
+    expect(driver.captureFrame()).toContain("Visible line");
+    expect(driver.renderer.root.findDescendantById("conversation-composer")).toBeDefined();
+
+    // A T3-owned subagent keeps its composer, so it can be messaged and steered.
+    await setChild("mcp");
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("reply-1");
+    expect(driver.captureFrame()).toContain("[U Parent]");
+    expect(driver.captureFrame()).not.toContain("Runs on its own");
+    expect(driver.renderer.root.findDescendantById("conversation-composer")).toBeDefined();
+    release();
   });
 
   it("cancels a running prompt from the composer controls", async () => {
