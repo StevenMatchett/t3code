@@ -109,7 +109,7 @@ describe("restoring the TUI session", () => {
       route: "conversation",
       projectId: ProjectId.make("beta"),
       threadId: ThreadId.make("thread-2"),
-      modal: null,
+      overlays: [],
     });
     first.session.close();
     const second = setup(path);
@@ -130,7 +130,7 @@ describe("restoring the TUI session", () => {
       route: "conversation",
       projectId: ProjectId.make("alpha"),
       threadId: ThreadId.make("deleted-thread"),
-      modal: null,
+      overlays: [],
     });
     first.session.close();
     const second = setup(path);
@@ -146,7 +146,7 @@ describe("restoring the TUI session", () => {
       route: "conversation",
       projectId: ProjectId.make("alpha"),
       threadId: id,
-      modal: null,
+      overlays: [],
     });
     first.session.saveConversation(id, {
       mode: "history",

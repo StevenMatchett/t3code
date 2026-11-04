@@ -1,7 +1,8 @@
-import type { BoxRenderable, KeyEvent } from "@opentui/core";
+import type { BoxRenderable } from "@opentui/core";
 import { useRenderer } from "@opentui/react";
 import { useState, type RefObject } from "react";
 import { openBrowser } from "../platform/browser.ts";
+import { useKeyLayer } from "./keymap.ts";
 import { Panel } from "./Panel.tsx";
 import { SelectionRow } from "./SelectionRow.tsx";
 import { Stack } from "./primitives.tsx";
@@ -54,19 +55,24 @@ export function useOutputLinkMenu({
       );
     }
   };
+  const moveSelection = () =>
+    setMenu((current) => current && { ...current, selected: 1 - current.selected });
+  useKeyLayer("linkMenu", {
+    active: active && menu !== null,
+    modal: true,
+    bindings: {
+      "linkMenu.close": () => setMenu(null),
+      "linkMenu.up": moveSelection,
+      "linkMenu.down": moveSelection,
+      "linkMenu.choose": () => {
+        if (menu) choose(menu.selected);
+      },
+    },
+  });
   return {
     open,
     isOpen: active && menu !== null,
     notice,
-    handleKey: (key: KeyEvent) => {
-      if (!active || !menu) return false;
-      if (key.name === "escape") setMenu(null);
-      else if (key.name === "up" || key.name === "down" || key.name === "tab")
-        setMenu({ ...menu, selected: 1 - menu.selected });
-      else if ((key.name === "return" || key.name === "enter") && !key.repeated)
-        choose(menu.selected);
-      return true;
-    },
     element:
       active && menu ? (
         <Stack

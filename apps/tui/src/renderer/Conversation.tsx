@@ -1,6 +1,6 @@
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
 import { decodePasteBytes, type BoxRenderable } from "@opentui/core";
-import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
+import { usePaste, useTerminalDimensions } from "@opentui/react";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useMemo, useState, useContext, useEffect, useRef } from "react";
@@ -25,7 +25,7 @@ import { inlineTerminalText, wrapTerminalWords } from "../ui/textLayout.ts";
 import { useOutputVim } from "./useOutputVim.ts";
 import { useOutputLinkMenu } from "../ui/OutputLinkMenu.tsx";
 import { ThreadTerminal } from "./ThreadTerminal.tsx";
-import type { HotkeyHint, HotkeyState } from "../ui/HotkeyBar.tsx";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { useUi } from "../ui/context.tsx";
 
 export function Conversation({
@@ -35,13 +35,9 @@ export function Conversation({
   height,
   active,
   onBack,
-  onHelp,
-  onNewThread,
   onOpenThread,
   onDiff,
-  onRestore,
   composerFocusRequest = 0,
-  onHintsChange,
   onTerminalFocusChange,
 }: {
   readonly client: TuiClient;
@@ -50,14 +46,10 @@ export function Conversation({
   readonly height: number;
   readonly active: boolean;
   readonly onBack: () => void;
-  readonly onHelp: () => void;
-  readonly onNewThread?: () => void;
   /** Opens another thread in this environment; false when it is not known yet. */
   readonly onOpenThread?: (threadId: ThreadId) => boolean;
   readonly composerFocusRequest?: number;
-  readonly onRestore?: () => void;
   readonly onDiff?: () => void;
-  readonly onHintsChange?: (state: HotkeyState) => void;
   readonly onTerminalFocusChange?: (focused: boolean) => void;
 }) {
   const { height: terminalHeight } = useTerminalDimensions();
@@ -103,7 +95,6 @@ export function Conversation({
     savedView?.selectedAgentId ?? null,
   );
   const [agentOutputStart, setAgentOutputStart] = useState(0);
-  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [search, setSearch] = useState<{ query: string; index: number } | null>(null);
   useEffect(() => {
     client.session?.saveConversation(threadId, {
@@ -231,162 +222,6 @@ export function Conversation({
   useEffect(() => {
     if (thread) client.actions.observe(registry, thread.id);
   }, [client, registry, thread]);
-  const hints = useMemo<readonly HotkeyHint[]>(() => {
-    if (linkMenu.isOpen)
-      return [
-        { key: "↑↓", label: "Choose action" },
-        { key: "Enter", label: "Select" },
-        { key: "Esc", label: "Close menu" },
-      ];
-    if (search)
-      return [
-        { key: "Enter/↓", label: "Next match" },
-        { key: "Shift+Enter/↑", label: "Previous" },
-        { key: "Esc", label: "Close search" },
-      ];
-    const terminalHint = client.terminals ? [{ key: "Ctrl+T", label: "Terminal" }] : [];
-    const pasteHint = interaction.pastes.length
-      ? [{ key: "Ctrl+P", label: showPastes ? "Hide pastes" : "Show pastes" }]
-      : [];
-    const markdownHint = {
-      key: "Ctrl+R",
-      label: renderMarkdown ? "Raw Markdown" : "Render Markdown",
-    };
-    if (selectedAgent)
-      return [
-        markdownHint,
-        { key: "hjkl", label: "Move" },
-        { key: "v/V", label: "Select" },
-        { key: "y/yy", label: "Yank" },
-        { key: "p", label: "Paste" },
-        { key: "PgUp/Dn", label: "Page" },
-        { key: "Home/End", label: "Jump" },
-        { key: "Ctrl+K", label: "Search" },
-        { key: "Esc", label: "Close agent" },
-      ];
-    if (mode === "questions")
-      return [
-        { key: "↑↓/Tab", label: "Choose" },
-        { key: "Enter", label: "Select/submit" },
-        { key: "E", label: "Type answer" },
-        { key: "PgUp/Dn", label: "Details" },
-        { key: "Esc", label: "Chat" },
-      ];
-    if (mode === "composer")
-      if (composerMenuOpen)
-        return [
-          markdownHint,
-          { key: "↑↓", label: "Select" },
-          ...terminalHint,
-          { key: "Enter/Tab", label: "Choose" },
-          { key: "⇧Tab/Esc", label: "Close" },
-          { key: "Ctrl+K", label: "Search" },
-        ];
-      else
-        return suggestedReplies.length
-          ? [
-              markdownHint,
-              ...pasteHint,
-              { key: "↑↓", label: "Choose reply" },
-              ...terminalHint,
-              { key: "Enter", label: "Select" },
-              { key: "Tab", label: "Options" },
-              { key: "Ctrl+K", label: "Search" },
-              { key: "Esc", label: "History" },
-            ]
-          : [
-              ...terminalHint,
-              {
-                key: "Enter",
-                label: thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send",
-              },
-              ...pasteHint,
-              markdownHint,
-              { key: "Shift+Enter", label: "New line" },
-              { key: "/", label: "Skills" },
-              { key: "Tab", label: agents.length ? "Options/agents" : "Options" },
-              ...(thread?.latestTurn?.state === "running" || queued
-                ? [{ key: "Ctrl+X", label: "Cancel" }]
-                : []),
-              { key: "Ctrl+K", label: "Search" },
-              { key: "Esc", label: "History" },
-            ];
-    if (mode === "requests")
-      return [
-        { key: "↑↓", label: "Select" },
-        { key: "Enter", label: "Submit" },
-        ...terminalHint,
-        { key: "PgUp/Dn", label: "Details" },
-        { key: "Ctrl+K", label: "Search" },
-        { key: "Esc", label: "Back" },
-      ];
-    if (mode === "agents")
-      return [
-        markdownHint,
-        { key: "↑↓", label: "Select" },
-        { key: "Enter", label: "Toggle/open" },
-        ...terminalHint,
-        { key: "Ctrl+K", label: "Search" },
-        { key: "Tab/Esc", label: "Back" },
-      ];
-    return [
-      ...terminalHint,
-      ...(readOnly ? [] : [{ key: "Enter", label: "Write" }]),
-      ...pasteHint,
-      ...(parentThreadId ? [{ key: "U", label: "Parent" }] : []),
-      markdownHint,
-      { key: "hjkl", label: "Move" },
-      { key: "v/V", label: "Select" },
-      { key: "y/yy", label: "Yank" },
-      ...(readOnly ? [] : [{ key: "p", label: "Paste" }]),
-      { key: "/", label: "Find text" },
-      { key: "A", label: "Requests" },
-      ...(agents.length ? [{ key: "Tab", label: "Agents" }] : []),
-      { key: "T", label: "Details" },
-      { key: "D", label: "Diff" },
-      { key: "E", label: "Edit from checkpoint" },
-      { key: "O", label: "Open link" },
-      { key: "N", label: "New thread" },
-      { key: "Ctrl+K", label: "Search" },
-      { key: "Esc", label: "Threads" },
-      ...(width >= 58 ? [{ key: "?", label: "Help" }] : []),
-    ];
-  }, [
-    linkMenu.isOpen,
-    interaction.pastes.length,
-    showPastes,
-    renderMarkdown,
-    agents.length,
-    client.terminals,
-    composerMenuOpen,
-    mode,
-    parentThreadId,
-    queued,
-    readOnly,
-    selectedAgent,
-    search,
-    suggestedReplies.length,
-    thread?.latestTurn?.state,
-    width,
-  ]);
-  const hotkeyContext = linkMenu.isOpen
-    ? "Link menu"
-    : selectedAgent
-      ? "Agent output"
-      : mode === "questions"
-        ? "Question"
-        : mode === "composer"
-          ? composerMenuOpen
-            ? "Menu"
-            : "Message"
-          : mode === "requests"
-            ? "Approval"
-            : mode === "agents"
-              ? "Agents"
-              : "Conversation";
-  useEffect(() => {
-    onHintsChange?.({ context: hotkeyContext, hints });
-  }, [hints, hotkeyContext, onHintsChange]);
   const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
   const pastePreviewHeight = interaction.pastes.length
     ? showPastes
@@ -538,6 +373,8 @@ export function Conversation({
       activateComposer();
     },
   });
+  const agentVisible = Math.max(1, height - 4);
+  const agentMaximum = Math.max(0, selectedAgentLines.length - agentVisible);
   const cancelTurn = () => {
     void client.actions.interrupt(registry, threadId);
   };
@@ -548,206 +385,170 @@ export function Conversation({
     setAgentOutputStart(0);
     setRenderMarkdown((current) => !current);
   };
-  useKeyboard((key) => {
-    if (!active) return;
-    if (linkMenu.handleKey(key)) {
-      key.preventDefault();
-      key.stopPropagation();
-      return;
-    }
-    if (
-      key.ctrl &&
-      key.name === "r" &&
-      !key.meta &&
-      !key.option &&
-      !terminalOpen &&
-      !search &&
-      (selectedAgent || mode === "history" || mode === "composer" || mode === "agents")
-    ) {
-      key.preventDefault();
-      key.stopPropagation();
-      if (!key.repeated) toggleMarkdown();
-      return;
-    }
-    if (
-      key.ctrl &&
-      key.name === "p" &&
-      !key.meta &&
-      !key.option &&
-      !terminalOpen &&
-      !selectedAgent &&
-      !search &&
-      (mode === "history" || mode === "composer") &&
-      interaction.pastes.length
-    ) {
-      key.preventDefault();
-      key.stopPropagation();
-      if (!key.repeated) togglePastes();
-      return;
-    }
-    if (search && !terminalOpen && !selectedAgent && mode === "history") {
-      if (key.name === "escape") {
+  const regionOpen = !terminalOpen && !selectedAgent;
+  useKeyLayer("conversation", {
+    bindings: {
+      "terminal.toggle": {
+        enabled: Boolean(client.terminals) && !terminalOpen,
+        run: () => setTerminalOpen(true),
+      },
+      "thread.stop": {
+        enabled:
+          regionOpen && !readOnly && (thread?.latestTurn?.state === "running" || Boolean(queued)),
+        run: cancelTurn,
+      },
+      "thread.steerQueuedMessage": {
+        enabled: regionOpen && Boolean(queued),
+        run: () => void client.actions.flushQueue(registry, threadId, true),
+      },
+      "thread.editQueuedMessage": {
+        enabled: regionOpen && Boolean(queued),
+        run: () => {
+          if (client.actions.editQueued(registry, threadId)) activateComposer();
+        },
+      },
+      "view.toggleMarkdown": {
+        enabled:
+          !terminalOpen &&
+          !search &&
+          !selectedAgent &&
+          (mode === "history" || mode === "composer" || mode === "agents"),
+        label: renderMarkdown ? "Raw Markdown" : "Render Markdown",
+        run: toggleMarkdown,
+      },
+      "composer.togglePastes": {
+        enabled:
+          regionOpen &&
+          !search &&
+          (mode === "history" || mode === "composer") &&
+          interaction.pastes.length > 0,
+        label: showPastes ? "Hide pastes" : "Show pastes",
+        run: togglePastes,
+      },
+    },
+  });
+  useKeyLayer("find", {
+    active: Boolean(search) && regionOpen && mode === "history",
+    typing: true,
+    bindings: {
+      "find.close": () => {
         scrollTo(start);
         setSearch(null);
-      } else if (
-        key.name === "return" ||
-        key.name === "enter" ||
-        key.name === "up" ||
-        key.name === "down"
-      ) {
-        const direction = key.shift || key.name === "up" ? -1 : 1;
-        setSearch({
-          ...search,
-          index: matches.length ? (matchIndex + direction + matches.length) % matches.length : 0,
-        });
-      } else return;
-      key.preventDefault();
-      key.stopPropagation();
-      return;
-    }
-    if (selectedAgent) {
-      if (agentVim.handleKey(key)) {
-        key.preventDefault();
-        key.stopPropagation();
-        return;
-      }
-      if (key.ctrl || key.meta || key.option) return;
-      agentVim.reset();
-      const visible = Math.max(1, height - 4);
-      const maximum = Math.max(0, selectedAgentLines.length - visible);
-      if (key.name === "escape") {
+      },
+      "find.next": () => {
+        if (search)
+          setSearch({
+            ...search,
+            index: matches.length ? (matchIndex + 1) % matches.length : 0,
+          });
+      },
+      "find.previous": () => {
+        if (search)
+          setSearch({
+            ...search,
+            index: matches.length ? (matchIndex - 1 + matches.length) % matches.length : 0,
+          });
+      },
+    },
+  });
+  useKeyLayer("agentOutput", {
+    active: selectedAgent !== null,
+    modal: true,
+    context: "Agent output",
+    raw: (key) => {
+      if (agentVim.handleKey(key)) return true;
+      if (!key.ctrl && !key.meta && !key.option) agentVim.reset();
+      return false;
+    },
+    bindings: {
+      "agentOutput.close": () => {
         setSelectedAgentId(null);
         setAgentOutputStart(0);
-      } else if (key.name === "up") setAgentOutputStart((current) => Math.max(0, current - 1));
-      else if (key.name === "down")
-        setAgentOutputStart((current) => Math.min(maximum, current + 1));
-      else if (key.name === "pageup")
-        setAgentOutputStart((current) => Math.max(0, current - visible));
-      else if (key.name === "pagedown")
-        setAgentOutputStart((current) => Math.min(maximum, current + visible));
-      else if (key.name === "home") setAgentOutputStart(0);
-      else if (key.name === "end") setAgentOutputStart(maximum);
-      else return;
-      key.preventDefault();
-      key.stopPropagation();
-      return;
-    }
-    if (key.ctrl && key.name === "t" && !terminalOpen && client.terminals) {
-      key.preventDefault();
-      key.stopPropagation();
-      setTerminalOpen(true);
-      return;
-    }
-    if (terminalOpen) return;
-    if (queued && key.ctrl && (key.name === "y" || key.name === "u")) {
-      key.preventDefault();
-      key.stopPropagation();
-      if (key.name === "y") void client.actions.flushQueue(registry, threadId, true);
-      else if (client.actions.editQueued(registry, threadId)) activateComposer();
-      return;
-    }
-    if (key.ctrl && key.name === "x" && !readOnly) {
-      key.preventDefault();
-      key.stopPropagation();
-      cancelTurn();
-      return;
-    }
-    if (mode === "agents") {
-      if (key.ctrl || key.meta || key.option || agents.length === 0) return;
-      const selectableCount = agentsExpanded ? agents.length + 1 : 1;
-      if (key.name === "up") {
-        const position = (resolvedAgentCursor + selectableCount) % selectableCount;
-        setAgentCursor(position - 1);
-      } else if (key.name === "down") {
-        const position = (resolvedAgentCursor + 2) % selectableCount;
-        setAgentCursor(position - 1);
-      } else if (key.name === "return" || key.name === "enter" || key.name === "space") {
+      },
+      "agentOutput.scrollUp": () => setAgentOutputStart((current) => Math.max(0, current - 1)),
+      "agentOutput.scrollDown": () =>
+        setAgentOutputStart((current) => Math.min(agentMaximum, current + 1)),
+      "agentOutput.pageUp": () =>
+        setAgentOutputStart((current) => Math.max(0, current - agentVisible)),
+      "agentOutput.pageDown": () =>
+        setAgentOutputStart((current) => Math.min(agentMaximum, current + agentVisible)),
+      "agentOutput.top": () => setAgentOutputStart(0),
+      "agentOutput.bottom": () => setAgentOutputStart(agentMaximum),
+      "agentOutput.toggleMarkdown": {
+        label: renderMarkdown ? "Raw Markdown" : "Render Markdown",
+        run: toggleMarkdown,
+      },
+      "agentOutput.vim": () => false,
+    },
+  });
+  const moveAgents = (offset: number) => {
+    const selectableCount = agentsExpanded ? agents.length + 1 : 1;
+    const position = (resolvedAgentCursor + 1 + offset + selectableCount) % selectableCount;
+    setAgentCursor(position - 1);
+  };
+  useKeyLayer("agents", {
+    active: regionOpen && mode === "agents" && agents.length > 0,
+    bindings: {
+      "agents.up": () => moveAgents(-1),
+      "agents.down": () => moveAgents(1),
+      "agents.open": () => {
         if (resolvedAgentCursor === -1) setAgentsExpanded((current) => !current);
         else {
           const agent = agents[resolvedAgentCursor];
           if (agent) openAgent(agent);
         }
-      } else if (key.name === "escape" || key.name === "tab") setMode(agentReturnMode);
-      else return;
-      key.preventDefault();
-      key.stopPropagation();
-      return;
-    }
-    if (mode === "history" && vim.handleKey(key)) {
-      key.preventDefault();
-      key.stopPropagation();
-      return;
-    }
-    if (key.ctrl || key.meta || key.option || mode !== "history") return;
-    vim.reset();
-    switch (key.name) {
-      case "/":
-        setSearch({ query: "", index: 0 });
-        break;
-      case "return":
-      case "enter":
-      case "i":
-        activateComposer();
-        break;
-      case "n":
-        onNewThread?.();
-        break;
-      case "u":
-        if (!parentThreadId) return;
-        openParent();
-        break;
-      case "a":
-        if (approval || question) setMode(requestMode);
-        break;
-      case "t":
-        setShowDetails((value) => !value);
-        setExpandedToolGroups(new Map());
-        break;
-      case "e":
-        onRestore?.();
-        break;
-      case "d":
-        onDiff?.();
-        break;
-      case "escape":
-      case "left":
-      case "backspace":
-        onBack();
-        break;
-      case "tab":
-        if (agents.length > 0 && !key.shift) activateAgents("history");
-        else onBack();
-        break;
-      case "?":
-        onHelp();
-        break;
-      case "r":
-        void client.retry(registry);
-        break;
-      case "up":
-        scrollTo(start - 1);
-        break;
-      case "down":
-        scrollTo(start + 1);
-        break;
-      case "pageup":
-        scrollTo(start - count);
-        break;
-      case "pagedown":
-        scrollTo(start + count);
-        break;
-      case "home":
+      },
+      "agents.back": () => setMode(agentReturnMode),
+    },
+  });
+  useKeyLayer("history", {
+    active: regionOpen && mode === "history" && !search,
+    raw: (key) => {
+      if (queued && key.ctrl && key.name === "u") return false;
+      if (vim.handleKey(key)) return true;
+      if (!key.ctrl && !key.meta && !key.option) vim.reset();
+      return false;
+    },
+    bindings: {
+      "composer.focus": { enabled: !readOnly, run: activateComposer },
+      "history.back": onBack,
+      "history.nextRegion": {
+        label: agents.length > 0 ? "Agents" : "Sidebar",
+        run: () => {
+          if (agents.length > 0) activateAgents("history");
+          else onBack();
+        },
+      },
+      "history.previousRegion": onBack,
+      "thread.find": () => setSearch({ query: "", index: 0 }),
+      "history.scrollUp": () => scrollTo(start - 1),
+      "history.scrollDown": () => scrollTo(start + 1),
+      "history.pageUp": () => scrollTo(start - count),
+      "history.pageDown": () => scrollTo(start + count),
+      "history.top": () => {
         scrollTo(0);
         if (page?.hasMoreHistory && !page.loading) client.loadOlder(registry, threadId);
-        break;
-      case "end":
-        setAnchor(null);
-        break;
-      default:
-        return;
-    }
-    key.preventDefault();
-    key.stopPropagation();
+      },
+      "history.live": { enabled: anchor !== null, run: () => setAnchor(null) },
+      "thread.toggleDetails": () => {
+        setShowDetails((value) => !value);
+        setExpandedToolGroups(new Map());
+      },
+      "thread.openRequests": {
+        enabled: Boolean(approval || question),
+        run: () => setMode(requestMode),
+      },
+      "thread.openParent": { enabled: parentThreadId !== null, run: openParent },
+      "history.vimMove": () => false,
+      "history.vimWord": () => false,
+      "history.vimLineEdge": () => false,
+      "history.vimEnds": () => false,
+      "history.vimPage": () => false,
+      "history.select": () => false,
+      "history.yank": () => false,
+      "history.paste": { enabled: !readOnly, run: () => false },
+      "history.openLink": () => false,
+    },
   });
   const empty =
     state.status === "deleted"
@@ -800,7 +601,6 @@ export function Conversation({
         worktreePath={thread?.worktreePath ?? null}
         active={active}
         {...(onTerminalFocusChange ? { onFocusChange: onTerminalFocusChange } : {})}
-        {...(onHintsChange ? { onHintsChange } : {})}
         onBack={() => setTerminalOpen(false)}
       />
     );
@@ -1061,7 +861,7 @@ export function Conversation({
             vim.reset();
             setMode("history");
           }}
-          onMenuChange={setComposerMenuOpen}
+          sendLabel={thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send"}
           {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
           onSubmit={() => {
             setAnchor(null);

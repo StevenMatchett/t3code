@@ -1,5 +1,4 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
 import { useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import {
@@ -10,6 +9,7 @@ import {
   type FavoriteModel,
   type ModelChoice,
 } from "../features/chat/providerChoices.ts";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
@@ -90,32 +90,40 @@ export function FavoriteModelsPanel({
     const favorite = favorites[selectedOrder];
     if (favorite) onChange((current) => toggleFavoriteModel(current, favorite));
   };
-  useKeyboard((key) => {
-    if (!active || key.ctrl || key.meta || key.option) return;
-    const confirm = (key.name === "return" || key.name === "enter") && !key.repeated;
-    if (held) {
-      if (key.name === "escape") setHeld(null);
-      else if (key.name === "up" || key.name === "down") {
-        const index = held.index + (key.name === "up" ? -1 : 1);
-        if (index >= 0 && index < favorites.length) setHeld({ ...held, index });
-      } else if (confirm) dropHeld(held.index);
-      else if (key.name !== "tab" && key.name !== "return" && key.name !== "enter") return;
-    } else if (key.name === "escape") onClose();
-    else if (key.name === "tab") setColumn(column === "models" ? "order" : "models");
-    else if (key.name === "up") moveCursor(-1);
-    else if (key.name === "down") moveCursor(1);
-    else if (column === "models" && confirm) toggleModel(models[selectedModel]);
-    else if (column === "order" && confirm) {
-      const favorite = favorites[selectedOrder];
-      if (favorite) setHeld({ favorite, index: selectedOrder });
-    } else if (
-      column === "order" &&
-      (key.name === "x" || key.name === "delete" || key.name === "backspace")
-    )
-      removeSelected();
-    else return;
-    key.preventDefault();
-    key.stopPropagation();
+  useKeyLayer("favorites", {
+    active,
+    modal: true,
+    typing: column === "models" && !held,
+    ...(held ? { context: "Moving favorite" } : {}),
+    bindings: {
+      "favorites.close": () => {
+        if (held) setHeld(null);
+        else onClose();
+      },
+      "favorites.switchColumn": () => {
+        if (!held) setColumn(column === "models" ? "order" : "models");
+      },
+      "favorites.up": () => {
+        if (!held) moveCursor(-1);
+        else if (held.index > 0) setHeld({ ...held, index: held.index - 1 });
+      },
+      "favorites.down": () => {
+        if (!held) moveCursor(1);
+        else if (held.index < favorites.length - 1) setHeld({ ...held, index: held.index + 1 });
+      },
+      "favorites.confirm": () => {
+        if (held) dropHeld(held.index);
+        else if (column === "models") toggleModel(models[selectedModel]);
+        else {
+          const favorite = favorites[selectedOrder];
+          if (favorite) setHeld({ favorite, index: selectedOrder });
+        }
+      },
+      "favorites.remove": {
+        enabled: column === "order" && !held,
+        run: removeSelected,
+      },
+    },
   });
   const panelLayout = stacked ? { height: panelRows + 2 } : { flexGrow: 1, flexBasis: 0 };
   return (

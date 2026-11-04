@@ -1,5 +1,4 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
 import type { ScrollBoxRenderable } from "@opentui/core";
 import type { ModelSelection, ThreadId } from "@t3tools/contracts";
 import { formatProviderSkillDisplayName } from "@t3tools/client-runtime/providerSkills";
@@ -16,6 +15,7 @@ import {
   type ComposerPromptHistoryPosition,
 } from "../features/chat/promptHistory.ts";
 import { trailingPastedImagePaths } from "../features/chat/imageAttachments.ts";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
@@ -43,6 +43,7 @@ export function ComposerControls({
   onMenuChange,
   onCancel,
   cancelPending = false,
+  sendLabel,
 }: {
   readonly client: TuiClient;
   readonly threadId: ThreadId;
@@ -63,6 +64,7 @@ export function ComposerControls({
   readonly onMenuChange?: (open: boolean) => void;
   readonly onCancel?: () => void;
   readonly cancelPending?: boolean;
+  readonly sendLabel: string;
 }) {
   const registry = useContext(RegistryContext);
   const catalog = useAtomValue(client.providers);
@@ -377,104 +379,98 @@ export function ComposerControls({
     }
     return true;
   };
-  useKeyboard((key) => {
-    if (!active || !focused) return;
-    if (
-      key.ctrl &&
-      key.name === "o" &&
-      !key.meta &&
-      !key.option &&
-      !menu &&
-      interaction.pastes.length
-    ) {
-      key.preventDefault();
-      key.stopPropagation();
-      if (!key.repeated) editPastes();
-      return;
-    }
-    if (key.ctrl && key.name === "backspace" && interaction.attachments.length > 0) {
-      const attachment = interaction.attachments.at(-1)!;
-      client.actions.removeAttachment(registry, threadId, attachment.id!);
-      key.preventDefault();
-      key.stopPropagation();
-      return;
-    }
-    if (key.ctrl || key.meta || key.option) return;
-    if (showPastes && !menu && (key.name === "pageup" || key.name === "pagedown")) {
-      key.preventDefault();
-      key.stopPropagation();
-      pastePreview.current?.scrollBy(key.name === "pageup" ? -1 : 1, "viewport");
-      return;
-    }
-    if (
-      !menu &&
-      focus === 0 &&
-      !key.shift &&
-      (key.name === "up" || key.name === "down") &&
-      recallPrompt(key.name === "up" ? "backward" : "forward")
-    ) {
-      key.preventDefault();
-      key.stopPropagation();
-      return;
-    }
-    if (menu) {
-      switch (key.name) {
-        case "escape":
-          close();
-          break;
-        case "up":
-          setCursor((value) => Math.max(0, value - 1));
-          break;
-        case "down":
-          setCursor((value) => Math.min(Math.max(0, rows.length - 1), value + 1));
-          break;
-        case "tab":
-          if (!key.shift) choose(index);
-          else close();
-          break;
-        case "return":
-        case "enter":
-          if (key.shift) return;
-          if (!key.repeated) choose(index);
-          break;
-        default:
-          return;
-      }
-    } else if (
-      suggestedReplies.length > 0 &&
-      (key.name === "up" || key.name === "down" || key.name === "left" || key.name === "right") &&
-      ((focus === 0 && interaction.draft.length === 0) ||
-        (focus > 0 && focus <= suggestedReplies.length))
-    ) {
-      const offset = key.name === "up" || key.name === "left" ? -1 : 1;
-      setFocus((current) => {
-        if (current < 1 || current > suggestedReplies.length)
-          return offset < 0 ? suggestedReplies.length : 1;
-        return ((current - 1 + offset + suggestedReplies.length) % suggestedReplies.length) + 1;
-      });
-    } else if (key.name === "tab") {
-      if (!key.shift && onFocusNext && focus === focusCount - 1) onFocusNext();
-      else setFocus((value) => (value + (key.shift ? focusCount - 1 : 1)) % focusCount);
-    } else if (key.name === "escape") {
-      if (focus > 0) setFocus(0);
-      else onBlur();
-    } else if (
-      focus > 0 &&
-      (key.name === "return" || key.name === "enter" || key.name === "space")
-    ) {
-      if (!key.repeated) {
-        if (focus <= suggestedReplies.length) chooseSuggestedReply(focus - 1);
-        else if (onCancel && focus === cancelIndex) {
-          if (!cancelPending) onCancel();
-        } else {
-          const controlIndex = focus - suggestedReplies.length;
-          const button = buttons[controlIndex - 1];
-          if (button) open(button.id, focus);
-        }
-      }
-    } else return;
-    key.preventDefault();
-    key.stopPropagation();
+  const composerHasFocus = active && focused;
+  useKeyLayer("menu", {
+    active: composerHasFocus && menu !== null,
+    typing: true,
+    bindings: {
+      "menu.close": close,
+      "menu.up": () => setCursor((value) => Math.max(0, value - 1)),
+      "menu.down": () => setCursor((value) => Math.min(Math.max(0, rows.length - 1), value + 1)),
+      "menu.choose": () => choose(index),
+    },
+  });
+  const onSuggestedReplies =
+    suggestedReplies.length > 0 &&
+    ((focus === 0 && interaction.draft.length === 0) ||
+      (focus > 0 && focus <= suggestedReplies.length));
+  useKeyLayer("composer", {
+    active: composerHasFocus,
+    typing: focus === 0,
+    bindings: {
+      "composer.recallPrompt": {
+        enabled: menu === null && focus === 0,
+        run: (key) => recallPrompt(key?.name === "up" ? "backward" : "forward") || false,
+      },
+      "composer.chooseReply": {
+        enabled: menu === null && onSuggestedReplies,
+        run: (key) => {
+          const offset = key?.name === "up" || key?.name === "left" ? -1 : 1;
+          setFocus((current) => {
+            if (current < 1 || current > suggestedReplies.length)
+              return offset < 0 ? suggestedReplies.length : 1;
+            return ((current - 1 + offset + suggestedReplies.length) % suggestedReplies.length) + 1;
+          });
+        },
+      },
+      "composer.send": {
+        enabled: menu === null && focus === 0 && !suggestedReplies.length,
+        label: sendLabel,
+        run: () => false,
+      },
+      "composer.newline": { enabled: menu === null && focus === 0, run: () => false },
+      "composer.skills": {
+        enabled: menu === null && focus === 0 && !suggestedReplies.length,
+        run: () => false,
+      },
+      "composer.activateControl": {
+        enabled: menu === null && focus > 0,
+        run: () => {
+          if (focus <= suggestedReplies.length) chooseSuggestedReply(focus - 1);
+          else if (onCancel && focus === cancelIndex) {
+            if (!cancelPending) onCancel();
+          } else {
+            const button = buttons[focus - suggestedReplies.length - 1];
+            if (button) open(button.id, focus);
+          }
+        },
+      },
+      "composer.nextControl": {
+        enabled: menu === null,
+        label: onFocusNext ? "Options/agents" : "Options",
+        run: () => {
+          if (onFocusNext && focus === focusCount - 1) onFocusNext();
+          else setFocus((value) => (value + 1) % focusCount);
+        },
+      },
+      "composer.previousControl": {
+        enabled: menu === null,
+        run: () => setFocus((value) => (value + focusCount - 1) % focusCount),
+      },
+      "composer.blur": {
+        enabled: menu === null,
+        run: () => {
+          if (focus > 0) setFocus(0);
+          else onBlur();
+        },
+      },
+      "composer.editPastes": {
+        enabled: menu === null && interaction.pastes.length > 0,
+        run: editPastes,
+      },
+      "composer.scrollPastes": {
+        enabled: showPastes && menu === null,
+        run: (key) => {
+          pastePreview.current?.scrollBy(key?.name === "pageup" ? -1 : 1, "viewport");
+        },
+      },
+      "composer.removeAttachment": {
+        enabled: interaction.attachments.length > 0,
+        run: () => {
+          client.actions.removeAttachment(registry, threadId, interaction.attachments.at(-1)!.id!);
+        },
+      },
+    },
   });
   const attachmentHeight = interaction.attachments.length > 0 ? 1 : 0;
   const suggestedReplyHeight = suggestedReplies.length > 0 ? 1 : 0;

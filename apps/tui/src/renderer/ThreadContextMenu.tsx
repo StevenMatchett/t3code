@@ -1,5 +1,5 @@
-import { useKeyboard } from "@opentui/react";
 import { useState } from "react";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { Stack } from "../ui/primitives.tsx";
@@ -64,16 +64,16 @@ function NavigationContextMenu<Action extends string>({
 }) {
   const [selected, setSelected] = useState(0);
   const menuHeight = actions.length + 2;
-  useKeyboard((key) => {
-    key.preventDefault();
-    key.stopPropagation();
-    if (key.name === "escape") onClose();
-    else if (key.name === "up" || key.name === "down" || key.name === "tab") {
-      const offset = key.name === "up" || (key.name === "tab" && key.shift) ? -1 : 1;
-      setSelected((current) => (current + offset + actions.length) % actions.length);
-    } else if ((key.name === "return" || key.name === "enter") && !key.repeated) {
-      onChoose(actions[selected]!.action);
-    }
+  const move = (offset: number) =>
+    setSelected((current) => (current + offset + actions.length) % actions.length);
+  useKeyLayer("contextMenu", {
+    modal: true,
+    bindings: {
+      "contextMenu.close": onClose,
+      "contextMenu.up": () => move(-1),
+      "contextMenu.down": () => move(1),
+      "contextMenu.choose": () => onChoose(actions[selected]!.action),
+    },
   });
   const menuWidth = Math.min(20, width);
   return (

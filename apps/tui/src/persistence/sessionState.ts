@@ -47,6 +47,7 @@ export const SavedShell = Schema.Struct({
   sidebarView: Schema.optionalKey(Schema.Literals(["projects", "recent", "archived"])),
   projectId: Schema.NullOr(ProjectId),
   threadId: Schema.NullOr(ThreadId),
+  expandedProjects: Schema.optionalKey(Schema.Array(ProjectId)),
 });
 export const ConversationView = Schema.Struct({
   mode: Schema.Literals(["history", "composer", "requests", "questions", "agents"]),

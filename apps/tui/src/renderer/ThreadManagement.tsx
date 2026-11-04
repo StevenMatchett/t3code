@@ -1,11 +1,10 @@
 import type { TuiThreadShell } from "../connection/models.ts";
-import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
+import { RegistryContext } from "@effect/atom-react";
 
-import { useContext, useEffect, useMemo, useState } from "react";
+import { useContext, useState } from "react";
 
 import type { TuiClient } from "../connection/clientRuntime.ts";
-import { SelectionRow } from "../ui/SelectionRow.tsx";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { useThemeColor } from "../ui/context.tsx";
@@ -80,23 +79,25 @@ export function ThreadActionsForm({
     else if (next !== "title") void run(next);
   };
 
-  useKeyboard((key) => {
-    if (!active || pending || key.ctrl || key.meta || key.option) return;
-    if (key.name === "escape") {
-      key.preventDefault();
-      key.stopPropagation();
-      onClose();
-      return;
-    }
-    if (key.name === "tab" || key.name === "up" || key.name === "down") {
-      const offset = key.name === "up" || (key.name === "tab" && key.shift) ? -1 : 1;
-      const index = targets.indexOf(target);
-      setTarget(targets[(index + offset + targets.length) % targets.length]!);
-    } else if ((key.name === "return" || key.name === "enter") && target !== "title") {
-      if (!key.repeated) activate(target);
-    } else return;
-    key.preventDefault();
-    key.stopPropagation();
+  const move = (offset: number) => {
+    const index = targets.indexOf(target);
+    setTarget(targets[(index + offset + targets.length) % targets.length]!);
+  };
+  useKeyLayer("manage", {
+    active,
+    modal: true,
+    typing: target === "title",
+    // A pending change cannot be interrupted, so the dialog keeps its keys until it settles.
+    ...(pending ? { raw: () => true } : {}),
+    bindings: {
+      "manage.close": onClose,
+      "manage.next": () => move(1),
+      "manage.previous": () => move(-1),
+      "manage.activate": {
+        enabled: target !== "title",
+        run: () => activate(target),
+      },
+    },
   });
 
   const button = (id: Exclude<ActionTarget, "title">, label: string, danger = false) => (
@@ -172,88 +173,6 @@ export function ThreadActionsForm({
         tone={message === null ? "muted" : message.includes("renamed") ? "success" : "danger"}
       >
         {message ?? "Tab selects an action. Delete requires confirmation."}
-      </Text>
-    </Stack>
-  );
-}
-
-export function ArchivedThreadsPanel({
-  client,
-  active,
-  onClose,
-  onManage,
-}: {
-  readonly client: TuiClient;
-  readonly active: boolean;
-  readonly onClose: () => void;
-  readonly onManage: (thread: TuiThreadShell) => void;
-}) {
-  const registry = useContext(RegistryContext);
-  const state = useAtomValue(client.archivedThreads);
-  const [cursor, setCursor] = useState(0);
-  const rows = useMemo(
-    () => [...state.threads].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [state.threads],
-  );
-  const selected = Math.max(0, Math.min(cursor, rows.length - 1));
-  useEffect(() => {
-    client.refreshArchivedThreads(registry);
-  }, [client, registry]);
-  useKeyboard((key) => {
-    if (!active || key.ctrl || key.meta || key.option) return;
-    if (key.name === "escape") onClose();
-    else if (key.name === "r") client.refreshArchivedThreads(registry);
-    else if (rows.length > 0 && key.name === "up")
-      setCursor((current) => (current - 1 + rows.length) % rows.length);
-    else if (rows.length > 0 && key.name === "down")
-      setCursor((current) => (current + 1) % rows.length);
-    else if (
-      rows[selected] &&
-      (key.name === "return" || key.name === "enter" || key.name === "right")
-    )
-      onManage(rows[selected]);
-    else return;
-    key.preventDefault();
-    key.stopPropagation();
-  });
-  return (
-    <Stack width="100%" height="100%" flexDirection="column">
-      <Text height={1} tone="muted">
-        {state.status === "loading"
-          ? "Loading archived threads..."
-          : state.status === "error"
-            ? "Could not load archived threads. R retries."
-            : `${rows.length} archived thread${rows.length === 1 ? "" : "s"}`}
-      </Text>
-      <Stack flexGrow={1} flexDirection="column" overflow="hidden">
-        {rows.length === 0 && state.status === "live" ? (
-          <Text tone="muted">No archived threads.</Text>
-        ) : (
-          rows.map((thread, index) => (
-            <Stack
-              key={thread.id}
-              id={`archived-thread-${thread.id}`}
-              height={1}
-              flexShrink={0}
-              onMouseDown={(event) => {
-                if (event.button !== 0) return;
-                event.preventDefault();
-                event.stopPropagation();
-                setCursor(index);
-                onManage(thread);
-              }}
-            >
-              <SelectionRow
-                selected={index === selected}
-                active={active}
-                label={`${thread.title}  ${thread.modelSelection.model}`}
-              />
-            </Stack>
-          ))
-        )}
-      </Stack>
-      <Text height={1} tone="muted">
-        Enter manages a thread · R refreshes · Esc closes
       </Text>
     </Stack>
   );

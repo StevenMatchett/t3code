@@ -1,11 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
-import {
-  createInitialShellState,
-  dispatchShellCommand,
-  shellCommandFromKey,
-  type ShellRows,
-} from "./state.ts";
+import { createInitialShellState, dispatchShellCommand, type ShellRows } from "./state.ts";
 
 const p1 = ProjectId.make("one");
 const p2 = ProjectId.make("two");
@@ -126,7 +121,7 @@ describe("shell coordination", () => {
     const conversation = dispatchShellCommand(threads, { type: "activate" }, rows);
     expect(conversation.route).toBe("conversation");
     expect(dispatchShellCommand(conversation, { type: "back" }, rows)).toEqual(threads);
-    expect(dispatchShellCommand(threads, { type: "back" }, rows)).toEqual(selected);
+    expect(dispatchShellCommand(threads, { type: "back" }, rows)).toMatchObject(selected);
   });
 
   it("clamps arrows, cycles Tab, and never activates an empty list", () => {
@@ -177,7 +172,7 @@ describe("shell coordination", () => {
       { type: "move", offset: 1, wrap: false },
       rows,
     );
-    const keyboard = dispatchShellCommand(selected, shellCommandFromKey({ name: "n" })!, rows);
+    const keyboard = dispatchShellCommand(selected, { type: "new-thread" }, rows);
     expect(dispatchShellCommand(initial(), { type: "new-thread", projectId: p2 }, rows)).toEqual(
       keyboard,
     );
@@ -193,27 +188,32 @@ describe("shell coordination", () => {
   it("opens project creation without requiring an existing project", () => {
     const empty = { projects: [], threads: [] };
     const modal = dispatchShellCommand(createInitialShellState(), { type: "new-project" }, empty);
-    expect(modal.modal).toBe("new-project");
-    expect(shellCommandFromKey({ name: "p" })).toEqual({ type: "new-project" });
+    expect(modal.overlays).toEqual([{ type: "new-project" }]);
     expect(
       dispatchShellCommand(modal, { type: "open-project", projectId: p2 }, rows),
-    ).toMatchObject({ route: "threads", projectId: p2, threadId: t3, modal: null });
+    ).toMatchObject({ route: "threads", projectId: p2, threadId: t3, overlays: [] });
   });
 
-  it("maps arrows, Enter, and Tab without stealing modified keys", () => {
-    expect(shellCommandFromKey({ name: "down" })).toEqual({ type: "move", offset: 1, wrap: false });
-    expect(shellCommandFromKey({ name: "up" })).toEqual({ type: "move", offset: -1, wrap: false });
-    expect(shellCommandFromKey({ name: "tab", shift: true })).toEqual({
-      type: "move",
-      offset: -1,
-      wrap: true,
-    });
-    for (const name of ["return", "enter", "right"])
-      expect(shellCommandFromKey({ name })).toEqual({ type: "activate" });
-    for (const name of ["left", "escape"])
-      expect(shellCommandFromKey({ name })).toEqual({ type: "back" });
-    expect(shellCommandFromKey({ name: "down", ctrl: true })).toBeUndefined();
-    expect(shellCommandFromKey({ name: "2" })).toBeUndefined();
+  it("removes exactly one overlay per step and never stacks the same overlay twice", () => {
+    const base = createInitialShellState();
+    const palette = dispatchShellCommand(
+      base,
+      { type: "push-overlay", overlay: { type: "palette" } },
+      rows,
+    );
+    const help = dispatchShellCommand(palette, { type: "toggle-help" }, rows);
+    expect(help.overlays).toEqual([{ type: "palette" }, { type: "help" }]);
+    expect(dispatchShellCommand(help, { type: "back" }, rows).overlays).toEqual([
+      { type: "palette" },
+    ]);
+    expect(dispatchShellCommand(help, { type: "toggle-help" }, rows).overlays).toEqual([
+      { type: "palette" },
+    ]);
+    expect(
+      dispatchShellCommand(help, { type: "push-overlay", overlay: { type: "palette" } }, rows)
+        .overlays,
+    ).toEqual([{ type: "palette" }]);
+    expect(dispatchShellCommand(palette, { type: "pop-overlay" }, rows).overlays).toEqual([]);
   });
 });
 

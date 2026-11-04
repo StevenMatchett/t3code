@@ -1,11 +1,6 @@
 import type { TuiThreadShell } from "../connection/models.ts";
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
-import {
-  useKeyboard,
-  useRenderer,
-  useSelectionHandler,
-  useTerminalDimensions,
-} from "@opentui/react";
+import { useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentui/react";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
@@ -13,10 +8,13 @@ import { Atom } from "effect/reactivity";
 import { useMemo, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { sortSidebarThreads } from "../app/threadOrder.ts";
 import { calculateShellLayout } from "../ui/layout.ts";
-import { AppShellView, useAppShellState } from "../app/AppShell.tsx";
+import { AppShellView, useAppShellState, type ShellOverlayView } from "../app/AppShell.tsx";
+import { useActiveActions, useKeyLayer } from "../ui/keymap.ts";
+import { actionKeyLabel } from "../app/actions.ts";
 import {
   nextSidebarView,
-  shellCommandFromKey,
+  topOverlay,
+  type ShellOverlay,
   type ShellRoute,
   type ShellState,
 } from "../app/state.ts";
@@ -25,9 +23,8 @@ import { Conversation } from "./Conversation.tsx";
 import { NewThreadForm } from "./NewThreadForm.tsx";
 import { NewProjectForm } from "./NewProjectForm.tsx";
 import { ActivityClockProvider } from "../ui/ThreadActivityIndicator.tsx";
-import { ArchivedThreadsPanel, ThreadActionsForm } from "./ThreadManagement.tsx";
-
-import type { HotkeyState } from "../ui/HotkeyBar.tsx";
+import { ThreadActionsForm } from "./ThreadManagement.tsx";
+import { HelpPanel } from "./HelpPanel.tsx";
 import { CommandPalette, type CommandPaletteItem } from "./CommandPalette.tsx";
 import { FavoriteModelsPanel } from "./FavoriteModelsPanel.tsx";
 import type { FavoriteModel } from "../features/chat/providerChoices.ts";
@@ -49,18 +46,7 @@ const NO_SESSION_ERROR = Atom.make<string | null>(null);
 
 type PaletteEntry = CommandPaletteItem & {
   readonly target:
-    | { readonly type: "new-project" }
-    | { readonly type: "new-thread" }
-    | { readonly type: "archived" }
-    | { readonly type: "favorite-models" }
-    | { readonly type: "help" }
-    | { readonly type: "toggle-sounds" }
-    | { readonly type: "toggle-sidebar-view" }
-    | { readonly type: "toggle-subagents" }
-    | { readonly type: "diff" }
-    | { readonly type: "restore" }
-    | { readonly type: "pull-request" }
-    | { readonly type: "manage"; readonly thread: TuiThreadShell }
+    | { readonly type: "action"; readonly run: () => void }
     | { readonly type: "project"; readonly projectId: TuiThreadShell["projectId"] }
     | {
         readonly type: "thread";
@@ -102,9 +88,7 @@ export function AppShell({
   const registry = useContext(RegistryContext);
   const { width, height } = useTerminalDimensions();
   const layout = calculateShellLayout(width, height);
-  const [hotkeys, setHotkeys] = useState<HotkeyState>({ context: "Conversation", hints: [] });
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
-  const [terminalFocused, setTerminalFocused] = useState(false);
   const [paletteSearchQuery, setPaletteSearchQuery] = useState("");
   const threadSearch = useAtomValue(client.threadSearch(paletteSearchQuery));
   const [notice, setNotice] = useState<{
@@ -181,39 +165,19 @@ export function AppShell({
     saveShell,
     client.session?.shell,
   );
-  const [threadOverlay, setThreadOverlay] = useState<
-    | { readonly type: "palette" }
-    | { readonly type: "favorite-models" }
-    | { readonly type: "rename"; readonly thread: TuiThreadShell }
-    | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
-    | { readonly type: "diff" }
-    | { readonly type: "restore" }
-    | { readonly type: "archived" }
-    | {
-        readonly type: "manage";
-        readonly thread: TuiThreadShell;
-        readonly returnToArchived: boolean;
-        readonly initialAction?: "rename" | "delete";
-      }
-    | null
-  >(null);
-  const [navigationMenu, setNavigationMenu] = useState<
-    | ((
-        | { type: "thread"; thread: TuiThreadShell }
-        | { type: "project"; projectId: TuiThreadShell["projectId"] }
-      ) & { x: number; y: number })
-    | null
-  >(null);
-  const chooseThreadAction = async (action: ThreadMenuAction) => {
-    if (navigationMenu?.type !== "thread") return;
-    const thread = navigationMenu.thread;
-    setNavigationMenu(null);
+  const overlays = state.overlays;
+  const pushOverlay = (overlay: ShellOverlay) => dispatch({ type: "push-overlay", overlay });
+  const popOverlay = useCallback(() => dispatch({ type: "pop-overlay" }), [dispatch]);
+  const chooseThreadAction = async (threadId: TuiThreadShell["id"], action: ThreadMenuAction) => {
+    const thread = rows.threads.find((item) => item.id === threadId);
+    popOverlay();
+    if (!thread) return;
     if (action === "rename") {
-      setThreadOverlay({ type: "rename", thread });
+      pushOverlay({ type: "rename", threadId: thread.id });
       return;
     }
     if (action === "delete") {
-      setThreadOverlay({ type: "manage", thread, returnToArchived: false, initialAction: action });
+      pushOverlay({ type: "manage", threadId: thread.id, initialAction: action });
       return;
     }
     const accepted = await (thread.archivedAt
@@ -234,125 +198,164 @@ export function AppShell({
     const cwd =
       selectedThread.worktreePath ??
       rows.projects.find((project) => project.id === selectedThread.projectId)?.workspaceRoot;
-    if (cwd) setThreadOverlay({ type: "pull-request", cwd, branch: selectedThread.branch });
+    if (cwd) pushOverlay({ type: "pull-request", cwd, branch: selectedThread.branch });
   };
-  const openPalette = () => {
+  const closePalette = useCallback(() => {
     setPaletteSearchQuery("");
-    setThreadOverlay({ type: "palette" });
-  };
-  const closePalette = () => {
+    popOverlay();
+  }, [popOverlay]);
+  const togglePalette = () => {
     setPaletteSearchQuery("");
-    setThreadOverlay(null);
+    if (topOverlay(state)?.type === "palette") popOverlay();
+    else pushOverlay({ type: "palette" });
   };
-  const handleTerminalFocusChange = useCallback(
-    (focused: boolean) => {
-      setTerminalFocused(focused);
-      onTerminalFocusChange?.(focused);
+  const toggleSounds = () => {
+    const enabled = !soundsEnabled;
+    setSoundsEnabled(enabled);
+    client.session?.saveSoundsEnabled(enabled);
+    if (!enabled) audio.current?.stop();
+  };
+  const updateFavorites = (
+    update: (favorites: readonly FavoriteModel[]) => readonly FavoriteModel[],
+  ) => {
+    // Start from the saved list so a change cannot undo one made in another TUI.
+    const next = update(client.session?.favoriteModels() ?? favoriteModels);
+    setFavoriteModels(next);
+    client.session?.saveFavoriteModels(next);
+  };
+  const browsingProjects =
+    state.route === "projects" && (state.sidebarView ?? "projects") === "projects";
+  const inConversation = state.route === "conversation";
+  const atArchivedRow = state.sidebarView === "archived" && !inConversation && selectedThread;
+  const { actions: paletteActions } = useActiveActions("palette");
+  useKeyLayer("app", {
+    bindings: {
+      "commandPalette.toggle": togglePalette,
+      "help.toggle": () => dispatch({ type: "toggle-help" }),
+      "sounds.toggle": {
+        label: soundsEnabled ? "Sounds on" : "Sounds off",
+        title: soundsEnabled ? "Turn notification sounds off" : "Turn notification sounds on",
+        run: toggleSounds,
+      },
+      "favorites.open": () => pushOverlay({ type: "favorite-models" }),
+      "theme.select": () => pushOverlay({ type: "theme" }),
     },
-    [onTerminalFocusChange],
-  );
+  });
+  useKeyLayer("workspace", {
+    bindings: {
+      "chat.new": {
+        enabled: state.projectId !== null,
+        run: () => dispatch({ type: "new-thread" }),
+      },
+      "project.new": () => dispatch({ type: "new-project" }),
+      "thread.manage": {
+        enabled: selectedThread !== null,
+        title: selectedThread ? `Manage ${selectedThread.title}` : "Manage thread",
+        run: () => {
+          if (selectedThread) pushOverlay({ type: "manage", threadId: selectedThread.id });
+        },
+      },
+      "diff.toggle": {
+        enabled: state.threadId !== null,
+        run: () => pushOverlay({ type: "diff" }),
+      },
+      "pullRequest.open": { enabled: selectedThread !== null, run: openPullRequest },
+      "checkpoint.restore": {
+        enabled: state.threadId !== null,
+        run: () => pushOverlay({ type: "restore" }),
+      },
+      "sidebar.showArchived": () => dispatch({ type: "set-sidebar-view", view: "archived" }),
+      "sidebar.toggle": {
+        title: `Show ${nextSidebarView(state.sidebarView)} in sidebar`,
+        run: () => dispatch({ type: "toggle-sidebar-view" }),
+      },
+      "sidebar.toggleSubagents": {
+        label: state.showSubagents ? "Hide subagents" : "Show subagents",
+        title: state.showSubagents ? "Hide subagents in sidebar" : "Show subagents in sidebar",
+        run: () => dispatch({ type: "toggle-subagents" }),
+      },
+      "connection.retry": () => {
+        if (state.sidebarView === "archived" && !inConversation)
+          client.refreshArchivedThreads(registry);
+        else void client.retry(registry);
+      },
+    },
+  });
+  const [filtering, setFiltering] = useState(false);
+  const moveSelection = (offset: number, wrap = false) => dispatch({ type: "move", offset, wrap });
+  useKeyLayer("listFilter", {
+    active: filtering && !inConversation,
+    typing: true,
+    bindings: {
+      "listFilter.up": () => moveSelection(-1),
+      "listFilter.down": () => moveSelection(1),
+      "listFilter.apply": () => setFiltering(false),
+      "listFilter.close": () => {
+        setFiltering(false);
+        dispatch({ type: "set-filter", filter: undefined });
+      },
+    },
+  });
+  useKeyLayer("navigation", {
+    active: !inConversation,
+    context: browsingProjects ? "Projects" : "Threads",
+    bindings: {
+      "list.up": () => moveSelection(-1),
+      "list.down": () => moveSelection(1),
+      "list.next": () => moveSelection(1, true),
+      "list.previous": () => moveSelection(-1, true),
+      "list.open": {
+        label: atArchivedRow ? "Manage" : "Open",
+        run: () => {
+          if (atArchivedRow) pushOverlay({ type: "manage", threadId: atArchivedRow.id });
+          else dispatch({ type: "activate" });
+        },
+      },
+      "list.back": {
+        enabled:
+          Boolean(state.filter) ||
+          (!browsingProjects && state.sidebarView !== "recent" && state.sidebarView !== "archived"),
+        label: state.filter ? "Clear filter" : "Projects",
+        run: () => dispatch({ type: "back" }),
+      },
+      "list.filter": () => {
+        setFiltering(true);
+        dispatch({ type: "set-filter", filter: state.filter ?? "" });
+      },
+      "project.toggleExpanded": {
+        enabled: browsingProjects,
+        run: () => dispatch({ type: "toggle-project-expanded" }),
+      },
+      "sidebar.previousView": () =>
+        dispatch({ type: "set-sidebar-view", view: nextSidebarView(state.sidebarView, -1) }),
+      "sidebar.nextView": () =>
+        dispatch({ type: "set-sidebar-view", view: nextSidebarView(state.sidebarView, 1) }),
+    },
+  });
   const paletteEntries = useMemo<readonly PaletteEntry[]>(() => {
     const contentMatchByThreadId = new Map(
       threadSearch.matches.map((match) => [match.threadId, match] as const),
     );
-    const commands: PaletteEntry[] = [
-      {
-        id: "command:sounds",
-        label: soundsEnabled ? "Turn notification sounds off" : "Turn notification sounds on",
-        detail: "Command · Ctrl+G · Input and completion chimes",
-        keywords: "audio mute unmute alerts approval finished",
-        target: { type: "toggle-sounds" },
-      },
-      {
-        id: "command:sidebar-view",
-        label: `Show ${nextSidebarView(state.sidebarView)} in sidebar`,
-        detail: "Command · Ctrl+B",
-        keywords: "toggle view navigation",
-        target: { type: "toggle-sidebar-view" },
-      },
-      {
-        id: "command:subagents",
-        label: state.showSubagents ? "Hide subagents in sidebar" : "Show subagents in sidebar",
-        detail: "Command · Ctrl+S",
-        keywords: "child threads visibility",
-        target: { type: "toggle-subagents" },
-      },
-      {
-        id: "command:new-project",
-        label: "New project",
-        detail: "Command",
-        keywords: "add workspace local folder github clone",
-        target: { type: "new-project" },
-      },
-      {
-        id: "command:archived",
-        label: "Show archived threads",
-        detail: "Command",
-        keywords: "restore history",
-        target: { type: "archived" },
-      },
-      {
-        id: "command:favorite-models",
-        label: "Favorite models",
-        detail: "Command · Choose and rank the models new threads start with",
-        keywords: "star pin provider",
-        target: { type: "favorite-models" },
-      },
-      {
-        id: "command:help",
-        label: "Show keyboard help",
-        detail: "Command",
-        keywords: "shortcuts hotkeys",
-        target: { type: "help" },
-      },
-    ];
-    if (state.projectId)
-      commands.splice(1, 0, {
-        id: "command:new-thread",
-        label: "New thread",
-        detail: "Command",
-        keywords: "conversation task worktree",
-        target: { type: "new-thread" },
-      });
-    if (selectedThread)
-      commands.push({
-        id: "command:pull-request",
-        label: "Open pull request in browser",
-        detail: "Command · O from thread history",
-        keywords: "pr branch github gitlab browser",
-        target: { type: "pull-request" },
-      });
-    if (selectedThread)
-      commands.push({
-        id: "command:restore",
-        label: "Edit from checkpoint",
-        detail: "Command · E from thread history",
-        keywords: "restore rewind revert undo",
-        target: { type: "restore" },
-      });
-    if (selectedThread)
-      commands.push({
-        id: "command:diff",
-        label: "View thread changes",
-        detail: "Command",
-        keywords: "diff files additions deletions",
-        target: { type: "diff" },
-      });
-    if (selectedThread)
-      commands.splice(2, 0, {
-        id: "command:manage-thread",
-        label: `Manage ${selectedThread.title}`,
-        detail: "Command",
-        keywords: "rename archive delete",
-        target: { type: "manage", thread: selectedThread },
-      });
     return [
-      ...commands,
+      ...paletteActions
+        .filter((action) => action.definition.palette !== false)
+        .map((action): PaletteEntry => {
+          const key = actionKeyLabel(action.definition);
+          return {
+            id: `action:${action.id}`,
+            label: action.title,
+            detail: key ? `Command · ${key}` : "Command",
+            keywords: `${action.definition.keywords ?? ""} ${action.id}`,
+            kind: "command",
+            target: { type: "action", run: () => void action.run() },
+          };
+        }),
       ...rows.projects.map((project): PaletteEntry => ({
         id: `project:${project.id}`,
         label: project.title,
         detail: `Project · ${project.workspaceRoot}`,
         keywords: "workspace repository",
+        kind: "entity",
         target: { type: "project", projectId: project.id },
       })),
       ...rows.threads
@@ -370,75 +373,19 @@ export function AppShell({
               ? `${contentLabel} · ${project?.title ?? "Unknown project"}`
               : `Thread · ${project?.title ?? "Unknown project"}`,
             keywords: `${thread.modelSelection.model} conversation ${contentMatch?.snippet ?? ""}`,
+            kind: "entity",
             target: { type: "thread", projectId: thread.projectId, threadId: thread.id },
           };
         }),
     ];
-  }, [
-    paletteSearchQuery,
-    soundsEnabled,
-    rows.projects,
-    rows.threads,
-    selectedThread,
-    state.projectId,
-    state.sidebarView,
-    state.showSubagents,
-    threadSearch.matches,
-  ]);
-  const toggleSounds = () => {
-    const enabled = !soundsEnabled;
-    setSoundsEnabled(enabled);
-    client.session?.saveSoundsEnabled(enabled);
-    if (!enabled) audio.current?.stop();
-  };
-  const updateFavorites = (
-    update: (favorites: readonly FavoriteModel[]) => readonly FavoriteModel[],
-  ) => {
-    // Start from the saved list so a change cannot undo one made in another TUI.
-    const next = update(client.session?.favoriteModels() ?? favoriteModels);
-    setFavoriteModels(next);
-    client.session?.saveFavoriteModels(next);
-  };
+  }, [paletteActions, paletteSearchQuery, rows.projects, rows.threads, threadSearch.matches]);
   const choosePaletteEntry = (id: string) => {
     const entry = paletteEntries.find((item) => item.id === id);
     if (!entry) return;
     closePalette();
     switch (entry.target.type) {
-      case "toggle-sounds":
-        toggleSounds();
-        break;
-      case "toggle-subagents":
-        dispatch({ type: "toggle-subagents" });
-        break;
-      case "toggle-sidebar-view":
-        dispatch({ type: "toggle-sidebar-view" });
-        break;
-      case "pull-request":
-        openPullRequest();
-        break;
-      case "restore":
-        setThreadOverlay({ type: "restore" });
-        break;
-      case "diff":
-        setThreadOverlay({ type: "diff" });
-        break;
-      case "new-project":
-        dispatch({ type: "new-project" });
-        break;
-      case "new-thread":
-        dispatch({ type: "new-thread" });
-        break;
-      case "archived":
-        dispatch({ type: "set-sidebar-view", view: "archived" });
-        break;
-      case "favorite-models":
-        setThreadOverlay({ type: "favorite-models" });
-        break;
-      case "help":
-        dispatch({ type: "toggle-help" });
-        break;
-      case "manage":
-        setThreadOverlay({ type: "manage", thread: entry.target.thread, returnToArchived: false });
+      case "action":
+        entry.target.run();
         break;
       case "project":
         dispatch({ type: "open-project", projectId: entry.target.projectId });
@@ -452,123 +399,6 @@ export function AppShell({
         break;
     }
   };
-  useKeyboard((key) => {
-    if (!active || navigationMenu || terminalFocused) return;
-    if (key.ctrl && !key.meta && !key.option && !key.shift && key.name.toLowerCase() === "g") {
-      key.preventDefault();
-      key.stopPropagation();
-      toggleSounds();
-      return;
-    }
-    if (
-      key.ctrl &&
-      !key.meta &&
-      !key.option &&
-      !key.shift &&
-      key.name.toLowerCase() === "s" &&
-      !state.modal &&
-      !threadOverlay
-    ) {
-      key.preventDefault();
-      key.stopPropagation();
-      dispatch({ type: "toggle-subagents" });
-      return;
-    }
-    if (key.ctrl && key.name === "b" && !state.modal && !threadOverlay) {
-      key.preventDefault();
-      key.stopPropagation();
-      dispatch({ type: "toggle-sidebar-view" });
-      return;
-    }
-    if (
-      key.ctrl &&
-      key.name.toLowerCase() === "k" &&
-      state.modal === null &&
-      threadOverlay === null
-    ) {
-      key.preventDefault();
-      key.stopPropagation();
-      openPalette();
-      return;
-    }
-    if (threadOverlay) return;
-    if (
-      state.route !== "conversation" &&
-      !key.ctrl &&
-      !key.meta &&
-      !key.option &&
-      state.modal === null
-    ) {
-      if (key.name === "left" || key.name === "right") {
-        key.preventDefault();
-        key.stopPropagation();
-        dispatch({
-          type: "set-sidebar-view",
-          view: nextSidebarView(state.sidebarView, key.name === "left" ? -1 : 1),
-        });
-        return;
-      }
-      if (
-        state.sidebarView === "archived" &&
-        selectedThread &&
-        (key.name === "return" || key.name === "enter")
-      ) {
-        key.preventDefault();
-        key.stopPropagation();
-        setThreadOverlay({ type: "manage", thread: selectedThread, returnToArchived: false });
-        return;
-      }
-      if (key.name.toLowerCase() === "d" && selectedThread) {
-        key.preventDefault();
-        key.stopPropagation();
-        setThreadOverlay({ type: "diff" });
-        return;
-      }
-      if (key.name.toLowerCase() === "o" && selectedThread) {
-        key.preventDefault();
-        key.stopPropagation();
-        openPullRequest();
-        return;
-      }
-      if (key.name.toLowerCase() === "m" && selectedThread) {
-        key.preventDefault();
-        key.stopPropagation();
-        setThreadOverlay({ type: "manage", thread: selectedThread, returnToArchived: false });
-        return;
-      }
-      if (key.name.toLowerCase() === "a" && key.shift) {
-        key.preventDefault();
-        key.stopPropagation();
-        dispatch({ type: "set-sidebar-view", view: "archived" });
-        return;
-      }
-    }
-    if (
-      key.ctrl ||
-      key.meta ||
-      key.option ||
-      state.modal === "new-thread" ||
-      state.modal === "new-project" ||
-      (state.route === "conversation" && state.modal === null)
-    )
-      return;
-    if (!state.modal && key.name === "r") {
-      key.preventDefault();
-      key.stopPropagation();
-      if (state.sidebarView === "archived") client.refreshArchivedThreads(registry);
-      else void client.retry(registry);
-      return;
-    }
-    const command = shellCommandFromKey(key);
-    if (
-      command === undefined ||
-      (!state.modal && state.route === "conversation" && command.type === "move")
-    )
-      return;
-    key.preventDefault();
-    key.stopPropagation();
-    dispatch(command);
-  });
   const status =
     connection.phase === "connected"
       ? Option.isSome(shell.error)
@@ -583,54 +413,224 @@ export function AppShell({
           : connection.phase === "offline"
             ? "Offline"
             : "Connecting";
+  const renderOverlay = (overlay: ShellOverlay, isTop: boolean): ShellOverlayView | null => {
+    const overlayActive = active && isTop;
+    switch (overlay.type) {
+      case "help":
+        return {
+          title: "Keyboard help",
+          content: (
+            <HelpPanel active={overlayActive} height={layout.contentHeight} onClose={popOverlay} />
+          ),
+        };
+      case "palette":
+        return {
+          title: "Search and commands",
+          content: (
+            <CommandPalette
+              items={paletteEntries}
+              height={layout.contentHeight}
+              active={overlayActive}
+              searching={threadSearch.loading}
+              searchFailed={threadSearch.failed}
+              searchedQuery={paletteSearchQuery}
+              searchDebounceMs={searchDebounceMs}
+              onSearchQueryChange={setPaletteSearchQuery}
+              onChoose={choosePaletteEntry}
+              onClose={closePalette}
+            />
+          ),
+        };
+      case "favorite-models":
+        return {
+          title: "Favorite models",
+          content: (
+            <FavoriteModelsPanel
+              client={client}
+              favorites={favoriteModels}
+              width={Math.max(1, width - 6)}
+              height={layout.contentHeight}
+              active={overlayActive}
+              onChange={updateFavorites}
+              onClose={popOverlay}
+            />
+          ),
+        };
+      case "theme":
+        return null;
+      case "diff":
+        return state.threadId
+          ? {
+              title: "Thread changes",
+              content: (
+                <ThreadDiff
+                  client={client}
+                  threadId={state.threadId}
+                  active={overlayActive}
+                  width={Math.max(1, width - 6)}
+                  height={layout.contentHeight}
+                  onClose={popOverlay}
+                />
+              ),
+            }
+          : null;
+      case "restore":
+        return state.threadId
+          ? {
+              title: "Checkpoint restore",
+              content: (
+                <CheckpointRestore
+                  key={state.threadId}
+                  client={client}
+                  threadId={state.threadId}
+                  active={overlayActive}
+                  height={layout.contentHeight}
+                  onClose={(restored) => {
+                    popOverlay();
+                    if (restored) setComposerFocusRequest((value) => value + 1);
+                  }}
+                />
+              ),
+            }
+          : null;
+      case "pull-request":
+        return {
+          title: "Pull request",
+          content: (
+            <PullRequestPanel
+              client={client}
+              cwd={overlay.cwd}
+              branch={overlay.branch}
+              active={overlayActive}
+              onClose={popOverlay}
+            />
+          ),
+        };
+      case "new-project":
+        return {
+          title: "New project",
+          content: (
+            <NewProjectForm
+              client={client}
+              height={layout.contentHeight}
+              onClose={popOverlay}
+              onCreated={(projectId) => dispatch({ type: "open-project", projectId })}
+            />
+          ),
+        };
+      case "new-thread":
+        return {
+          title: "New thread",
+          content: (
+            <NewThreadForm
+              client={client}
+              projectId={state.projectId}
+              favoriteModels={favoriteModels}
+              height={layout.contentHeight}
+              onClose={popOverlay}
+              onCreated={(projectId, threadId) =>
+                dispatch({ type: "open-thread", projectId, threadId })
+              }
+            />
+          ),
+        };
+      case "manage": {
+        const thread = rows.threads.find((item) => item.id === overlay.threadId);
+        return thread
+          ? {
+              title: thread.archivedAt ? "Manage archived thread" : "Manage thread",
+              content: (
+                <ThreadActionsForm
+                  client={client}
+                  initialAction={overlay.initialAction ?? "rename"}
+                  thread={thread}
+                  active={overlayActive}
+                  onClose={popOverlay}
+                  onRemoved={() => {
+                    popOverlay();
+                    if (state.route === "conversation" && state.threadId === thread.id)
+                      dispatch({ type: "back" });
+                  }}
+                />
+              ),
+            }
+          : null;
+      }
+      case "rename": {
+        const thread = rows.threads.find((item) => item.id === overlay.threadId);
+        return thread
+          ? {
+              floating: true,
+              content: (
+                <RenameThreadDialog
+                  key={thread.id}
+                  client={client}
+                  thread={thread}
+                  onClose={popOverlay}
+                />
+              ),
+            }
+          : null;
+      }
+      case "thread-menu": {
+        const thread = rows.threads.find((item) => item.id === overlay.threadId);
+        return thread
+          ? {
+              floating: true,
+              content: (
+                <ThreadContextMenu
+                  key={thread.id}
+                  x={overlay.x}
+                  y={overlay.y}
+                  width={width}
+                  height={height}
+                  archived={thread.archivedAt !== null}
+                  onChoose={(action) => void chooseThreadAction(thread.id, action)}
+                  onClose={popOverlay}
+                />
+              ),
+            }
+          : null;
+      }
+      case "project-menu":
+        return {
+          floating: true,
+          content: (
+            <ProjectContextMenu
+              key={overlay.projectId}
+              x={overlay.x}
+              y={overlay.y}
+              width={width}
+              height={height}
+              onChoose={() => {
+                popOverlay();
+                dispatch({ type: "new-thread", projectId: overlay.projectId });
+              }}
+              onClose={popOverlay}
+            />
+          ),
+        };
+    }
+  };
+  const overlayViews = overlays.flatMap((overlay, index) => {
+    const isTop = index === overlays.length - 1;
+    const view = renderOverlay(overlay, isTop);
+    return view ? [{ ...view, key: `${index}:${overlay.type}`, visible: isTop }] : [];
+  });
   return (
     <ActivityClockProvider>
       <QueuedMessages client={client} />
       <AppShellView
         onProjectContextMenu={(projectId, position) => {
-          if (!active || state.modal || threadOverlay) return;
+          if (!active || overlays.length > 0) return;
           renderer.clearSelection();
-          setNavigationMenu({ type: "project", projectId, ...position });
+          pushOverlay({ type: "project-menu", projectId, ...position });
         }}
         onThreadContextMenu={(thread, position) => {
-          if (!active || state.modal || threadOverlay) return;
+          if (!active || overlays.length > 0) return;
           renderer.clearSelection();
-          setNavigationMenu({ type: "thread", thread, ...position });
+          pushOverlay({ type: "thread-menu", threadId: thread.id, ...position });
         }}
-        contextMenu={
-          active && threadOverlay?.type === "rename" ? (
-            <RenameThreadDialog
-              key={threadOverlay.thread.id}
-              client={client}
-              thread={threadOverlay.thread}
-              onClose={() => setThreadOverlay(null)}
-            />
-          ) : active && navigationMenu?.type === "project" ? (
-            <ProjectContextMenu
-              key={navigationMenu.projectId}
-              x={navigationMenu.x}
-              y={navigationMenu.y}
-              width={width}
-              height={height}
-              onChoose={() => {
-                dispatch({ type: "new-thread", projectId: navigationMenu.projectId });
-                setNavigationMenu(null);
-              }}
-              onClose={() => setNavigationMenu(null)}
-            />
-          ) : active && navigationMenu?.type === "thread" ? (
-            <ThreadContextMenu
-              key={navigationMenu.thread.id}
-              x={navigationMenu.x}
-              y={navigationMenu.y}
-              width={width}
-              height={height}
-              archived={navigationMenu.thread.archivedAt !== null}
-              onChoose={(action) => void chooseThreadAction(action)}
-              onClose={() => setNavigationMenu(null)}
-            />
-          ) : null
-        }
         onToggleSidebarView={() => dispatch({ type: "toggle-sidebar-view" })}
         environmentId={client.environmentId}
         live={
@@ -648,223 +648,26 @@ export function AppShell({
         error={Option.isSome(shell.error) || connection.phase === "blocked"}
         width={width}
         height={height}
-        hotkeys={hotkeys}
-        soundShortcut={
-          active && !terminalFocused && !navigationMenu
-            ? { key: "Ctrl+G", label: soundsEnabled ? "Sounds on" : "Sounds off" }
-            : undefined
-        }
         notice={sessionError ? { text: sessionError, failed: true } : notice}
-        managementOverlay={
-          threadOverlay?.type === "restore" && state.threadId
-            ? {
-                title: "Checkpoint restore",
-                context: "Restore",
-                hints: [],
-                content: (
-                  <CheckpointRestore
-                    key={state.threadId}
-                    client={client}
-                    threadId={state.threadId}
-                    active={active && state.modal === null}
-                    height={layout.contentHeight}
-                    onClose={(restored) => {
-                      setThreadOverlay(null);
-                      if (restored) setComposerFocusRequest((value) => value + 1);
-                    }}
-                  />
-                ),
-              }
-            : threadOverlay?.type === "pull-request"
-              ? {
-                  title: "Pull request",
-                  context: "Pull request",
-                  hints: [
-                    { key: "C", label: "Copy URL" },
-                    { key: "R", label: "Retry" },
-                    { key: "Esc", label: "Close" },
-                  ],
-                  content: (
-                    <PullRequestPanel
-                      client={client}
-                      cwd={threadOverlay.cwd}
-                      branch={threadOverlay.branch}
-                      active={active && state.modal === null}
-                      onClose={() => setThreadOverlay(null)}
-                    />
-                  ),
-                }
-              : threadOverlay?.type === "diff" && state.threadId
-                ? {
-                    title: "Thread changes",
-                    context: "Diff",
-                    hints: [
-                      { key: "S/W", label: "Saved/working" },
-                      { key: "[/]", label: "Change scope/turn" },
-                      { key: "Tab", label: "Files/diff" },
-                      { key: "R", label: "Refresh" },
-                      { key: "Esc", label: "Close" },
-                    ],
-                    content: (
-                      <ThreadDiff
-                        client={client}
-                        threadId={state.threadId}
-                        active={active}
-                        width={Math.max(1, width - 6)}
-                        height={layout.contentHeight}
-                        onClose={() => setThreadOverlay(null)}
-                      />
-                    ),
-                  }
-                : threadOverlay?.type === "palette"
-                  ? {
-                      title: "Search and commands",
-                      context: "Command palette",
-                      hints: [
-                        { key: "Type", label: "Filter" },
-                        { key: "↑↓", label: "Select" },
-                        { key: "Enter", label: "Open" },
-                        { key: "Esc", label: "Close" },
-                      ],
-                      content: (
-                        <CommandPalette
-                          items={paletteEntries}
-                          height={layout.contentHeight}
-                          active={active}
-                          searching={threadSearch.loading}
-                          searchFailed={threadSearch.failed}
-                          searchedQuery={paletteSearchQuery}
-                          searchDebounceMs={searchDebounceMs}
-                          onSearchQueryChange={setPaletteSearchQuery}
-                          onChoose={choosePaletteEntry}
-                          onClose={closePalette}
-                        />
-                      ),
-                    }
-                  : threadOverlay?.type === "favorite-models"
-                    ? {
-                        title: "Favorite models",
-                        context: "Favorite models",
-                        hints: [
-                          { key: "Tab", label: "Models/order" },
-                          { key: "↑↓", label: "Select" },
-                          { key: "Enter", label: "Add/move" },
-                          { key: "Esc", label: "Close" },
-                        ],
-                        content: (
-                          <FavoriteModelsPanel
-                            client={client}
-                            favorites={favoriteModels}
-                            width={Math.max(1, width - 6)}
-                            height={layout.contentHeight}
-                            active={active}
-                            onChange={updateFavorites}
-                            onClose={() => setThreadOverlay(null)}
-                          />
-                        ),
-                      }
-                    : threadOverlay?.type === "archived"
-                      ? {
-                          title: "Archived threads",
-                          context: "Archived",
-                          hints: [
-                            { key: "↑↓", label: "Select" },
-                            { key: "Enter", label: "Manage" },
-                            { key: "R", label: "Refresh" },
-                            { key: "Esc", label: "Close" },
-                          ],
-                          content: (
-                            <ArchivedThreadsPanel
-                              client={client}
-                              active={active}
-                              onClose={() => setThreadOverlay(null)}
-                              onManage={(thread) =>
-                                setThreadOverlay({ type: "manage", thread, returnToArchived: true })
-                              }
-                            />
-                          ),
-                        }
-                      : threadOverlay?.type === "manage"
-                        ? {
-                            title: threadOverlay.thread.archivedAt
-                              ? "Manage archived thread"
-                              : "Manage thread",
-                            context: "Manage thread",
-                            hints: [
-                              { key: "Tab/↑↓", label: "Select" },
-                              { key: "Enter", label: "Activate" },
-                              { key: "Esc", label: "Close" },
-                            ],
-                            content: (
-                              <ThreadActionsForm
-                                client={client}
-                                initialAction={threadOverlay.initialAction ?? "rename"}
-                                thread={threadOverlay.thread}
-                                active={active}
-                                onClose={() =>
-                                  setThreadOverlay(
-                                    threadOverlay.returnToArchived ? { type: "archived" } : null,
-                                  )
-                                }
-                                onRemoved={() => {
-                                  if (threadOverlay.returnToArchived) {
-                                    setThreadOverlay({ type: "archived" });
-                                  } else {
-                                    setThreadOverlay(null);
-                                    if (
-                                      state.route === "conversation" &&
-                                      state.threadId === threadOverlay.thread.id
-                                    )
-                                      dispatch({ type: "back" });
-                                  }
-                                }}
-                              />
-                            ),
-                          }
-                        : null
-        }
+        overlays={overlayViews}
+        filtering={filtering}
+        onFilterChange={(filter) => dispatch({ type: "set-filter", filter })}
         onOpenArchived={() => dispatch({ type: "set-sidebar-view", view: "archived" })}
-        onOpenPalette={openPalette}
+        onOpenPalette={togglePalette}
         {...(selectedThread
           ? {
-              onManageThread: () =>
-                setThreadOverlay({
-                  type: "manage",
-                  thread: selectedThread,
-                  returnToArchived: false,
-                }),
+              onManageThread: () => pushOverlay({ type: "manage", threadId: selectedThread.id }),
             }
           : {})}
         onOpenProject={(projectId) => dispatch({ type: "open-project", projectId })}
+        onToggleProject={(projectId) => dispatch({ type: "toggle-project-expanded", projectId })}
         onOpenThread={(projectId, threadId) => {
           const thread = rows.threads.find((item) => item.id === threadId);
-          if (thread?.archivedAt)
-            setThreadOverlay({ type: "manage", thread, returnToArchived: false });
+          if (thread?.archivedAt) pushOverlay({ type: "manage", threadId });
           else dispatch({ type: "open-thread", projectId, threadId });
         }}
         onNewProject={() => dispatch({ type: "new-project" })}
         onNewThread={() => dispatch({ type: "new-thread" })}
-        modalContent={
-          state.modal === "new-project" ? (
-            <NewProjectForm
-              client={client}
-              height={layout.contentHeight}
-              onClose={() => dispatch({ type: "close-modal" })}
-              onCreated={(projectId) => dispatch({ type: "open-project", projectId })}
-            />
-          ) : state.modal === "new-thread" ? (
-            <NewThreadForm
-              client={client}
-              projectId={state.projectId}
-              favoriteModels={favoriteModels}
-              height={layout.contentHeight}
-              onClose={() => dispatch({ type: "close-modal" })}
-              onCreated={(projectId, threadId) =>
-                dispatch({ type: "open-thread", projectId, threadId })
-              }
-            />
-          ) : undefined
-        }
       >
         {state.route === "conversation" && state.threadId !== null ? (
           <Conversation
@@ -873,13 +676,8 @@ export function AppShell({
             threadId={state.threadId}
             width={layout.contentWidth}
             height={layout.contentHeight}
-            onHintsChange={setHotkeys}
-            active={
-              active && state.modal === null && threadOverlay === null && navigationMenu === null
-            }
+            active={active && overlays.length === 0}
             onBack={() => dispatch({ type: "back" })}
-            onHelp={() => dispatch({ type: "toggle-help" })}
-            onNewThread={() => dispatch({ type: "new-thread" })}
             onOpenThread={(threadId) => {
               const thread = rows.threads.find((item) => item.id === threadId);
               if (!thread) return false;
@@ -887,9 +685,8 @@ export function AppShell({
               return true;
             }}
             composerFocusRequest={composerFocusRequest}
-            onRestore={() => setThreadOverlay({ type: "restore" })}
-            onDiff={() => setThreadOverlay({ type: "diff" })}
-            onTerminalFocusChange={handleTerminalFocusChange}
+            onDiff={() => pushOverlay({ type: "diff" })}
+            {...(onTerminalFocusChange ? { onTerminalFocusChange } : {})}
           />
         ) : null}
       </AppShellView>

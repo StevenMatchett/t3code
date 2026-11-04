@@ -2,8 +2,6 @@ import type { ProjectId, ThreadId } from "@t3tools/contracts";
 
 export const SHELL_ROUTES = ["projects", "threads", "conversation"] as const;
 export type ShellRoute = (typeof SHELL_ROUTES)[number];
-export type ShellFocusTarget = "project-list" | "thread-list" | "conversation";
-export type ShellModal = "help" | "new-project" | "new-thread";
 export const SIDEBAR_VIEWS = ["projects", "recent", "archived"] as const;
 export type SidebarView = (typeof SIDEBAR_VIEWS)[number];
 export function nextSidebarView(view: SidebarView = "projects", offset = 1): SidebarView {
@@ -12,20 +10,54 @@ export function nextSidebarView(view: SidebarView = "projects", offset = 1): Sid
   ]!;
 }
 
+/** What sits above the workspace, bottom first. Esc removes exactly the top entry. */
+export type ShellOverlay =
+  | { readonly type: "help" }
+  | { readonly type: "new-project" }
+  | { readonly type: "new-thread" }
+  | { readonly type: "palette" }
+  | { readonly type: "favorite-models" }
+  | { readonly type: "theme" }
+  | { readonly type: "diff" }
+  | { readonly type: "restore" }
+  | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
+  | { readonly type: "rename"; readonly threadId: ThreadId }
+  | {
+      readonly type: "manage";
+      readonly threadId: ThreadId;
+      readonly initialAction?: "rename" | "delete";
+    }
+  | {
+      readonly type: "thread-menu";
+      readonly threadId: ThreadId;
+      readonly x: number;
+      readonly y: number;
+    }
+  | {
+      readonly type: "project-menu";
+      readonly projectId: ProjectId;
+      readonly x: number;
+      readonly y: number;
+    };
+
 export interface ShellState {
   readonly sidebarView?: SidebarView;
   readonly showSubagents?: boolean;
   readonly route: ShellRoute;
   readonly projectId: ProjectId | null;
   readonly threadId: ThreadId | null;
-  readonly modal: ShellModal | null;
+  readonly overlays: readonly ShellOverlay[];
+  /** Projects showing their threads in the sidebar tree. */
+  readonly expandedProjects?: readonly ProjectId[];
+  readonly filter?: string;
 }
 
 export interface ShellRows {
-  readonly projects: ReadonlyArray<{ readonly id: ProjectId }>;
+  readonly projects: ReadonlyArray<{ readonly id: ProjectId; readonly title?: string }>;
   readonly threads: ReadonlyArray<{
     readonly id: ThreadId;
     readonly projectId: ProjectId;
+    readonly title?: string;
     readonly archivedAt?: string | null;
     readonly lineage?: { readonly relationshipToParent: "fork" | "subagent" | null } | undefined;
   }>;
@@ -35,79 +67,82 @@ export function isSidebarThreadVisible(thread: ShellRows["threads"][number], sta
   return state.showSubagents || thread.lineage?.relationshipToParent !== "subagent";
 }
 
+const textMatchesFilter = (title: string | undefined, filter: string | undefined) =>
+  !filter || (title ?? "").toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase());
+
+/** Threads the sidebar lists for this state, ignoring which project is selected. */
+export function sidebarThreads<Thread extends ShellRows["threads"][number]>(
+  threads: readonly Thread[],
+  state: ShellState,
+  keepThreadId: ThreadId | null = null,
+): readonly Thread[] {
+  return threads.filter(
+    (thread) =>
+      thread.id === keepThreadId ||
+      (Boolean(thread.archivedAt) === (state.sidebarView === "archived") &&
+        isSidebarThreadVisible(thread, state) &&
+        textMatchesFilter(thread.title, state.filter)),
+  );
+}
+
+/** A project stays listed under a filter when its name or any of its threads match. */
+export function sidebarProjects<Project extends ShellRows["projects"][number]>(
+  projects: readonly Project[],
+  threads: ShellRows["threads"],
+  state: ShellState,
+): readonly Project[] {
+  if (!state.filter) return projects;
+  const matching = new Set(sidebarThreads(threads, state).map((thread) => thread.projectId));
+  return projects.filter(
+    (project) => matching.has(project.id) || textMatchesFilter(project.title, state.filter),
+  );
+}
+
 export type ShellCommand =
   | { readonly type: "toggle-subagents" }
   | { readonly type: "set-sidebar-view"; readonly view: SidebarView }
   | { readonly type: "toggle-sidebar-view" }
+  | { readonly type: "toggle-project-expanded"; readonly projectId?: ProjectId }
+  | { readonly type: "set-filter"; readonly filter: string | undefined }
   | { readonly type: "move"; readonly offset: number; readonly wrap: boolean }
   | { readonly type: "activate" }
   | { readonly type: "back" }
   | { readonly type: "toggle-help" }
   | { readonly type: "new-project" }
   | { readonly type: "new-thread"; readonly projectId?: ProjectId }
-  | { readonly type: "close-modal" }
+  | { readonly type: "push-overlay"; readonly overlay: ShellOverlay }
+  | { readonly type: "pop-overlay" }
   | { readonly type: "open-project"; readonly projectId: ProjectId }
   | { readonly type: "open-thread"; readonly projectId: ProjectId; readonly threadId: ThreadId }
   | { readonly type: "reconcile" };
 
-export interface ShellKey {
-  readonly name: string;
-  readonly shift?: boolean;
-  readonly ctrl?: boolean;
-  readonly meta?: boolean;
-  readonly option?: boolean;
-}
-
-const focusTargets = {
-  projects: ["project-list"],
-  threads: ["thread-list"],
-  conversation: ["conversation"],
-} as const satisfies Record<ShellRoute, readonly ShellFocusTarget[]>;
-
-export function getRouteFocusTargets(route: ShellRoute): readonly ShellFocusTarget[] {
-  return focusTargets[route];
-}
-
 export function createInitialShellState(route: ShellRoute = "projects"): ShellState {
-  return { route, projectId: null, threadId: null, modal: null };
+  return { route, projectId: null, threadId: null, overlays: [] };
 }
 
-export function shellCommandFromKey(key: ShellKey): ShellCommand | undefined {
-  if (key.ctrl || key.meta || key.option) return undefined;
-  switch (key.name) {
-    case "down":
-      return { type: "move", offset: 1, wrap: false };
-    case "up":
-      return { type: "move", offset: -1, wrap: false };
-    case "tab":
-      return { type: "move", offset: key.shift ? -1 : 1, wrap: true };
-    case "return":
-    case "enter":
-    case "right":
-      return { type: "activate" };
-    case "escape":
-    case "left":
-    case "backspace":
-      return { type: "back" };
-    case "?":
-      return { type: "toggle-help" };
-    case "n":
-      return { type: "new-thread" };
-    case "p":
-      return { type: "new-project" };
-    default:
-      return undefined;
-  }
+export function topOverlay(state: ShellState): ShellOverlay | null {
+  return state.overlays.at(-1) ?? null;
+}
+
+/** Opening something already in the stack returns to it, so the stack can never grow in a loop. */
+function pushOverlay(state: ShellState, overlay: ShellOverlay): ShellState {
+  const existing = state.overlays.findIndex((entry) => entry.type === overlay.type);
+  return {
+    ...state,
+    overlays:
+      existing >= 0
+        ? [...state.overlays.slice(0, existing), overlay]
+        : [...state.overlays, overlay],
+  };
 }
 
 function reconcile(state: ShellState, rows: ShellRows): ShellState {
   rows = {
     ...rows,
-    threads: rows.threads.filter(
-      (thread) =>
-        Boolean(thread.archivedAt) === (state.sidebarView === "archived") &&
-        (isSidebarThreadVisible(thread, state) ||
-          (state.route === "conversation" && thread.id === state.threadId)),
+    threads: sidebarThreads(
+      rows.threads,
+      state,
+      state.route === "conversation" ? state.threadId : null,
     ),
   };
   if (state.sidebarView === "recent" || state.sidebarView === "archived") {
@@ -123,9 +158,10 @@ function reconcile(state: ShellState, rows: ShellRows): ShellState {
       ? state
       : { ...state, threadId, projectId, route };
   }
-  const projectId = rows.projects.some((project) => project.id === state.projectId)
+  const listed = sidebarProjects(rows.projects, rows.threads, state);
+  const projectId = listed.some((project) => project.id === state.projectId)
     ? state.projectId
-    : (rows.projects[0]?.id ?? null);
+    : (listed[0]?.id ?? (state.filter ? state.projectId : null));
   const threads = rows.threads.filter((thread) => thread.projectId === projectId);
   const threadId = threads.some((thread) => thread.id === state.threadId)
     ? state.threadId
@@ -141,6 +177,11 @@ function reconcile(state: ShellState, rows: ShellRows): ShellState {
     : { ...state, projectId, threadId, route };
 }
 
+function withExpanded(state: ShellState, projectId: ProjectId | null): ShellState {
+  if (projectId === null || state.expandedProjects?.includes(projectId)) return state;
+  return { ...state, expandedProjects: [...(state.expandedProjects ?? []), projectId] };
+}
+
 export function dispatchShellCommand(
   previous: ShellState,
   command: ShellCommand,
@@ -148,7 +189,6 @@ export function dispatchShellCommand(
 ): ShellState {
   const state = reconcile(previous, rows);
   if (command.type === "set-sidebar-view") {
-    if (state.modal) return state;
     return reconcile(
       {
         ...state,
@@ -180,48 +220,78 @@ export function dispatchShellCommand(
     );
   if (command.type === "toggle-subagents")
     return reconcile({ ...state, showSubagents: !state.showSubagents }, rows);
+  if (command.type === "toggle-project-expanded") {
+    const projectId = command.projectId ?? state.projectId;
+    if (projectId === null) return state;
+    const expanded = state.expandedProjects ?? [];
+    return {
+      ...state,
+      expandedProjects: expanded.includes(projectId)
+        ? expanded.filter((id) => id !== projectId)
+        : [...expanded, projectId],
+    };
+  }
+  if (command.type === "set-filter") {
+    const { filter: _previous, ...rest } = state;
+    return reconcile(command.filter ? { ...rest, filter: command.filter } : rest, rows);
+  }
   if (command.type === "reconcile") return state;
-  if (command.type === "close-modal") return { ...state, modal: null };
-  if (command.type === "new-project") return { ...state, modal: "new-project" };
+  if (command.type === "push-overlay") return pushOverlay(state, command.overlay);
+  if (command.type === "pop-overlay") return { ...state, overlays: state.overlays.slice(0, -1) };
+  if (command.type === "new-project") return pushOverlay(state, { type: "new-project" });
   if (command.type === "new-thread") {
     const projectId = command.projectId ?? state.projectId;
     return projectId && rows.projects.some((project) => project.id === projectId)
-      ? reconcile({ ...state, projectId, modal: "new-thread" }, rows)
+      ? pushOverlay(reconcile({ ...state, projectId }, rows), { type: "new-thread" })
       : state;
   }
   if (command.type === "open-project")
     return rows.projects.some((project) => project.id === command.projectId)
-      ? reconcile(
-          {
-            ...state,
-            sidebarView: "projects",
-            route: "threads",
-            projectId: command.projectId,
-            threadId: null,
-            modal: null,
-          },
-          rows,
+      ? withExpanded(
+          reconcile(
+            {
+              ...state,
+              sidebarView: "projects",
+              route: "threads",
+              projectId: command.projectId,
+              threadId: null,
+              overlays: [],
+            },
+            rows,
+          ),
+          command.projectId,
         )
       : state;
   if (command.type === "open-thread")
     return rows.threads.some(
       (thread) => thread.id === command.threadId && thread.projectId === command.projectId,
     )
-      ? {
-          ...state,
-          ...(state.sidebarView === "archived" ? { sidebarView: "recent" as const } : {}),
-          route: "conversation",
-          projectId: command.projectId,
-          threadId: command.threadId,
-          modal: null,
-        }
+      ? withExpanded(
+          {
+            ...state,
+            ...(state.sidebarView === "archived" ? { sidebarView: "recent" as const } : {}),
+            route: "conversation",
+            projectId: command.projectId,
+            threadId: command.threadId,
+            overlays: [],
+          },
+          command.projectId,
+        )
       : state;
-  if (command.type === "toggle-help") return { ...state, modal: state.modal ? null : "help" };
-  if (state.modal)
+  if (command.type === "toggle-help")
+    return topOverlay(state)?.type === "help"
+      ? { ...state, overlays: state.overlays.slice(0, -1) }
+      : pushOverlay(state, { type: "help" });
+  // The top overlay owns navigation until it is dismissed.
+  if (state.overlays.length > 0)
     return command.type === "back" || command.type === "activate"
-      ? { ...state, modal: null }
+      ? { ...state, overlays: state.overlays.slice(0, -1) }
       : state;
-  if (command.type === "back")
+  if (command.type === "back") {
+    if (state.filter && state.route !== "conversation") {
+      const { filter: _cleared, ...rest } = state;
+      return reconcile(rest, rows);
+    }
     return state.route === "projects" ||
       (state.sidebarView !== undefined &&
         state.sidebarView !== "projects" &&
@@ -231,26 +301,20 @@ export function dispatchShellCommand(
           { ...state, route: state.route === "conversation" ? "threads" : "projects" },
           rows,
         );
+  }
   if (command.type === "activate") {
     if (state.route === "projects" && state.projectId !== null)
-      return { ...state, route: "threads" };
+      return withExpanded({ ...state, route: "threads" }, state.projectId);
     if (state.route === "threads" && state.threadId !== null)
       return { ...state, route: "conversation" };
     return state;
   }
   if (state.route === "conversation") return state;
-  rows = {
-    ...rows,
-    threads: rows.threads.filter(
-      (thread) =>
-        Boolean(thread.archivedAt) === (state.sidebarView === "archived") &&
-        isSidebarThreadVisible(thread, state),
-    ),
-  };
+  const threads = sidebarThreads(rows.threads, state);
   const items =
     state.route === "projects"
-      ? rows.projects
-      : rows.threads.filter(
+      ? sidebarProjects(rows.projects, rows.threads, state)
+      : threads.filter(
           (thread) =>
             (state.sidebarView ?? "projects") !== "projects" ||
             thread.projectId === state.projectId,
@@ -263,15 +327,12 @@ export function dispatchShellCommand(
     ? (((current + command.offset) % items.length) + items.length) % items.length
     : Math.max(0, Math.min(items.length - 1, current + command.offset));
   if (state.route === "projects") {
-    const projectId = rows.projects[next]!.id;
+    const projectId = items[next]!.id as ProjectId;
     return projectId === state.projectId
       ? state
       : reconcile({ ...state, projectId, threadId: null }, rows);
   }
-  const selected = rows.threads.filter(
-    (thread) =>
-      (state.sidebarView ?? "projects") !== "projects" || thread.projectId === state.projectId,
-  )[next]!;
+  const selected = items[next] as ShellRows["threads"][number];
   return selected.id === state.threadId
     ? state
     : { ...state, threadId: selected.id, projectId: selected.projectId };

@@ -112,7 +112,7 @@ describe("TUI session persistence", () => {
       showSubagents: true,
       projectId: null,
       threadId: null,
-      modal: null,
+      overlays: [],
     });
     first.session.close();
     expect(open(path).session.shell).toMatchObject({
@@ -128,7 +128,7 @@ describe("TUI session persistence", () => {
       sidebarView: "recent",
       projectId: ProjectId.make("alpha"),
       threadId: first.id,
-      modal: "help",
+      overlays: [{ type: "help" }],
     });
     first.actions.setRuntimeMode(first.registry, first.id, "approval-required");
     first.actions.setInteractionMode(first.registry, first.id, "plan");
@@ -142,7 +142,7 @@ describe("TUI session persistence", () => {
       sidebarView: "recent",
       projectId: "alpha",
       threadId: first.id,
-      modal: null,
+      overlays: [],
     });
     expect(second.registry.get(second.actions.state(second.id))).toMatchObject({
       draft: first.registry.get(first.actions.state(first.id)).draft,
@@ -331,7 +331,7 @@ describe("TUI session persistence", () => {
       import { openTuiSessionState } from ${JSON.stringify(new URL("./sessionStore.ts", import.meta.url).href)};
       import { AtomRegistry } from 'effect/reactivity';
       const session = openTuiSessionState({ stateDirectory: process.argv[1], environmentId: 'test-env', httpOrigin: 'http://localhost:3773', registry: AtomRegistry.make() });
-      session.saveShell({ route: 'conversation', sidebarView: 'recent', projectId: 'alpha', threadId: 'thread-0', modal: null });
+      session.saveShell({ route: 'conversation', sidebarView: 'recent', projectId: 'alpha', threadId: 'thread-0', overlays: [] });
       session.saveInteraction('thread-0', { draft: 'Saved before kill', pastes: [], attachments: [], skill: null, queue: [], attempt: null, attemptDraft: null });
       process.on('message', () => {});
       process.send('saved');

@@ -1,5 +1,5 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { useKeyboard, useRenderer } from "@opentui/react";
+import { useRenderer } from "@opentui/react";
 import { DEFAULT_TERMINAL_ID, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import {
   EMPTY_TERMINAL_BUFFER_STATE,
@@ -9,10 +9,10 @@ import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
 import { useContext, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { EmbeddedTerminalSurface } from "./embedded-terminal/index.ts";
-import type { HotkeyState } from "../ui/HotkeyBar.tsx";
 
 const discardedByClient = new WeakMap<TuiClient, Map<string, Set<string>>>();
 
@@ -45,7 +45,6 @@ export function ThreadTerminal({
   worktreePath,
   active,
   onBack,
-  onHintsChange,
   onFocusChange,
 }: {
   readonly client: TuiClient;
@@ -55,7 +54,6 @@ export function ThreadTerminal({
   readonly worktreePath: string | null;
   readonly active: boolean;
   readonly onBack: () => void;
-  readonly onHintsChange?: (state: HotkeyState) => void;
   readonly onFocusChange?: (focused: boolean) => void;
 }) {
   const terminals = client.terminals!;
@@ -113,21 +111,6 @@ export function ThreadTerminal({
   );
   const attachFailed = AsyncResult.isFailure(attachResult);
   useEffect(() => {
-    onHintsChange?.({
-      context: focused ? "Terminal" : "Shell controls",
-      hints: focused
-        ? [{ key: "Ctrl+\\", label: "Shell controls" }]
-        : [
-            { key: "Enter", label: "Focus shell" },
-            { key: "←→", label: "Switch shell" },
-            { key: "N", label: "New shell" },
-            { key: "X", label: "Close shell" },
-            { key: "Ctrl+K", label: "Search" },
-            { key: "Esc", label: "Chat" },
-          ],
-    });
-  }, [focused, onHintsChange]);
-  useEffect(() => {
     onFocusChange?.(focused);
     return () => onFocusChange?.(false);
   }, [focused, onFocusChange]);
@@ -152,6 +135,10 @@ export function ThreadTerminal({
     setHiddenIds((current) => new Set(current).add(terminalId));
     if (remaining.length === 0) onBack();
     else setTerminalId(remaining[0]!);
+  };
+  const cycleTerminal = (offset: number) => {
+    const current = Math.max(0, terminalIds.indexOf(terminalId));
+    setTerminalId(terminalIds[(current + offset + terminalIds.length) % terminalIds.length]!);
   };
   const closeTerminal = async () => {
     const summary = summaries.find(
@@ -188,19 +175,22 @@ export function ThreadTerminal({
     handledExit.current = exitKey;
     handleTerminalEnded(terminal.status);
   }, [terminal.lifecycleVersion, terminal.status, terminal.version, terminalId]);
-  useKeyboard((key) => {
-    if (!active || focused || key.ctrl || key.meta || key.option) return;
-    if (key.name === "escape") onBack();
-    else if (key.name === "return" || key.name === "enter") setFocused(true);
-    else if (key.name === "n") nextTerminal();
-    else if (key.name === "x") void closeTerminal();
-    else if (key.name === "left" || key.name === "right") {
-      const current = Math.max(0, terminalIds.indexOf(terminalId));
-      const offset = key.name === "left" ? -1 : 1;
-      setTerminalId(terminalIds[(current + offset + terminalIds.length) % terminalIds.length]!);
-    } else return;
-    key.preventDefault();
-    key.stopPropagation();
+  useKeyLayer("shell", {
+    active: active && !focused,
+    bindings: {
+      "shell.back": onBack,
+      "shell.focus": () => setFocused(true),
+      "terminal.new": nextTerminal,
+      "terminal.close": () => void closeTerminal(),
+      "shell.previous": () => cycleTerminal(-1),
+      "shell.next": () => cycleTerminal(1),
+    },
+  });
+  useKeyLayer("terminalFocus", {
+    active: active && focused,
+    modal: true,
+    capture: true,
+    bindings: { "terminalFocus.release": () => false },
   });
   return (
     <Stack flexDirection="column" width="100%" height="100%" overflow="hidden">

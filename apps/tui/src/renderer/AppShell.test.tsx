@@ -511,7 +511,7 @@ describeWithNativeFfi("connected AppShell", () => {
       delayMs: 0,
     });
     const newProject = driver.renderer.root.findDescendantById(
-      "command-palette-command:new-project",
+      "command-palette-action:project.new",
     );
     expect(newProject).toBeDefined();
     await driver.mouse.click(newProject!.screenX + 1, newProject!.screenY, MouseButtons.LEFT, {
@@ -628,8 +628,9 @@ describeWithNativeFfi("connected AppShell", () => {
     await driver.input.pressKey("ESCAPE");
     expect(fixture.managementCommands).toHaveLength(0);
     await openRename();
-    await driver.input.pressKey("HOME");
-    await driver.input.pressKey("k", { ctrl: true });
+    // Ctrl+K opens the palette everywhere, so clear the field a character at a time.
+    await driver.input.pressKey("END");
+    for (const _character of thread.title) await driver.input.pressKey("BACKSPACE");
     await click("thread-rename-save");
     expect(driver.captureFrame()).toContain("Enter a thread title.");
     expect(fixture.managementCommands).toHaveLength(0);

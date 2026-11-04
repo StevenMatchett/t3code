@@ -16,7 +16,7 @@ import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { useThemeColor } from "../ui/context.tsx";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { inlineTerminalText } from "../ui/textLayout.ts";
-import { HotkeyBar, type HotkeyHint, type HotkeyState } from "../ui/HotkeyBar.tsx";
+import { HotkeyBar } from "../ui/HotkeyBar.tsx";
 import {
   isSidebarThreadVisible,
   createInitialShellState,
@@ -26,6 +26,14 @@ import {
   type ShellRows,
   type ShellState,
 } from "./state.ts";
+
+/** One entry of the overlay stack. Lower entries stay mounted so they keep their state. */
+export interface ShellOverlayView {
+  readonly title?: string;
+  /** Floating content positions itself; everything else fills the body in a panel. */
+  readonly floating?: boolean;
+  readonly content: ReactNode;
+}
 
 export interface AppShellViewProps {
   readonly environmentId: EnvironmentId;
@@ -40,15 +48,12 @@ export interface AppShellViewProps {
   readonly error: boolean;
   readonly width: number;
   readonly height: number;
-  readonly hotkeys?: HotkeyState;
-  readonly soundShortcut?: HotkeyHint | undefined;
   readonly notice?: {
     readonly text: string;
     readonly failed: boolean;
   } | null;
   readonly children?: ReactNode;
   readonly onOpenProject?: (projectId: ProjectId) => void;
-  readonly contextMenu?: ReactNode;
   readonly onProjectContextMenu?: (
     projectId: ProjectId,
     position: { x: number; y: number },
@@ -60,13 +65,12 @@ export interface AppShellViewProps {
   readonly onOpenThread?: (projectId: ProjectId, threadId: ThreadId) => void;
   readonly onNewProject?: () => void;
   readonly onNewThread?: () => void;
-  readonly modalContent?: ReactNode;
-  readonly managementOverlay?: {
-    readonly title: string;
-    readonly context: string;
-    readonly hints: readonly HotkeyHint[];
-    readonly content: ReactNode;
-  } | null;
+  readonly overlays?: ReadonlyArray<
+    ShellOverlayView & { readonly key: string; readonly visible: boolean }
+  >;
+  readonly filtering?: boolean;
+  readonly onFilterChange?: (filter: string) => void;
+  readonly onToggleProject?: (projectId: ProjectId) => void;
   readonly onOpenArchived?: () => void;
   readonly onManageThread?: () => void;
   readonly onOpenPalette?: () => void;
@@ -196,53 +200,6 @@ function List({
   );
 }
 
-function Help() {
-  return (
-    <Stack flexDirection="column" gap={1}>
-      <Text strong>Keyboard help</Text>
-      <Text tone="accent">NAVIGATION</Text>
-      <Text>Up/Down or Tab Select Enter Open</Text>
-      <Text>Left Projects Right Recent threads (sidebar)</Text>
-      <Text>Esc Back R Reconnect</Text>
-      <Text>Ctrl+B Cycle Projects / Recent / Archived sidebar</Text>
-      <Text>Ctrl+S Show/hide subagents in sidebar (hidden on launch)</Text>
-      <Text>Ctrl+K Search conversation output, projects, threads, and commands</Text>
-      <Text>Ctrl+G Toggle notification sounds</Text>
-      <Text tone="accent">CONVERSATION</Text>
-      <Text>Enter / i Write prompt Esc Return to history</Text>
-      <Text>Enter Send Shift+Enter New line</Text>
-      <Text>Ctrl+P Show/hide pasted text; Ctrl+O Insert pasted text into the prompt to edit</Text>
-      <Text>Ctrl+R Toggle rendered Markdown / raw source in output</Text>
-      <Text>Up in an empty message recalls prompts; Down moves forward</Text>
-      <Text>Click model/reasoning or Tab then Enter</Text>
-      <Text>/ Find in thread · In message box: search skills</Text>
-      <Text>Mouse wheel / Up/Down / PgUp/PgDn Scroll End Follow latest</Text>
-      <Text>hjkl Move · w/b Words · 0/$ Line edges · gg/G First/last</Text>
-      <Text>v/V Visual/line selection · y/yy Yank · p Paste into prompt</Text>
-      <Text>Esc Clear selection/back · Ctrl+U/D Half page · Tab Agents</Text>
-      <Text>A Requests T Tool detail Ctrl+X Stop turn</Text>
-      <Text>Tab Agents, Enter opens a subagent's thread · U Back to the parent thread</Text>
-      <Text>E Edit from checkpoint: rewind chat, optionally revert files</Text>
-      <Text>Ctrl+T Open thread shell Ctrl+\ Release shell focus</Text>
-      <Text>N New thread (from navigation or history)</Text>
-      <Text>Ctrl+K Favorite models: choose and rank the models new threads start with</Text>
-      <Text>P New project</Text>
-      <Text>M Manage thread Shift+A Archived threads (navigation)</Text>
-      <Text>D View saved thread changes (navigation or history)</Text>
-      <Text>O Open selected output link (history); open branch PR (thread list)</Text>
-      <Text>Right-click an output link: Copy link / Go to link (no selection needed)</Text>
-      <Text tone="muted">Ctrl+C asks before closing the TUI; the shared server keeps running.</Text>
-      <Text tone="muted">
-        Provider switching in existing threads and Git actions remain pending.
-      </Text>
-    </Stack>
-  );
-}
-
-function withSoundHint(hints: readonly HotkeyHint[], sound: HotkeyHint | undefined) {
-  return sound ? [...hints.slice(0, 2), sound, ...hints.slice(2)] : hints;
-}
-
 export function AppShellView({
   environmentId,
   live,
@@ -256,25 +213,27 @@ export function AppShellView({
   error,
   width,
   height,
-  hotkeys,
-  soundShortcut,
   notice,
   children,
   onOpenProject,
   onOpenThread,
   onThreadContextMenu,
   onProjectContextMenu,
-  contextMenu,
   onNewProject,
   onNewThread,
-  modalContent,
-  managementOverlay,
+  overlays = [],
+  filtering = false,
+  onFilterChange,
+  onToggleProject,
   onOpenArchived,
   onManageThread,
   onOpenPalette,
   onToggleSidebarView,
 }: AppShellViewProps) {
   const layout = calculateShellLayout(width, height);
+  const overlayOpen = overlays.length > 0;
+  // Floating dialogs keep the workspace visible behind them.
+  const bodyCovered = overlays.some((overlay) => !overlay.floating);
   const background = useThemeColor("panel");
   const project = projects.find((item) => item.id === state.projectId);
   const archived = state.sidebarView === "archived";
@@ -286,41 +245,6 @@ export function AppShellView({
     isSidebarThreadVisible(thread, state),
   );
   const conversation = state.route === "conversation";
-  const navigationHints: readonly HotkeyHint[] = browsingProjects
-    ? [
-        { key: "↑↓", label: "Select" },
-        { key: "Enter", label: "Open" },
-        { key: "←/→", label: "View" },
-        { key: "Ctrl+B", label: "Toggle view" },
-        { key: "Ctrl+S", label: state.showSubagents ? "Hide subagents" : "Show subagents" },
-        { key: "P", label: "New project" },
-        { key: "⇧A", label: "Archived" },
-        { key: "Ctrl+K", label: "Search" },
-        { key: "?", label: "Help" },
-      ]
-    : archived
-      ? [
-          { key: "↑↓", label: "Select" },
-          { key: "Enter", label: "Manage / restore" },
-          { key: "←/→", label: "View" },
-          { key: "Ctrl+B", label: "Cycle view" },
-          { key: "Ctrl+S", label: state.showSubagents ? "Hide subagents" : "Show subagents" },
-          { key: "R", label: "Refresh" },
-        ]
-      : [
-          { key: "↑↓", label: "Select" },
-          { key: "Enter", label: "Open" },
-          { key: "←/→", label: "View" },
-          { key: "Ctrl+B", label: "Toggle view" },
-          { key: "Ctrl+S", label: state.showSubagents ? "Hide subagents" : "Show subagents" },
-          { key: "N", label: "New thread" },
-          { key: "M", label: "Manage" },
-          { key: "D", label: "Diff" },
-          { key: "O", label: "Open PR" },
-          { key: "⇧A", label: "Archived" },
-          { key: "Ctrl+K", label: "Search" },
-          { key: "Esc", label: "Projects" },
-        ];
   const title = recent
     ? `${archived ? "Archived" : "Recent"} threads (${visibleThreads.length})`
     : browsingProjects
@@ -407,7 +331,7 @@ export function AppShellView({
         count={Math.max(1, Math.floor((layout.contentHeight - 4) / (recent ? 2 : 1)))}
         empty={empty}
         active={!conversation}
-        visible={state.modal === null}
+        visible={!overlayOpen}
         onContextMenu={(id, position) => {
           if (browsingProjects) {
             const project = projects.find((item) => item.id === id);
@@ -490,7 +414,7 @@ export function AppShellView({
             width={17}
             flexShrink={0}
             onMouseDown={(event) => {
-              if (event.button !== 0 || state.modal !== null) return;
+              if (event.button !== 0 || overlayOpen) return;
               event.preventDefault();
               event.stopPropagation();
               onNewProject();
@@ -508,7 +432,7 @@ export function AppShellView({
             width={12}
             flexShrink={0}
             onMouseDown={(event) => {
-              if (event.button !== 0 || state.modal !== null || managementOverlay) return;
+              if (event.button !== 0 || overlayOpen) return;
               event.preventDefault();
               event.stopPropagation();
               onOpenPalette();
@@ -526,7 +450,7 @@ export function AppShellView({
             width={16}
             flexShrink={0}
             onMouseDown={(event) => {
-              if (event.button !== 0 || state.modal !== null) return;
+              if (event.button !== 0 || overlayOpen) return;
               event.preventDefault();
               event.stopPropagation();
               onNewThread();
@@ -544,7 +468,7 @@ export function AppShellView({
             width={11}
             flexShrink={0}
             onMouseDown={(event) => {
-              if (event.button !== 0 || state.modal !== null || managementOverlay) return;
+              if (event.button !== 0 || overlayOpen) return;
               event.preventDefault();
               event.stopPropagation();
               onManageThread();
@@ -562,7 +486,7 @@ export function AppShellView({
             width={12}
             flexShrink={0}
             onMouseDown={(event) => {
-              if (event.button !== 0 || state.modal !== null || managementOverlay) return;
+              if (event.button !== 0 || overlayOpen) return;
               event.preventDefault();
               event.stopPropagation();
               onOpenArchived();
@@ -580,13 +504,7 @@ export function AppShellView({
       </Stack>
       <Stack height={1} flexShrink={0} />
       <Stack height={layout.bodyHeight} flexShrink={0} flexDirection="row" gap={1}>
-        <Stack
-          visible={state.modal === null && !managementOverlay}
-          width="100%"
-          height="100%"
-          flexDirection="row"
-          gap={1}
-        >
+        <Stack visible={!bodyCovered} width="100%" height="100%" flexDirection="row" gap={1}>
           {layout.split ? (
             <Panel
               title={title}
@@ -614,45 +532,25 @@ export function AppShellView({
             {conversation ? children : layout.split ? preview : navigation}
           </Panel>
         </Stack>
-        {state.modal ? (
-          <Panel
-            position="absolute"
-            top={0}
-            left={0}
-            width="100%"
-            height="100%"
-            title={
-              state.modal === "new-thread"
-                ? "New thread"
-                : state.modal === "new-project"
-                  ? "New project"
-                  : "Help"
-            }
-            borderTone="borderFocused"
-            flexDirection="column"
-          >
-            {state.modal === "new-thread" || state.modal === "new-project" ? (
-              modalContent
-            ) : (
-              <Help />
-            )}
-          </Panel>
-        ) : null}
-        {managementOverlay ? (
-          <Panel
-            id="thread-management-overlay"
-            position="absolute"
-            top={0}
-            left={0}
-            width="100%"
-            height="100%"
-            title={managementOverlay.title}
-            borderTone="borderFocused"
-            flexDirection="column"
-          >
-            {managementOverlay.content}
-          </Panel>
-        ) : null}
+        {overlays
+          .filter((overlay) => !overlay.floating)
+          .map((overlay) => (
+            <Panel
+              key={overlay.key}
+              id="thread-management-overlay"
+              visible={overlay.visible}
+              position="absolute"
+              top={0}
+              left={0}
+              width="100%"
+              height="100%"
+              {...(overlay.title ? { title: overlay.title } : {})}
+              borderTone="borderFocused"
+              flexDirection="column"
+            >
+              {overlay.content}
+            </Panel>
+          ))}
       </Stack>
       {notice ? (
         <Stack height={2} flexShrink={0}>
@@ -667,43 +565,24 @@ export function AppShellView({
           </Text>
         </Stack>
       ) : (
-        <HotkeyBar
-          width={Math.max(1, width - 2)}
-          context={
-            managementOverlay?.context ??
-            (state.modal === "new-thread"
-              ? "New thread"
-              : state.modal === "new-project"
-                ? "New project"
-                : state.modal
-                  ? "Help"
-                  : conversation
-                    ? (hotkeys?.context ?? "Conversation")
-                    : browsingProjects
-                      ? "Projects"
-                      : "Threads")
-          }
-          hints={withSoundHint(
-            managementOverlay?.hints ??
-              (state.modal === "new-thread" || state.modal === "new-project"
-                ? [
-                    { key: "Tab", label: "Next field" },
-                    { key: "Enter", label: "Activate" },
-                    { key: "Esc", label: "Close" },
-                  ]
-                : state.modal
-                  ? [{ key: "Esc", label: "Close" }]
-                  : conversation
-                    ? (hotkeys?.hints ?? [
-                        { key: "Enter", label: "Write" },
-                        { key: "Esc", label: "Threads" },
-                      ])
-                    : navigationHints),
-            soundShortcut,
-          )}
-        />
+        <HotkeyBar width={Math.max(1, width - 2)} />
       )}
-      {contextMenu}
+      {overlays
+        .filter((overlay) => overlay.floating)
+        .map((overlay) => (
+          <Stack
+            key={overlay.key}
+            visible={overlay.visible}
+            position="absolute"
+            top={0}
+            left={0}
+            width="100%"
+            height="100%"
+            zIndex={100}
+          >
+            {overlay.content}
+          </Stack>
+        ))}
     </Stack>
   );
 }

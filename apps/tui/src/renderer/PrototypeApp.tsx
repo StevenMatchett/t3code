@@ -1,8 +1,9 @@
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useTerminalDimensions } from "@opentui/react";
 import { useState } from "react";
 
 import { AppShell } from "./AppShell.tsx";
 import type { TuiClient } from "../connection/clientRuntime.ts";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { useThemeColor } from "../ui/context.tsx";
@@ -14,7 +15,6 @@ export interface PrototypeAppProps {
 
 export function PrototypeApp({ onInterrupt, client }: PrototypeAppProps) {
   const [confirming, setConfirming] = useState(false);
-  const [terminalFocused, setTerminalFocused] = useState(false);
   const [selection, setSelection] = useState<"cancel" | "quit">("cancel");
   const { width, height } = useTerminalDimensions();
   const selectedBackground = useThemeColor("selection");
@@ -28,24 +28,25 @@ export function PrototypeApp({ onInterrupt, client }: PrototypeAppProps) {
     if (selection === "quit") onInterrupt();
     else closeConfirmation();
   };
-  useKeyboard((key) => {
-    if (key.ctrl && key.name.toLowerCase() === "c") {
-      if (terminalFocused) return;
-      key.preventDefault();
-      key.stopPropagation();
-      if (confirming) onInterrupt();
-      else setConfirming(true);
-      return;
-    }
-    if (!confirming || key.ctrl || key.meta || key.option) return;
-    if (key.name === "escape" || key.name.toLowerCase() === "n") closeConfirmation();
-    else if (key.name.toLowerCase() === "y" || key.name.toLowerCase() === "q") onInterrupt();
-    else if (key.name === "tab" || key.name === "left" || key.name === "right")
-      setSelection((current) => (current === "cancel" ? "quit" : "cancel"));
-    else if ((key.name === "return" || key.name === "enter") && !key.repeated) confirm();
-    else return;
-    key.preventDefault();
-    key.stopPropagation();
+  const switchSelection = () =>
+    setSelection((current) => (current === "cancel" ? "quit" : "cancel"));
+  useKeyLayer("app", {
+    bindings: {
+      "app.quit": () => {
+        if (confirming) onInterrupt();
+        else setConfirming(true);
+      },
+    },
+  });
+  useKeyLayer("quit", {
+    active: confirming,
+    modal: true,
+    bindings: {
+      "quit.confirm": onInterrupt,
+      "quit.cancel": closeConfirmation,
+      "quit.switch": switchSelection,
+      "quit.activate": confirm,
+    },
   });
 
   const button = (id: "cancel" | "quit", label: string) => (
@@ -71,12 +72,7 @@ export function PrototypeApp({ onInterrupt, client }: PrototypeAppProps) {
 
   return (
     <Stack width="100%" height="100%">
-      <AppShell
-        client={client}
-        initialRoute="projects"
-        active={!confirming}
-        onTerminalFocusChange={setTerminalFocused}
-      />
+      <AppShell client={client} initialRoute="projects" active={!confirming} />
       {confirming ? (
         <Panel
           id="exit-confirmation"

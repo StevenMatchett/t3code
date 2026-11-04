@@ -1,10 +1,10 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
 import type { ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useContext, useMemo, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText, wrapTerminalLines } from "../ui/textLayout.ts";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
@@ -142,26 +142,28 @@ export function ThreadDiff({
     if (focus === "files") selectFile(fileIndex);
     else scroll(lineIndex);
   };
-  useKeyboard((key) => {
-    if (!active || key.ctrl || key.meta || key.option) return;
-    if (key.name === "escape") onClose();
-    else if (key.name === "s") changeScope("saved");
-    else if (key.name === "w") changeScope("working");
-    else if (key.name === "[") cycleScope(-1);
-    else if (key.name === "]") cycleScope(1);
-    else if (key.name === "r") query?.refresh();
-    else if (key.name === "tab") setFocus((value) => (value === "files" ? "diff" : "files"));
-    else if (key.name === "return" || key.name === "right") setFocus("diff");
-    else if (key.name === "left") setFocus("files");
-    else if (key.name === "up") move(selected - 1, start - 1);
-    else if (key.name === "down") move(selected + 1, start + 1);
-    else if (key.name === "pageup") move(selected - count, start - count);
-    else if (key.name === "pagedown") move(selected + count, start + count);
-    else if (key.name === "home") move(0, 0);
-    else if (key.name === "end") move(files.length - 1, maximum);
-    else return;
-    key.preventDefault();
-    key.stopPropagation();
+  useKeyLayer("diff", {
+    active,
+    modal: true,
+    bindings: {
+      "diff.close": onClose,
+      "diff.saved": () => changeScope("saved"),
+      "diff.working": () => changeScope("working"),
+      "diff.previousScope": () => cycleScope(-1),
+      "diff.nextScope": () => cycleScope(1),
+      "diff.refresh": () => {
+        query?.refresh();
+      },
+      "diff.switchPane": () => setFocus((value) => (value === "files" ? "diff" : "files")),
+      "diff.openFile": () => setFocus("diff"),
+      "diff.files": () => setFocus("files"),
+      "diff.up": () => move(selected - 1, start - 1),
+      "diff.down": () => move(selected + 1, start + 1),
+      "diff.pageUp": () => move(selected - count, start - count),
+      "diff.pageDown": () => move(selected + count, start + count),
+      "diff.top": () => move(0, 0),
+      "diff.bottom": () => move(files.length - 1, maximum),
+    },
   });
   const scopeButton = (label: string, action: () => void) => (
     <Text

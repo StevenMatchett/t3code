@@ -1,5 +1,4 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
 import type {
   ModelSelection,
   OrchestrationProjectShell,
@@ -22,6 +21,7 @@ import {
 import { permissionChoices } from "../features/chat/composerModes.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { useThemeColor } from "../ui/context.tsx";
@@ -55,11 +55,10 @@ export function NewThreadForm(props: Props) {
     client.newThreads.reset(registry);
     onCreated(created.projectId, created.id);
   }, [created, registry, client, onCreated]);
-  useKeyboard((key) => {
-    if (key.name !== "escape" || (project && settings && catalog.status === "live")) return;
-    key.preventDefault();
-    key.stopPropagation();
-    props.onClose();
+  useKeyLayer("newThread", {
+    modal: true,
+    active: !(project && settings && catalog.status === "live"),
+    bindings: { "newThread.close": props.onClose },
   });
   if (!project) return <Text tone="danger">The project is no longer available. Esc closes.</Text>;
   if (!settings || catalog.status !== "live")
@@ -213,50 +212,54 @@ function Fields({
     setModelMenu(false);
     setFocus("model");
   };
-  useKeyboard((key) => {
-    if (key.ctrl || key.meta || key.option) return;
-    if (permissionsMenu) {
-      if (key.name === "escape") setPermissionsMenu(false);
-      else if (key.name === "up") setCursor((value) => Math.max(0, value - 1));
-      else if (key.name === "down")
-        setCursor((value) => Math.min(permissionChoices.length - 1, value + 1));
-      else if ((key.name === "return" || key.name === "enter") && !key.repeated) {
-        setRuntimeMode(permissionChoices[cursor]!.id);
-        setPermissionsMenu(false);
-      } else return;
-    } else if (modelMenu) {
-      switch (key.name) {
-        case "escape":
-          setModelMenu(false);
-          break;
-        case "up":
-          setCursor((value) => Math.max(0, value - 1));
-          break;
-        case "down":
-          setCursor((value) => Math.min(Math.max(0, filtered.length - 1), value + 1));
-          break;
-        case "return":
-        case "enter":
-          if (!key.repeated) chooseModel(Math.min(cursor, filtered.length - 1));
-          break;
-        default:
-          return;
-      }
-    } else if (key.name === "escape") activate("cancel");
-    else if (key.name === "tab") advance(key.shift ? -1 : 1);
-    else if (key.name === "up" || key.name === "down") advance(key.name === "up" ? -1 : 1);
-    else if ((key.name === "left" || key.name === "right") && focus !== "title" && focus !== "base")
-      advance(key.name === "left" ? -1 : 1);
-    else if (
-      (key.name === "enter" ||
-        key.name === "return" ||
-        (key.name === "space" && focus !== "title" && focus !== "base")) &&
-      !key.repeated
-    )
-      activate(focus);
-    else return;
-    key.preventDefault();
-    key.stopPropagation();
+  const menuOpen = permissionsMenu || modelMenu;
+  const moveCursor = (offset: number) => {
+    const last = permissionsMenu ? permissionChoices.length - 1 : Math.max(0, filtered.length - 1);
+    setCursor((value) => Math.max(0, Math.min(last, value + offset)));
+  };
+  useKeyLayer("newThread", {
+    modal: true,
+    typing: modelMenu || focus === "title" || focus === "base",
+    bindings: {
+      "newThread.close": () => {
+        if (permissionsMenu) setPermissionsMenu(false);
+        else if (modelMenu) setModelMenu(false);
+        else activate("cancel");
+      },
+      "newThread.next": (key) => {
+        if (menuOpen) {
+          if (key?.name === "down") moveCursor(1);
+          else return false;
+        } else advance(1);
+      },
+      "newThread.previous": (key) => {
+        if (menuOpen) {
+          if (key?.name === "up") moveCursor(-1);
+          else return false;
+        } else advance(-1);
+      },
+      "newThread.previousOption": {
+        enabled: !menuOpen && focus !== "title" && focus !== "base",
+        run: () => advance(-1),
+      },
+      "newThread.nextOption": {
+        enabled: !menuOpen && focus !== "title" && focus !== "base",
+        run: () => advance(1),
+      },
+      "newThread.activate": (key) => {
+        if (permissionsMenu) {
+          if (key?.name === "space") return false;
+          setRuntimeMode(permissionChoices[cursor]!.id);
+          setPermissionsMenu(false);
+        } else if (modelMenu) {
+          if (key?.name === "space") return false;
+          chooseModel(Math.min(cursor, filtered.length - 1));
+        } else {
+          if (key?.name === "space" && (focus === "title" || focus === "base")) return false;
+          activate(focus);
+        }
+      },
+    },
   });
   const button = (id: string, text: string, selected = false) => (
     <Stack

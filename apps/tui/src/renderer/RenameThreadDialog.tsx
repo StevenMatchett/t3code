@@ -1,9 +1,9 @@
 import type { TuiThreadShell } from "../connection/models.ts";
 import { RegistryContext } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
 
 import { useContext, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
@@ -43,24 +43,20 @@ export function RenameThreadDialog({
       setPending(false);
     }
   };
-  useKeyboard((key) => {
-    if (pending) {
-      key.preventDefault();
-      key.stopPropagation();
-      return;
-    }
-    if (key.name === "escape") onClose();
-    else if (key.name === "tab") {
-      const targets = ["title", "save", "cancel"] as const;
-      setTarget(targets[(targets.indexOf(target) + (key.shift ? 2 : 1)) % targets.length]!);
-    } else if (key.name === "return" || key.name === "enter") {
-      if (!key.repeated) {
+  const targets = ["title", "save", "cancel"] as const;
+  useKeyLayer("rename", {
+    modal: true,
+    typing: target === "title",
+    ...(pending ? { raw: () => true } : {}),
+    bindings: {
+      "rename.close": onClose,
+      "rename.next": () => setTarget(targets[(targets.indexOf(target) + 1) % targets.length]!),
+      "rename.previous": () => setTarget(targets[(targets.indexOf(target) + 2) % targets.length]!),
+      "rename.confirm": () => {
         if (target === "cancel") onClose();
         else void save();
-      }
-    } else return;
-    key.preventDefault();
-    key.stopPropagation();
+      },
+    },
   });
   return (
     <Stack

@@ -1,5 +1,4 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
 import {
   type ThreadPendingApproval as PendingApproval,
   type ThreadPendingUserInput as PendingUserInput,
@@ -12,6 +11,7 @@ import {
   answersAreComplete,
   type QuestionAnswers,
 } from "../features/chat/interactions.ts";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { inlineTerminalText, wrapTerminalLines } from "../ui/textLayout.ts";
@@ -54,41 +54,30 @@ export function Approval({
     width,
   );
   const count = Math.max(1, height - options.length - 4);
-  useKeyboard((key) => {
-    if (!active || key.ctrl || key.meta || key.option) return;
-    switch (key.name) {
-      case "escape":
-        onBack();
-        break;
-      case "pageup":
-        setOffset((value) => Math.max(0, value - count));
-        break;
-      case "pagedown":
-        setOffset((value) => Math.min(Math.max(0, lines.length - count), value + count));
-        break;
-      case "up":
+  useKeyLayer("approval", {
+    active,
+    bindings: {
+      "approval.back": onBack,
+      "approval.pageUp": () => setOffset((value) => Math.max(0, value - count)),
+      "approval.pageDown": () =>
+        setOffset((value) => Math.min(Math.max(0, lines.length - count), value + count)),
+      "approval.up": () => {
         setChoice((value) => Math.max(0, value - 1));
         setOffset(0);
-        break;
-      case "down":
+      },
+      "approval.down": () => {
         setChoice((value) => Math.min(options.length - 1, value + 1));
         setOffset(0);
-        break;
-      case "return":
-      case "enter":
-        if (!waiting) {
-          void client.actions.reply(registry, threadId, {
-            kind: "approval",
-            requestId: request.requestId,
-            decision: selected.decision,
-          });
-        }
-        break;
-      default:
-        return;
-    }
-    key.preventDefault();
-    key.stopPropagation();
+      },
+      "approval.submit": () => {
+        if (waiting) return;
+        void client.actions.reply(registry, threadId, {
+          kind: "approval",
+          requestId: request.requestId,
+          decision: selected.decision,
+        });
+      },
+    },
   });
   return (
     <Stack flexDirection="column" height="100%" overflow="hidden">
@@ -218,56 +207,53 @@ export function Questions({
     } else if (index < continueIndex) beginCustomAnswer();
     else continueOrSubmit();
   };
-  useKeyboard((key) => {
-    if (!active || key.ctrl || key.meta || key.option) return;
-    if (editing) {
-      if (key.name !== "escape") return;
-      setEditing(false);
-    } else
-      switch (key.name) {
-        case "escape":
-          onBack();
-          break;
-        case "left":
-          if (questionIndex > 0) {
-            const previousIndex = questionIndex - 1;
-            const previous = request.questions[previousIndex]!;
-            setQuestionIndex(previousIndex);
-            setChoice(0);
-            setEditing(previous.options.length === 0 && previous.allowCustomAnswer !== false);
-            setOffset(0);
-          }
-          break;
-        case "up":
+  const moveChoice = (offset: number) => {
+    setChoice((value) => (value + offset + continueIndex + 1) % (continueIndex + 1));
+    setOffset(0);
+  };
+  useKeyLayer("question", {
+    active,
+    typing: editing,
+    bindings: {
+      "question.back": () => {
+        if (editing) setEditing(false);
+        else onBack();
+      },
+      "question.previous": {
+        enabled: !editing && questionIndex > 0,
+        run: () => {
+          const previousIndex = questionIndex - 1;
+          const previous = request.questions[previousIndex]!;
+          setQuestionIndex(previousIndex);
+          setChoice(0);
+          setEditing(previous.options.length === 0 && previous.allowCustomAnswer !== false);
+          setOffset(0);
+        },
+      },
+      "question.up": {
+        enabled: !editing,
+        run: () => {
           setChoice((value) => Math.max(0, value - 1));
           setOffset(0);
-          break;
-        case "down":
-        case "tab":
-          setChoice((value) => (value + (key.shift ? continueIndex : 1)) % (continueIndex + 1));
-          setOffset(0);
-          break;
-        case "pageup":
-          setOffset((value) => Math.max(0, value - count));
-          break;
-        case "pagedown":
-          setOffset((value) => Math.min(Math.max(0, lines.length - count), value + count));
-          break;
-        case "space":
-          if (!waiting && choice < question.options.length) toggle();
-          break;
-        case "e":
-          if (!waiting && canCustom) beginCustomAnswer();
-          break;
-        case "return":
-        case "enter":
-          activate();
-          break;
-        default:
-          return;
-      }
-    key.preventDefault();
-    key.stopPropagation();
+        },
+      },
+      "question.down": { enabled: !editing, run: () => moveChoice(1) },
+      "question.previousChoice": { enabled: !editing, run: () => moveChoice(-1) },
+      "question.pageUp": {
+        enabled: !editing,
+        run: () => setOffset((value) => Math.max(0, value - count)),
+      },
+      "question.pageDown": {
+        enabled: !editing,
+        run: () => setOffset((value) => Math.min(Math.max(0, lines.length - count), value + count)),
+      },
+      "question.toggle": {
+        enabled: !editing && !waiting && choice < question.options.length,
+        run: () => toggle(),
+      },
+      "question.custom": { enabled: !editing && !waiting && canCustom, run: beginCustomAnswer },
+      "question.activate": { enabled: !editing, run: () => activate() },
+    },
   });
   const items = [
     ...question.options.map((option) => ({

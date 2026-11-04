@@ -1,9 +1,10 @@
 import { RegistryContext } from "@effect/atom-react";
-import { useKeyboard, useRenderer } from "@opentui/react";
+import { useRenderer } from "@opentui/react";
 import type { GitResolvedPullRequest } from "@t3tools/contracts";
 import { useContext, useEffect, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { openBrowser } from "../platform/browser.ts";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 
@@ -59,17 +60,18 @@ export function PullRequestPanel({
           : "Clipboard unavailable; use the link below.",
       );
   };
-  useKeyboard((key) => {
-    if (!active || key.ctrl || key.meta || key.option) return;
-    if (key.name === "escape") onClose();
-    else if (key.name === "c") copy();
-    else if (key.name === "r" && !key.repeated) {
-      setRequest(null);
-      setStatus("Finding pull request...");
-      setAttempt((value) => value + 1);
-    } else return;
-    key.preventDefault();
-    key.stopPropagation();
+  useKeyLayer("pullRequest", {
+    active,
+    modal: true,
+    bindings: {
+      "pullRequest.close": onClose,
+      "pullRequest.copy": copy,
+      "pullRequest.retry": () => {
+        setRequest(null);
+        setStatus("Finding pull request...");
+        setAttempt((value) => value + 1);
+      },
+    },
   });
   return (
     <Stack flexDirection="column" gap={1}>

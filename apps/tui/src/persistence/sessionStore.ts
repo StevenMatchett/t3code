@@ -226,10 +226,16 @@ export function openTuiSessionState(options: {
         report();
       }
     },
-    shell: shell ? { ...shell, modal: null } : undefined,
+    shell: shell ? { ...shell, overlays: [] } : undefined,
     interactions,
-    saveShell: ({ route, sidebarView, projectId, threadId }) =>
-      save("shell", { route, sidebarView: sidebarView ?? "projects", projectId, threadId }),
+    saveShell: ({ route, sidebarView, projectId, threadId, expandedProjects }) =>
+      save("shell", {
+        route,
+        sidebarView: sidebarView ?? "projects",
+        projectId,
+        threadId,
+        ...(expandedProjects?.length ? { expandedProjects } : {}),
+      }),
     saveInteraction: (
       id,
       {

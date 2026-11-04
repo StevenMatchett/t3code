@@ -1,5 +1,4 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
 import {
   ensureBrowseDirectoryPath,
   getBrowseParentPath,
@@ -10,6 +9,7 @@ import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { defaultCloneDestination } from "../features/projects/newProject.ts";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { useThemeColor } from "../ui/context.tsx";
@@ -150,18 +150,24 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
     if (target === "clone") void client.newProjects.cloneGitHub(registry, url, destination);
   };
 
-  useKeyboard((key) => {
-    if (key.ctrl || key.meta || key.option) return;
-    if (key.name === "escape") activate("cancel");
-    else if (key.name === "tab") advance(key.shift ? -1 : 1);
-    else if (focus === "tree" && (key.name === "up" || key.name === "down"))
-      setTreeIndex((index) =>
-        Math.max(0, Math.min(treeEntries.length - 1, index + (key.name === "up" ? -1 : 1))),
-      );
-    else if ((key.name === "return" || key.name === "enter") && !key.repeated) activate(focus);
-    else return;
-    key.preventDefault();
-    key.stopPropagation();
+  const movingTree = focus === "tree";
+  useKeyLayer("newProject", {
+    modal: true,
+    typing: focus !== "tree" && focus !== "local" && focus !== "github",
+    bindings: {
+      "newProject.close": () => activate("cancel"),
+      "newProject.next": () => advance(1),
+      "newProject.previous": () => advance(-1),
+      "newProject.treeUp": {
+        enabled: movingTree,
+        run: () => setTreeIndex((index) => Math.max(0, index - 1)),
+      },
+      "newProject.treeDown": {
+        enabled: movingTree,
+        run: () => setTreeIndex((index) => Math.min(treeEntries.length - 1, index + 1)),
+      },
+      "newProject.activate": () => activate(focus),
+    },
   });
 
   const button = (id: string, label: string, selected = false) => (

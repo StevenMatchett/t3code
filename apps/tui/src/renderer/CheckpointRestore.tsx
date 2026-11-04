@@ -1,10 +1,10 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { useKeyboard } from "@opentui/react";
 import type { MessageId, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useContext, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { checkpointRestoreTargets } from "../features/chat/checkpointRestore.ts";
+import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
@@ -48,26 +48,35 @@ export function CheckpointRestore({
     setMessageId(id);
     setChoice(0);
   };
-  useKeyboard((key) => {
-    if (!active || key.ctrl || key.meta || key.option) return;
-    if (key.name === "escape") {
-      if (pending) return;
-      if (messageId) setMessageId(null);
-      else onClose();
-    } else if (pending) return;
-    else if (key.name === "up" || key.name === "down" || key.name === "tab") {
-      const offset = key.name === "up" || (key.name === "tab" && key.shift) ? -1 : 1;
-      if (messageId) setChoice((choice + offset + 3) % 3);
-      else setCursor(Math.max(0, Math.min(targets.length - 1, selected + offset)));
-    } else if (key.name === "return" || key.name === "enter") {
-      if (key.repeated) return;
-      if (messageId) void choose(choice);
-      else if (targets[selected]) select(targets[selected].message.id);
-    } else if (key.name === "l" && !messageId && page?.hasMoreHistory && !page.loading) {
-      client.loadOlder(registry, threadId);
-    } else return;
-    key.preventDefault();
-    key.stopPropagation();
+  const move = (offset: number) => {
+    if (messageId) setChoice((choice + offset + 3) % 3);
+    else setCursor(Math.max(0, Math.min(targets.length - 1, selected + offset)));
+  };
+  useKeyLayer("restore", {
+    active,
+    modal: true,
+    bindings: {
+      "restore.back": () => {
+        if (pending) return;
+        if (messageId) setMessageId(null);
+        else onClose();
+      },
+      "restore.up": { enabled: !pending, run: () => move(-1) },
+      "restore.down": { enabled: !pending, run: () => move(1) },
+      "restore.confirm": {
+        enabled: !pending,
+        run: () => {
+          if (messageId) void choose(choice);
+          else if (targets[selected]) select(targets[selected].message.id);
+        },
+      },
+      "restore.loadOlder": {
+        enabled: !pending && !messageId && Boolean(page?.hasMoreHistory) && !page?.loading,
+        run: () => {
+          client.loadOlder(registry, threadId);
+        },
+      },
+    },
   });
   const count = Math.max(1, height - 7);
   const start = Math.max(0, selected - count + 1);
