@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
+import { diffFileTree, type DiffFile } from "./diffFiles.ts";
 import { parseDiffRows, splitDiffRows } from "./diffRows.ts";
 import { diffSyntaxTokens } from "./diffSyntax.ts";
 
@@ -61,5 +62,38 @@ describe("diff syntax", () => {
   it("uses the file's own comment marker and leaves unknown files plain", () => {
     expect(kinds("x = 1 # note", "a.py")).toContainEqual(["# note", "comment"]);
     expect(kinds("if 1 # note", "notes.md")).toEqual([["if 1 # note", "plain"]]);
+  });
+});
+
+describe("diff file tree", () => {
+  const file = (path: string): DiffFile => ({
+    id: path,
+    path,
+    additions: 1,
+    deletions: 0,
+    text: "",
+  });
+
+  it("adds one heading per directory, and keeps files selectable in their order", () => {
+    const rows = diffFileTree([
+      file("README.md"),
+      file("src/a.ts"),
+      file("src/b.ts"),
+      file("src/deep/er/c.ts"),
+      file("test/d.ts"),
+    ]);
+    expect(rows.map((row) => row.label)).toEqual([
+      "README.md +1 -0",
+      "src/",
+      "a.ts +1 -0",
+      "b.ts +1 -0",
+      "deep/er/",
+      "c.ts +1 -0",
+      "test/",
+      "d.ts +1 -0",
+    ]);
+    expect(rows.flatMap((row) => (row.kind === "file" ? [row.fileIndex] : []))).toEqual([
+      0, 1, 2, 3, 4,
+    ]);
   });
 });

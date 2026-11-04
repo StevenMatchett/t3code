@@ -1133,6 +1133,46 @@ describe("pull requests", () => {
     expect(driver.captureFrame()).toContain("Review submitted.");
   });
 
+  it("carries line notes from the code view into the review", async () => {
+    const { driver, fixture } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    // The file header takes no note, so N does nothing until the cursor reaches code.
+    await tick(driver, () => driver.input.pressKey("n"));
+    expect(driver.captureFrame()).not.toContain("Comment on this line");
+    for (let index = 0; index < 5; index += 1)
+      await tick(driver, () => driver.input.pressKey("ARROW_DOWN"));
+    await tick(driver, () => driver.input.pressKey("n"));
+    await driver.input.typeText("Why two?");
+    await driver.flush();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(driver.captureFrame()).toContain("1 note for your review");
+
+    await tick(driver, () => driver.input.pressKey("r"));
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(fixture.pullRequestReviews).toMatchObject([
+      {
+        verdict: "approve",
+        comments: [{ path: "src/a.ts", position: { kind: "added", newLine: 1 }, body: "Why two?" }],
+      },
+    ]);
+  });
+
+  it("moves through a stack with the bracket keys", async () => {
+    const { driver, fixture } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(driver.captureFrame()).toContain("Stack 1 of 2");
+    await tick(driver, () => driver.input.pressKey("["));
+    expect(driver.captureFrame()).toContain("#42");
+    await tick(driver, () => driver.input.pressKey("]"));
+    expect(driver.captureFrame()).toContain("#43");
+    expect(driver.captureFrame()).toContain("Stack 2 of 2");
+    expect(driver.captureFrame()).toContain("feature-43 into main");
+    await tick(driver, () => driver.input.pressKey("t"));
+    expect(fixture.pullRequestThreads).toEqual([43]);
+  });
+
   it("starts a thread on the pull request", async () => {
     const { driver, fixture } = await openList();
     await tick(driver, () => driver.input.pressKey("RETURN"));

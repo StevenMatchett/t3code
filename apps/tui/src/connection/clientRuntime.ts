@@ -79,6 +79,7 @@ import {
   type PullRequestListEntry,
   type PullRequestListState,
   type PullRequestRef,
+  type PullRequestStack,
   type RuntimeMode,
   type VcsPullResult,
   type GitRunStackedActionResult,
@@ -188,6 +189,11 @@ export interface TuiPullRequests {
     registry: AtomRegistry.AtomRegistry,
     reference: PullRequestRef,
   ) => Promise<PullRequestActivity>;
+  /** Null when the pull request is in no stack. */
+  readonly stack: (
+    registry: AtomRegistry.AtomRegistry,
+    reference: PullRequestRef,
+  ) => Promise<PullRequestStack | null>;
   /** The first slice of the change. */
   readonly diff: (
     reference: PullRequestRef,
@@ -647,6 +653,10 @@ export function createTuiClient(
     label: "tui.pull-requests.activity",
     tag: WS_METHODS.pullRequestsActivity,
   });
+  const pullRequestStack = createEnvironmentRpcCommand(runtime, {
+    label: "tui.pull-requests.stack",
+    tag: WS_METHODS.pullRequestsStack,
+  });
   const pullRequestReview = createEnvironmentRpcCommand(runtime, {
     label: "tui.pull-requests.submit-review",
     tag: WS_METHODS.pullRequestsSubmitReview,
@@ -687,6 +697,11 @@ export function createTuiClient(
       settled(
         await pullRequestActivity.run(registry, { environmentId, input }),
         "Could not read the conversation.",
+      ),
+    stack: async (registry, input) =>
+      settled(
+        await pullRequestStack.run(registry, { environmentId, input }),
+        "Could not read the stack.",
       ),
     diff: (input) => pullRequestEnvironment.diff({ environmentId, input }),
     submitReview: async (registry, input) => {

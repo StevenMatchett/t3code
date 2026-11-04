@@ -13,7 +13,7 @@ import { ListFilterRow } from "../ui/FormField.tsx";
 import { ListView } from "../ui/ListView.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { useThemeColor, useUi } from "../ui/context.tsx";
-import { diffFiles } from "../ui/diffFiles.ts";
+import { diffFiles, diffFileTree } from "../ui/diffFiles.ts";
 import { parseDiffRows, splitDiffRows, type DiffRow } from "../ui/diffRows.ts";
 import { diffSyntaxTokens, type DiffTokenKind } from "../ui/diffSyntax.ts";
 import { FormInput } from "../ui/FormField.tsx";
@@ -202,6 +202,11 @@ export function ThreadDiff({
   }, [allFiles, filter]);
   const selected = Math.max(0, Math.min(cursor, files.length - 1));
   const file = files[selected];
+  const tree = useMemo(() => diffFileTree(files), [files]);
+  const selectedRow = Math.max(
+    0,
+    tree.findIndex((row) => row.kind === "file" && row.fileIndex === selected),
+  );
   const split = width >= 76;
   const [sideBySide, setSideBySide] = useState<boolean | null>(null);
   const [lineCursor, setLineCursor] = useState(0);
@@ -465,25 +470,29 @@ export function ThreadDiff({
           {split || focus === "files" ? (
             <Stack width={listWidth} height="100%" flexDirection="column" overflow="hidden">
               <ListView
-                items={files}
-                selected={selected}
+                items={tree}
+                selected={selectedRow}
                 height={count}
-                itemKey={(entry) => entry.id}
-                itemId={(_entry, index) => `diff-file-${index}`}
-                onActivate={(_entry, index) => {
-                  if (!active) return;
-                  selectFile(index);
+                itemKey={(row) => row.id}
+                itemId={(row) => (row.kind === "file" ? `diff-file-${row.fileIndex}` : row.id)}
+                onActivate={(row) => {
+                  if (!active || row.kind !== "file") return;
+                  selectFile(row.fileIndex);
                   setFocus("diff");
                 }}
-                renderItem={(entry, index) => (
-                  <SelectionRow
-                    selected={index === selected}
-                    active={focus === "files"}
-                    label={inlineTerminalText(
-                      `${entry.path} +${entry.additions} -${entry.deletions}`,
-                    )}
-                  />
-                )}
+                renderItem={(row, index) =>
+                  row.kind === "directory" ? (
+                    <Text height={1} tone="muted" wrapMode="none" truncate>
+                      {`  ${"  ".repeat(row.depth)}${inlineTerminalText(row.label)}`}
+                    </Text>
+                  ) : (
+                    <SelectionRow
+                      selected={index === selectedRow}
+                      active={focus === "files"}
+                      label={inlineTerminalText(`${"  ".repeat(row.depth)}${row.label}`)}
+                    />
+                  )
+                }
               />
             </Stack>
           ) : null}

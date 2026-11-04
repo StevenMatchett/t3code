@@ -665,6 +665,17 @@ export function makeClientFixture(
             nextCursor: null,
           }),
         ),
+      stack: async () =>
+        ({
+          id: "stack-1",
+          number: 1,
+          url: "https://github.com/example/repo/stack/1",
+          base: "main",
+          layers: [
+            { number: 42, headBranch: "feature-42", state: "open" },
+            { number: 43, headBranch: "feature-43", state: "open" },
+          ],
+        }) as never,
       submitReview: async (_registry, input) => {
         pullRequestReviews.push(input);
       },

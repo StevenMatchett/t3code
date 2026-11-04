@@ -3,7 +3,9 @@ import { useRenderer } from "@opentui/react";
 import type {
   PullRequestActivity,
   PullRequestChecks,
+  PullRequestReviewCommentDraft,
   PullRequestReviewVerdict,
+  PullRequestStack,
   PullRequestDetail,
   PullRequestListEntry,
   PullRequestListState,
@@ -29,7 +31,7 @@ import { FormInput } from "../ui/FormField.tsx";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/reactivity";
-import { parseDiffRows } from "../ui/diffRows.ts";
+import { parseDiffRows, type DiffRow } from "../ui/diffRows.ts";
 import { DiffText } from "./ThreadDiff.tsx";
 
 const VIEWS = ["summary", "conversation", "code"] as const;
@@ -156,6 +158,7 @@ function PullRequests({
   if (open)
     return (
       <PullRequestDetailView
+        key={`${open.repository}#${open.number}`}
         pulls={pulls}
         entry={open}
         source={source}
@@ -167,6 +170,21 @@ function PullRequests({
           load();
         }}
         onOpenThread={onOpenThread}
+        onOpenLayer={(layer) =>
+          setOpen(
+            entries?.find(
+              (item) => item.repository === open.repository && item.number === layer.number,
+            ) ?? {
+              ...open,
+              number: layer.number,
+              title: layer.title ?? `Pull request ${layer.number}`,
+              headBranch: layer.headBranch,
+              state: layer.state,
+              isDraft: layer.isDraft ?? false,
+              url: open.url.replace(/\/\d+$/u, `/${layer.number}`),
+            },
+          )
+        }
       />
     );
   const rows = Math.max(1, height - 2);
@@ -228,6 +246,15 @@ function diffPath(rows: ReturnType<typeof parseDiffRows>, index: number) {
   return "";
 }
 
+/** Where a note lands on the host, which addresses a line by the side of the diff it is on. */
+function reviewPosition(row: DiffRow): PullRequestReviewCommentDraft["position"] {
+  if (row.oldLine !== null && row.newLine !== null)
+    return { kind: "context", oldLine: row.oldLine, newLine: row.newLine, side: "right" };
+  return row.newLine !== null
+    ? { kind: "added", newLine: row.newLine }
+    : { kind: "deleted", oldLine: row.oldLine! };
+}
+
 function PullRequestDetailView({
   pulls,
   entry,
@@ -237,7 +264,9 @@ function PullRequestDetailView({
   height,
   onBack,
   onOpenThread,
+  onOpenLayer,
 }: {
+  readonly onOpenLayer: (layer: PullRequestStack["layers"][number]) => void;
   readonly pulls: TuiPullRequests;
   readonly entry: PullRequestListEntry;
   readonly source: Parameters<TuiPullRequests["startThread"]>[2];
@@ -258,6 +287,10 @@ function PullRequestDetailView({
   const [offset, setOffset] = useState(0);
   const [view, setView] = useState<(typeof VIEWS)[number]>("summary");
   const [activity, setActivity] = useState<PullRequestActivity | null>(null);
+  const [stack, setStack] = useState<PullRequestStack | null>(null);
+  const [codeCursor, setCodeCursor] = useState(0);
+  const [lineComment, setLineComment] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<readonly PullRequestReviewCommentDraft[]>([]);
   const [review, setReview] = useState<{
     readonly verdict: PullRequestReviewVerdict;
     readonly body: string;
@@ -277,6 +310,7 @@ function PullRequestDetailView({
     });
     pulls.checks(registry, reference).then(setChecks, () => setChecks(null));
     pulls.activity(registry, reference).then(setActivity, () => setActivity(null));
+    pulls.stack(registry, reference).then(setStack, () => setStack(null));
   }, [pulls, registry, reference]);
   useEffect(load, [load]);
   const actions = detail ? pullRequestActions(detail) : [];
@@ -371,8 +405,9 @@ function PullRequestDetailView({
         ...reference,
         verdict: submitted.verdict,
         body: submitted.body,
-        comments: [],
+        comments: drafts,
       });
+      setDrafts([]);
       setStatus({ text: "Review submitted.", failed: false });
       load();
     } catch (failure) {
@@ -382,6 +417,37 @@ function PullRequestDetailView({
       setBusy(false);
     }
   };
+  const codeTarget =
+    view === "code" ? codeRows[Math.min(codeCursor, codeRows.length - 1)] : undefined;
+  const commentable =
+    codeTarget && (codeTarget.newLine !== null || codeTarget.oldLine !== null)
+      ? codeTarget
+      : undefined;
+  const moveCode = (next: number) => {
+    const line = Math.max(0, Math.min(codeRows.length - 1, next));
+    setCodeCursor(line);
+    if (line < start) scroll(line);
+    else if (line >= start + rows) scroll(line - rows + 1);
+  };
+  const layers = stack?.layers ?? [];
+  const layerIndex = layers.findIndex((layer) => layer.number === entry.number);
+  const previousLayer = layerIndex > 0 ? layers[layerIndex - 1] : undefined;
+  const nextLayer = layerIndex >= 0 ? layers[layerIndex + 1] : undefined;
+  useKeyLayer("pullRequestLineComment", {
+    active: active && lineComment !== null,
+    modal: true,
+    typing: true,
+    bindings: {
+      "pullRequestLineComment.save": () => {
+        const body = lineComment?.trim();
+        if (!body || !commentable) return;
+        const path = diffPath(codeRows, Math.min(codeCursor, codeRows.length - 1));
+        setDrafts((current) => [...current, { path, position: reviewPosition(commentable), body }]);
+        setLineComment(null);
+      },
+      "pullRequestLineComment.cancel": () => setLineComment(null),
+    },
+  });
   useKeyLayer("pullRequestReview", {
     active: active && review !== null,
     modal: true,
@@ -399,9 +465,25 @@ function PullRequestDetailView({
     },
   });
   useKeyLayer("pullRequestDetail", {
-    active: active && confirming === null && review === null,
+    active: active && confirming === null && review === null && lineComment === null,
     modal: true,
     bindings: {
+      "pullRequestDetail.lineComment": {
+        enabled: Boolean(commentable) && verdicts.length > 0,
+        run: () => setLineComment(""),
+      },
+      "pullRequestDetail.previousLayer": {
+        enabled: previousLayer !== undefined,
+        run: () => {
+          if (previousLayer) onOpenLayer(previousLayer);
+        },
+      },
+      "pullRequestDetail.nextLayer": {
+        enabled: nextLayer !== undefined,
+        run: () => {
+          if (nextLayer) onOpenLayer(nextLayer);
+        },
+      },
       "pullRequestDetail.view": () => {
         setView(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]!);
         setOffset(0);
@@ -411,8 +493,14 @@ function PullRequestDetailView({
         run: () => setReview({ verdict: verdicts[0]!, body: "" }),
       },
       "pullRequestDetail.back": { enabled: !busy, run: onBack },
-      "pullRequestDetail.up": () => scroll(start - 1),
-      "pullRequestDetail.down": () => scroll(start + 1),
+      "pullRequestDetail.up": () => {
+        if (view === "code") moveCode(codeCursor - 1);
+        else scroll(start - 1);
+      },
+      "pullRequestDetail.down": () => {
+        if (view === "code") moveCode(codeCursor + 1);
+        else scroll(start + 1);
+      },
       "pullRequestDetail.merge": { enabled: can("merge"), run: () => take("merge") },
       "pullRequestDetail.ready": {
         enabled: can("ready") || can("draft"),
@@ -479,16 +567,22 @@ function PullRequestDetailView({
           ) : AsyncResult.isFailure(diff) ? (
             <Text tone="danger">Could not load the changes. Esc and open it again to retry.</Text>
           ) : (
-            codeRows
-              .slice(start, start + rows)
-              .map((row, index) => (
+            codeRows.slice(start, start + rows).map((row, index) => (
+              <Stack key={start + index} height={1} flexShrink={0} flexDirection="row">
+                <Text height={1} width={1} flexShrink={0} tone="accent" wrapMode="none">
+                  {start + index === Math.min(codeCursor, codeRows.length - 1)
+                    ? capabilities.unicode
+                      ? "▌"
+                      : ">"
+                    : " "}
+                </Text>
                 <DiffText
-                  key={start + index}
                   row={row}
                   path={diffPath(codeRows, start + index)}
-                  width={width}
+                  width={Math.max(1, width - 1)}
                 />
-              ))
+              </Stack>
+            ))
           )}
         </Stack>
       ) : (
@@ -496,7 +590,20 @@ function PullRequestDetailView({
           {lines.slice(start, start + rows).join("\n")}
         </Text>
       )}
-      {review ? (
+      {lineComment !== null ? (
+        <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
+          <Text height={1} flexShrink={0} tone="accent" wrapMode="none">
+            Note
+          </Text>
+          <FormInput
+            id="pull-request-line-comment"
+            value={lineComment}
+            placeholder="Comment on this line"
+            focused={active}
+            onInput={setLineComment}
+          />
+        </Stack>
+      ) : review ? (
         <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
           <Text height={1} flexShrink={0} tone="accent" wrapMode="none">
             {VERDICT_LABEL[review.verdict]}
@@ -526,6 +633,14 @@ function PullRequestDetailView({
                 status?.text ??
                   `${VIEWS.map((item) => (item === view ? `[${item}]` : item)).join(" ")}${
                     view === "code" && patch?.nextCursor ? " · Showing the first part" : ""
+                  }${
+                    drafts.length > 0
+                      ? ` · ${drafts.length} ${drafts.length === 1 ? "note" : "notes"} for your review`
+                      : ""
+                  }${
+                    layers.length > 1 && layerIndex >= 0
+                      ? ` · Stack ${layerIndex + 1} of ${layers.length}`
+                      : ""
                   }`,
               )}
         </Text>
