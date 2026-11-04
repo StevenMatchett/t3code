@@ -5,9 +5,10 @@ import { useContext, useState } from "react";
 
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { useKeyLayer } from "../ui/keymap.ts";
+import { Button } from "../ui/Button.tsx";
+import { FormInput, FormRow } from "../ui/FormField.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
-import { useThemeColor } from "../ui/context.tsx";
 
 type ActionTarget = "title" | "save" | "archive" | "delete" | "cancel";
 
@@ -34,7 +35,6 @@ export function ThreadActionsForm({
   const [pending, setPending] = useState<ActionTarget | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(initialAction === "delete");
-  const selectedBackground = useThemeColor("selection");
   const archived = thread.archivedAt !== null;
   const targets: readonly ActionTarget[] = ["title", "save", "archive", "delete", "cancel"];
 
@@ -93,58 +93,45 @@ export function ThreadActionsForm({
       "manage.close": onClose,
       "manage.next": () => move(1),
       "manage.previous": () => move(-1),
-      "manage.activate": {
-        enabled: target !== "title",
-        run: () => activate(target),
+      "manage.activate": () => {
+        if (target === "title") void run("save");
+        else activate(target);
       },
     },
   });
 
   const button = (id: Exclude<ActionTarget, "title">, label: string, danger = false) => (
-    <Stack
+    <Button
       id={`thread-action-${id}`}
-      height={1}
+      label={label}
       flexGrow={1}
+      flexShrink={1}
       minWidth={0}
-      {...(target === id && selectedBackground ? { backgroundColor: selectedBackground } : {})}
-      onMouseDown={(event) => {
-        if (event.button !== 0 || pending) return;
-        event.preventDefault();
-        event.stopPropagation();
-        activate(id);
-      }}
-    >
-      <Text
-        height={1}
-        tone={danger ? "danger" : target === id ? "accent" : "muted"}
-        strong={target === id}
-        wrapMode="none"
-        truncate
-      >
-        {label}
-      </Text>
-    </Stack>
+      focused={target === id}
+      disabled={pending !== null}
+      {...(danger ? { tone: "danger" as const } : {})}
+      onPress={() => activate(id)}
+    />
   );
 
   return (
     <Stack width="100%" height="100%" flexDirection="column" gap={1}>
-      <Text strong>{inlineTerminalText(thread.title)}</Text>
-      <Text tone="muted" wrapMode="none" truncate>
-        Rename this thread or change whether it appears in the active thread list.
+      <Text strong wrapMode="none" truncate>
+        {inlineTerminalText(thread.title)}
       </Text>
-      <input
-        id="thread-action-title"
-        focused={active && target === "title"}
-        width="100%"
-        value={title}
-        placeholder="Thread title"
-        onInput={(value) => {
-          setTitle(value);
-          setConfirmDelete(false);
-        }}
-        onMouseDown={() => setTarget("title")}
-        onSubmit={() => void run("save")}
-      />
+      <FormRow label="Title" labelWidth={7} focused={target === "title"}>
+        <FormInput
+          id="thread-action-title"
+          focused={active && target === "title"}
+          value={title}
+          placeholder="Thread title"
+          onInput={(value) => {
+            setTitle(value);
+            setConfirmDelete(false);
+          }}
+          onFocusRequest={() => setTarget("title")}
+        />
+      </FormRow>
       <Stack height={1} flexDirection="row" gap={1}>
         {button("save", pending === "save" ? "[ Saving... ]" : "[ Save title ]")}
         {button(
@@ -171,8 +158,10 @@ export function ThreadActionsForm({
       <Text
         height={1}
         tone={message === null ? "muted" : message.includes("renamed") ? "success" : "danger"}
+        wrapMode="none"
+        truncate
       >
-        {message ?? "Tab selects an action. Delete requires confirmation."}
+        {message ?? "Delete asks for confirmation first."}
       </Text>
     </Stack>
   );

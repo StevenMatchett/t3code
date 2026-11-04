@@ -1,58 +1,23 @@
-import type { KeyEvent } from "@opentui/core";
 import type { BoxProps } from "@opentui/react";
 
 import { useThemeColor, useUi } from "./context.tsx";
 import { resolveGlyph, type GlyphName } from "./glyphs.tsx";
-import { KeyHint } from "./KeyHint.tsx";
+import { useDelayedFlag } from "./StatusLine.tsx";
 import type { ThemeToken } from "./theme.ts";
 
-interface StateAction {
-  readonly label: string;
-  readonly onSelect: () => void;
-}
-
-interface StateMessageProps extends Omit<BoxProps, "children" | "onKeyDown"> {
-  readonly action?: StateAction;
+interface StateMessageProps extends Omit<BoxProps, "children"> {
   readonly description?: string;
   readonly glyph: GlyphName;
   readonly title: string;
   readonly tone: ThemeToken;
 }
 
-function isActivationKey(event: KeyEvent) {
-  return (
-    event.eventType === "press" &&
-    !event.repeated &&
-    (event.name === "enter" || event.name === "return" || event.name === "space")
-  );
-}
-
-function StateMessage({ action, description, glyph, title, tone, ...props }: StateMessageProps) {
+function StateMessage({ description, glyph, title, tone, ...props }: StateMessageProps) {
   const { capabilities } = useUi();
   const toneColor = useThemeColor(tone);
   const mutedColor = useThemeColor("muted");
-
   return (
-    <box
-      {...props}
-      flexDirection="column"
-      focusable={action !== undefined}
-      onKeyDown={(event) => {
-        if (!action || !isActivationKey(event)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        action.onSelect();
-      }}
-      {...(action
-        ? {
-            onMouseDown: (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              action.onSelect();
-            },
-          }
-        : {})}
-    >
+    <box {...props} flexDirection="column">
       <text {...(toneColor ? { fg: toneColor } : {})} truncate>
         {resolveGlyph(glyph, capabilities.unicode)} {title}
       </text>
@@ -61,59 +26,42 @@ function StateMessage({ action, description, glyph, title, tone, ...props }: Sta
           {description}
         </text>
       ) : null}
-      {action ? <KeyHint keys="enter" label={action.label} /> : null}
     </box>
   );
 }
 
-export interface EmptyStateProps extends Omit<BoxProps, "children" | "onKeyDown"> {
-  readonly actionLabel?: string;
-  readonly description?: string;
-  readonly onAction?: () => void;
+export interface StateProps extends Omit<BoxProps, "children"> {
   readonly title: string;
+  /** Names the next action, such as "Press P to add one." */
+  readonly description?: string;
 }
 
-export function EmptyState({
-  actionLabel = "Continue",
-  description,
-  onAction,
-  title,
-  ...props
-}: EmptyStateProps) {
+const optional = (description: string | undefined) =>
+  description === undefined ? {} : { description };
+
+export function EmptyState({ description, title, ...props }: StateProps) {
   return (
-    <StateMessage
-      {...props}
-      glyph="empty"
-      title={title}
-      tone="muted"
-      {...(onAction ? { action: { label: actionLabel, onSelect: onAction } } : {})}
-      {...(description === undefined ? {} : { description })}
-    />
+    <StateMessage {...props} glyph="empty" title={title} tone="muted" {...optional(description)} />
   );
 }
 
-export interface ErrorStateProps extends Omit<BoxProps, "children" | "onKeyDown"> {
-  readonly description?: string;
-  readonly onRetry?: () => void;
-  readonly retryLabel?: string;
-  readonly title?: string;
+export function ErrorState({ description, title, ...props }: StateProps) {
+  return (
+    <StateMessage {...props} glyph="error" title={title} tone="danger" {...optional(description)} />
+  );
 }
 
-export function ErrorState({
-  description,
-  onRetry,
-  retryLabel = "Retry",
-  title = "Something went wrong",
-  ...props
-}: ErrorStateProps) {
+/** Stays blank for the first 200ms, so work that finishes quickly never flashes a message. */
+export function LoadingState({ description, title, ...props }: StateProps) {
+  const visible = useDelayedFlag(true);
+  if (!visible) return <box {...props} />;
   return (
     <StateMessage
       {...props}
-      glyph="error"
+      glyph="pending"
       title={title}
-      tone="danger"
-      {...(onRetry ? { action: { label: retryLabel, onSelect: onRetry } } : {})}
-      {...(description === undefined ? {} : { description })}
+      tone="muted"
+      {...optional(description)}
     />
   );
 }

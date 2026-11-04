@@ -228,8 +228,7 @@ export function useOutputVim({
       reset,
       range,
       status: [
-        notice ||
-          (selection ? (linewise ? "VISUAL LINE" : "VISUAL") : lines.length ? "NORMAL" : ""),
+        notice || (selection ? (linewise ? "VISUAL LINE" : "VISUAL") : cursor ? "NORMAL" : ""),
         link ? `o: open link · y: copy link · ${link}` : "",
       ]
         .filter(Boolean)

@@ -9,7 +9,7 @@ import { runTuiLifecycle } from "../dist/cli/lifecycle.js";
 import { TuiShutdownController } from "../dist/cli/shutdown.js";
 import { startRendererRuntime } from "../dist/renderer/runtime.js";
 import { PromptEditor } from "../dist/renderer/PromptEditor.js";
-import { PrototypeApp } from "../dist/renderer/PrototypeApp.js";
+import { App } from "../dist/renderer/App.js";
 import { makeClientFixture } from "../dist/testing/clientFixture.js";
 
 const termios = () =>
@@ -42,7 +42,7 @@ function Probe() {
   }, []);
   if (failed) throw new Error("injected React failure");
   if (["CONFIRM_EXIT", "CLICK_EXIT"].includes(process.argv[2])) {
-    return createElement(PrototypeApp, {
+    return createElement(App, {
       client: makeClientFixture().client,
       onInterrupt: () => shutdown.request({ kind: "signal", signal: "SIGINT" }),
     });

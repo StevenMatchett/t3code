@@ -68,6 +68,13 @@ export function conversationLines(
   return result;
 }
 
+// Wrapping and Markdown parsing are the costly steps. A row object only changes when its source does,
+// so a streaming chunk re-renders one row no matter how long the thread is.
+const renderedRows = new WeakMap<TimelineRow, Map<string, readonly ConversationLine[]>>();
+
+/** Counts actual row renders, so a test can prove cost tracks new content. */
+export const conversationLineStats = { rowsRendered: 0 };
+
 function renderRows(
   rows: readonly TimelineRow[],
   width: number,
@@ -75,7 +82,31 @@ function renderRows(
   renderMarkdown: boolean,
   unicode: boolean,
 ): readonly ConversationLine[] {
-  return rows.flatMap<ConversationLine>((row) => {
+  const variant = `${width}:${expanded}:${renderMarkdown}:${unicode}`;
+  return rows.flatMap((row) => {
+    let variants = renderedRows.get(row);
+    if (!variants) {
+      variants = new Map();
+      renderedRows.set(row, variants);
+    }
+    let lines = variants.get(variant);
+    if (!lines) {
+      conversationLineStats.rowsRendered += 1;
+      lines = renderRow(row, width, expanded, renderMarkdown, unicode);
+      variants.set(variant, lines);
+    }
+    return lines;
+  });
+}
+
+function renderRow(
+  row: TimelineRow,
+  width: number,
+  expanded: boolean,
+  renderMarkdown: boolean,
+  unicode: boolean,
+): readonly ConversationLine[] {
+  return ((): readonly ConversationLine[] => {
     if (row.source === "message" && row.kind === "assistant") {
       return [
         ...markdownLines(row.text, width, renderMarkdown, unicode),
@@ -169,5 +200,5 @@ function renderRows(
       ...(line < shellLines ? { shell: true } : {}),
       ...(line < highlightedLines ? { highlight: true } : {}),
     }));
-  });
+  })();
 }

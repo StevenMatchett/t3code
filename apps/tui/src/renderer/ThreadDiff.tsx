@@ -5,8 +5,11 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { useContext, useMemo, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { useKeyLayer } from "../ui/keymap.ts";
+import { EmptyState, ErrorState, LoadingState } from "../ui/StateMessage.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText, wrapTerminalLines } from "../ui/textLayout.ts";
+import { Button } from "../ui/Button.tsx";
+import { ListView } from "../ui/ListView.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { diffFiles } from "../ui/diffFiles.ts";
 import type { ThemeToken } from "../ui/theme.ts";
@@ -101,7 +104,7 @@ export function ThreadDiff({
   const file = files[selected];
   const split = width >= 76;
   const listWidth = split ? Math.min(32, Math.floor(width / 3)) : width;
-  const count = Math.max(1, height - 3);
+  const count = Math.max(1, height - 2);
   const diffWidth = Math.max(1, split ? width - listWidth - 1 : width);
   const lines = useMemo(
     () =>
@@ -165,21 +168,16 @@ export function ThreadDiff({
       "diff.bottom": () => move(files.length - 1, maximum),
     },
   });
-  const scopeButton = (label: string, action: () => void) => (
-    <Text
-      height={1}
+  const scopeButton = (id: string, label: string, chosen: boolean, action: () => void) => (
+    <Button
+      id={`diff-scope-${id}`}
+      label={label}
       tone="accent"
-      onMouseDown={(event) => {
-        if (!active || event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        action();
-      }}
-    >
-      {label}
-    </Text>
+      selected={chosen}
+      disabled={!active}
+      onPress={action}
+    />
   );
-  const listStart = Math.max(0, Math.min(selected - Math.floor(count / 2), files.length - count));
   const message = !thread
     ? Option.isSome(state.error)
       ? "Could not load thread."
@@ -198,10 +196,12 @@ export function ThreadDiff({
   return (
     <Stack width="100%" height="100%" flexDirection="column">
       <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
-        {scopeButton("[S Saved]", () => changeScope("saved"))}
-        {scopeButton("[W Working]", () => changeScope("working"))}
-        {scopeButton("[ Prev", () => cycleScope(-1))}
-        {scopeButton("Next ]", () => cycleScope(1))}
+        {scopeButton("saved", "[S Saved]", selectedScope === "saved", () => changeScope("saved"))}
+        {scopeButton("working", "[W Working]", selectedScope === "working", () =>
+          changeScope("working"),
+        )}
+        {scopeButton("previous", "[ Prev", false, () => cycleScope(-1))}
+        {scopeButton("next", "Next ]", false, () => cycleScope(1))}
       </Stack>
       <Text
         height={1}
@@ -219,35 +219,39 @@ export function ThreadDiff({
       </Text>
       {message ? (
         <Stack flexGrow={1}>
-          <Text tone={result.failed ? "danger" : "muted"}>{message}</Text>
+          {result.failed ? (
+            <ErrorState title={message} />
+          ) : result.loading ? (
+            <LoadingState title={message} />
+          ) : (
+            <EmptyState title={message} />
+          )}
         </Stack>
       ) : (
         <Stack height={count} flexShrink={0} flexDirection="row" gap={split ? 1 : 0}>
           {split || focus === "files" ? (
             <Stack width={listWidth} height="100%" flexDirection="column" overflow="hidden">
-              {files.slice(listStart, listStart + count).map((entry, index) => (
-                <Stack
-                  key={entry.id}
-                  id={`diff-file-${listStart + index}`}
-                  height={1}
-                  flexShrink={0}
-                  onMouseDown={(event) => {
-                    if (!active || event.button !== 0) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    selectFile(listStart + index);
-                    setFocus("diff");
-                  }}
-                >
+              <ListView
+                items={files}
+                selected={selected}
+                height={count}
+                itemKey={(entry) => entry.id}
+                itemId={(_entry, index) => `diff-file-${index}`}
+                onActivate={(_entry, index) => {
+                  if (!active) return;
+                  selectFile(index);
+                  setFocus("diff");
+                }}
+                renderItem={(entry, index) => (
                   <SelectionRow
-                    selected={listStart + index === selected}
+                    selected={index === selected}
                     active={focus === "files"}
                     label={inlineTerminalText(
                       `${entry.path} +${entry.additions} -${entry.deletions}`,
                     )}
                   />
-                </Stack>
-              ))}
+                )}
+              />
             </Stack>
           ) : null}
           {split || focus === "diff" ? (
@@ -278,12 +282,6 @@ export function ThreadDiff({
           ) : null}
         </Stack>
       )}
-      <Text height={1} flexShrink={0} tone="muted" wrapMode="none" truncate>
-        {focus === "files"
-          ? "Files: arrows select · Enter opens"
-          : "Diff: arrows scroll · Left returns to files"}{" "}
-        · Tab switches · Esc closes
-      </Text>
     </Stack>
   );
 }

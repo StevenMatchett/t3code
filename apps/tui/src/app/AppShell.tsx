@@ -8,19 +8,28 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { threadActivityPhase, type ThreadActivityPhase } from "../features/chat/threadActivity.ts";
-import { ThreadActivityIndicator } from "../ui/ThreadActivityIndicator.tsx";
+import { AnimationGate, ThreadActivityIndicator } from "../ui/ThreadActivityIndicator.tsx";
 import { TurnTiming } from "../ui/TurnTiming.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
-import { useThemeColor } from "../ui/context.tsx";
-import { calculateShellLayout } from "../ui/layout.ts";
+import { useThemeColor, useUi } from "../ui/context.tsx";
+import { BREAKPOINTS, calculateShellLayout, clampBox, MINIMUM_SIZE } from "../ui/layout.ts";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { HotkeyBar } from "../ui/HotkeyBar.tsx";
+import { Button } from "../ui/Button.tsx";
+import { ListView } from "../ui/ListView.tsx";
+import { Tabs } from "../ui/Tabs.tsx";
+import { EmptyState, ErrorState, LoadingState } from "../ui/StateMessage.tsx";
+import { StatusBadge, type StatusTone } from "../ui/StatusBadge.tsx";
+import { FormInput } from "../ui/FormField.tsx";
+import { resolveGlyph } from "../ui/glyphs.tsx";
+import type { Toast } from "../ui/StatusLine.tsx";
 import {
-  isSidebarThreadVisible,
   createInitialShellState,
   dispatchShellCommand,
+  sidebarProjects,
+  sidebarThreads,
   type ShellCommand,
   type ShellRoute,
   type ShellRows,
@@ -30,8 +39,10 @@ import {
 /** One entry of the overlay stack. Lower entries stay mounted so they keep their state. */
 export interface ShellOverlayView {
   readonly title?: string;
-  /** Floating content positions itself; everything else fills the body in a panel. */
+  /** Floating content positions itself; everything else opens in a panel over the body. */
   readonly floating?: boolean;
+  /** Preferred size, clamped to the body. Omitted panels fill the body. */
+  readonly size?: { readonly width: number; readonly height: number };
   readonly content: ReactNode;
 }
 
@@ -48,10 +59,7 @@ export interface AppShellViewProps {
   readonly error: boolean;
   readonly width: number;
   readonly height: number;
-  readonly notice?: {
-    readonly text: string;
-    readonly failed: boolean;
-  } | null;
+  readonly notice?: Toast | null;
   readonly children?: ReactNode;
   readonly onOpenProject?: (projectId: ProjectId) => void;
   readonly onProjectContextMenu?: (
@@ -70,7 +78,6 @@ export interface AppShellViewProps {
   >;
   readonly filtering?: boolean;
   readonly onFilterChange?: (filter: string) => void;
-  readonly onToggleProject?: (projectId: ProjectId) => void;
   readonly onOpenArchived?: () => void;
   readonly onManageThread?: () => void;
   readonly onOpenPalette?: () => void;
@@ -99,103 +106,169 @@ export function useAppShellState(
   return [state, send];
 }
 
-function List({
-  items,
-  selectedId,
-  count,
-  empty,
-  active,
+const SIDEBAR_TABS = [
+  { id: "projects", label: "Projects" },
+  { id: "recent", label: "Recent" },
+  { id: "archived", label: "Archived" },
+] as const;
+
+const PHASE_PRIORITY: { readonly [Phase in ThreadActivityPhase]: number } = {
+  idle: 0,
+  completed: 1,
+  stale: 2,
+  starting: 3,
+  running: 4,
+  failed: 5,
+  waiting_for_input: 6,
+  waiting_for_approval: 7,
+};
+
+type SidebarRow =
+  | {
+      readonly kind: "project";
+      readonly id: ProjectId;
+      readonly project: OrchestrationProjectShell;
+      readonly phase: ThreadActivityPhase;
+      readonly count: number;
+      readonly expanded: boolean;
+    }
+  | {
+      readonly kind: "thread";
+      readonly id: ThreadId;
+      readonly thread: TuiThreadShell;
+      readonly phase: ThreadActivityPhase;
+      readonly indent: boolean;
+      readonly subline?: string;
+    }
+  | { readonly kind: "placeholder"; readonly id: string };
+
+function ThreadRowTrailing({
+  phase,
+  latestTurn,
+  runningSince,
   visible,
-  onActivate,
-  onContextMenu,
 }: {
-  readonly items: ReadonlyArray<{
-    readonly id: string;
-    readonly text: string;
-    readonly subline?: string;
-    readonly phase?: ThreadActivityPhase;
-    readonly latestTurn?: TuiLatestTurn | null;
-    readonly runningSince?: string | null;
-  }>;
-  readonly selectedId: string | null;
-  readonly count: number;
-  readonly empty: string;
-  readonly active: boolean;
+  readonly phase: ThreadActivityPhase;
+  readonly latestTurn: TuiLatestTurn | null;
+  readonly runningSince: string | null;
   readonly visible: boolean;
-  readonly onContextMenu?: (id: string, position: { x: number; y: number }) => void;
-  readonly onActivate?: (id: string) => void;
 }) {
-  const selected = Math.max(
-    0,
-    items.findIndex((item) => item.id === selectedId),
-  );
-  const visibleCount = items.length > count ? Math.max(1, count - 1) : count;
-  const start = Math.max(
-    0,
-    Math.min(selected - Math.floor(visibleCount / 2), items.length - visibleCount),
-  );
   return (
-    <Stack flexDirection="column" flexGrow={1} overflow="hidden">
-      {items.length === 0 ? (
-        <Text tone="muted">{empty}</Text>
-      ) : (
-        items.slice(start, start + visibleCount).map((item) => (
-          <Stack
-            key={item.id}
-            id={`navigation-${item.id}`}
-            width="100%"
-            height={item.subline ? 2 : 1}
-            flexDirection="column"
-            flexShrink={0}
-            onMouseDown={(event) => {
-              if (event.button === 2 && onContextMenu) {
-                event.preventDefault();
-                event.stopPropagation();
-                onContextMenu(item.id, { x: event.x, y: event.y });
-                return;
-              }
-              if (event.button !== 0) return;
-              onActivate?.(item.id);
-            }}
-          >
-            <SelectionRow
-              selected={item.id === selectedId}
-              active={active}
-              label={item.text}
-              trailing={
-                item.phase ? (
-                  <Stack flexDirection="row">
-                    {item.phase === "running" || item.phase === "starting" ? (
-                      <TurnTiming
-                        turn={item.latestTurn ?? null}
-                        runningSince={item.runningSince ?? null}
-                        compact
-                      />
-                    ) : null}
-                    <ThreadActivityIndicator phase={item.phase} compact visible={visible} />
-                  </Stack>
-                ) : undefined
-              }
-            />
-            {item.subline ? (
-              <Text
-                height={1}
-                tone="muted"
-                dim
-                wrapMode="none"
-                truncate
-              >{`    ${inlineTerminalText(item.subline)}`}</Text>
-            ) : null}
-          </Stack>
-        ))
-      )}
-      <Stack flexGrow={1} />
-      {items.length > count ? (
-        <Text
-          height={1}
-          tone="muted"
-        >{`${start + 1}-${Math.min(items.length, start + visibleCount)} of ${items.length}`}</Text>
+    <Stack flexDirection="row" flexShrink={0}>
+      {phase === "running" || phase === "starting" ? (
+        <TurnTiming turn={latestTurn} runningSince={runningSince} compact />
       ) : null}
+      <ThreadActivityIndicator phase={phase} compact visible={visible} />
+    </Stack>
+  );
+}
+
+function Header({
+  width,
+  breadcrumb,
+  label,
+  status,
+  error,
+  overlayOpen,
+  onNewProject,
+  onNewThread,
+  onOpenPalette,
+  onManageThread,
+  onOpenArchived,
+}: {
+  readonly width: number;
+  readonly breadcrumb: string;
+  readonly label: string;
+  readonly status: string;
+  readonly error: boolean;
+  readonly overlayOpen: boolean;
+  readonly onNewProject: (() => void) | undefined;
+  readonly onNewThread: (() => void) | undefined;
+  readonly onOpenPalette: (() => void) | undefined;
+  readonly onManageThread: (() => void) | undefined;
+  readonly onOpenArchived: (() => void) | undefined;
+}) {
+  const tone: StatusTone = error
+    ? "danger"
+    : status === "Connected"
+      ? "success"
+      : status === "Offline"
+        ? "warning"
+        : "pending";
+  // Buttons appear in priority order as width allows, and their order never changes.
+  const available = width - 8 - 16 - 16;
+  const candidates = [
+    { id: "new-thread-action", label: "[+ New thread]", onPress: onNewThread },
+    { id: "new-project-action", label: "[+ New project]", onPress: onNewProject },
+    { id: "open-command-palette", label: "[ Search ]", onPress: onOpenPalette },
+    { id: "manage-thread-action", label: "[ Manage ]", onPress: onManageThread },
+    { id: "archived-threads-action", label: "[ Archived ]", onPress: onOpenArchived },
+  ];
+  const shown = new Set();
+  let used = 0;
+  for (const candidate of candidates) {
+    if (!candidate.onPress) continue;
+    if (used + candidate.label.length + 1 > available) break;
+    used += candidate.label.length + 1;
+    shown.add(candidate.id);
+  }
+  const showLabel = width >= BREAKPOINTS.wide && label.length > 0;
+  return (
+    <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
+      <Text strong tone="accent" flexShrink={0} height={1}>
+        T3 TUI
+      </Text>
+      <Text tone="text" flexGrow={1} minWidth={0} height={1} wrapMode="none" truncate>
+        {breadcrumb}
+      </Text>
+      {showLabel ? (
+        <Text
+          tone="muted"
+          flexShrink={1}
+          minWidth={0}
+          maxWidth={24}
+          height={1}
+          wrapMode="none"
+          truncate
+        >
+          {inlineTerminalText(label)}
+        </Text>
+      ) : null}
+      {candidates.map((candidate) =>
+        shown.has(candidate.id) ? (
+          <Button
+            key={candidate.id}
+            id={candidate.id}
+            label={candidate.label}
+            tone="accent"
+            disabled={overlayOpen}
+            {...(candidate.onPress ? { onPress: candidate.onPress } : {})}
+          />
+        ) : null,
+      )}
+      <StatusBadge id="connection-status" label={status} tone={tone} width={15} flexShrink={0} />
+    </Stack>
+  );
+}
+
+function TooSmall({ width, height }: { readonly width: number; readonly height: number }) {
+  return (
+    <Stack
+      id="terminal-too-small"
+      position="absolute"
+      top={0}
+      left={0}
+      width="100%"
+      height="100%"
+      zIndex={500}
+      flexDirection="column"
+    >
+      <Text tone="warning" strong wrapMode="word">
+        Terminal too small
+      </Text>
+      <Text tone="muted" wrapMode="word">
+        {`${width}x${height}. Resize to at least ${MINIMUM_SIZE.width}x${MINIMUM_SIZE.height}.`}
+      </Text>
     </Stack>
   );
 }
@@ -224,172 +297,235 @@ export function AppShellView({
   overlays = [],
   filtering = false,
   onFilterChange,
-  onToggleProject,
   onOpenArchived,
   onManageThread,
   onOpenPalette,
   onToggleSidebarView,
 }: AppShellViewProps) {
   const layout = calculateShellLayout(width, height);
+  const { capabilities } = useUi();
   const overlayOpen = overlays.length > 0;
-  // Floating dialogs keep the workspace visible behind them.
-  const bodyCovered = overlays.some((overlay) => !overlay.floating);
+  // A sized or floating overlay leaves the workspace visible around it, so it keeps animating too.
+  const bodyCovered = overlays.some((overlay) => !overlay.floating && !overlay.size);
   const background = useThemeColor("panel");
   const project = projects.find((item) => item.id === state.projectId);
   const archived = state.sidebarView === "archived";
   const recent = state.sidebarView === "recent" || archived;
-  const projectThreads = threads.filter((item) => item.projectId === state.projectId);
-  const selectedThread = projectThreads.find((item) => item.id === state.threadId);
+  const allProjectThreads = threads.filter((item) => item.projectId === state.projectId);
+  const selectedThread = allProjectThreads.find((item) => item.id === state.threadId);
   const browsingProjects = !recent && state.route === "projects";
-  const visibleThreads = (recent ? threads : projectThreads).filter((thread) =>
-    isSidebarThreadVisible(thread, state),
-  );
+  const visibleThreads = sidebarThreads(threads, state);
+  const projectThreads = visibleThreads.filter((item) => item.projectId === state.projectId);
   const conversation = state.route === "conversation";
+  const listedProjects = sidebarProjects(projects, threads, state);
   const title = recent
     ? `${archived ? "Archived" : "Recent"} threads (${visibleThreads.length})`
     : browsingProjects
-      ? `Projects (${projects.length})`
-      : `Threads (${visibleThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
-  const priorities: Record<ThreadActivityPhase, number> = {
-    idle: 0,
-    completed: 1,
-    stale: 2,
-    starting: 3,
-    running: 4,
-    failed: 5,
-    waiting_for_input: 6,
-    waiting_for_approval: 7,
-  };
+      ? `Projects (${listedProjects.length})`
+      : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
   const projectActivity = new Map<ProjectId, ThreadActivityPhase>();
   const phases = new Map(
     threads.map((thread) => {
       const phase = threadActivityPhase(environmentId, thread, live);
-      if (priorities[phase] > priorities[projectActivity.get(thread.projectId) ?? "idle"])
+      if (PHASE_PRIORITY[phase] > PHASE_PRIORITY[projectActivity.get(thread.projectId) ?? "idle"])
         projectActivity.set(thread.projectId, phase);
       return [thread.id, phase] as const;
     }),
   );
-  const items = browsingProjects
-    ? projects.map((item) => ({
-        id: item.id,
-        text: item.title,
-        phase: projectActivity.get(item.id) ?? "idle",
-      }))
-    : visibleThreads.map((item) => ({
-        id: item.id,
-        text: `${item.title}${item.worktreePath ? " [WT]" : ""}`,
-        phase: phases.get(item.id)!,
-        latestTurn: item.latestTurn,
-        runningSince: item.session?.updatedAt ?? null,
-        ...(recent
-          ? {
-              subline:
-                projects.find((project) => project.id === item.projectId)?.title ??
-                "Unknown project",
-            }
-          : {}),
-      }));
-  const empty = archived
-    ? archivedStatus === "loading"
-      ? "Loading archived threads..."
-      : archivedStatus === "error"
-        ? "Could not load archives. R retries."
-        : "No archived threads."
-    : error
-      ? "Connection unavailable. R retries."
-      : !loaded
-        ? "Loading your workspace..."
-        : browsingProjects
-          ? "No projects in this environment."
-          : recent
-            ? "No active threads in this environment."
-            : "No active threads in this project.";
+  const expanded = new Set(state.expandedProjects ?? []);
+  const threadRow = (thread: TuiThreadShell, indent: boolean, subline?: string): SidebarRow => ({
+    kind: "thread",
+    id: thread.id,
+    thread,
+    phase: phases.get(thread.id) ?? "idle",
+    indent,
+    ...(subline === undefined ? {} : { subline }),
+  });
+  const rows: readonly SidebarRow[] = recent
+    ? visibleThreads.map((thread) =>
+        threadRow(
+          thread,
+          false,
+          projects.find((item) => item.id === thread.projectId)?.title ?? "Unknown project",
+        ),
+      )
+    : listedProjects.flatMap((item): readonly SidebarRow[] => {
+        const children = visibleThreads.filter((thread) => thread.projectId === item.id);
+        // Entering a project shows its threads. A filter also opens everything it matched.
+        const isExpanded =
+          expanded.has(item.id) ||
+          Boolean(state.filter) ||
+          (item.id === state.projectId && state.route !== "projects");
+        return [
+          {
+            kind: "project",
+            id: item.id,
+            project: item,
+            // A finished turn is not news at the project level.
+            phase:
+              projectActivity.get(item.id) === "completed"
+                ? "idle"
+                : (projectActivity.get(item.id) ?? "idle"),
+            count: children.length,
+            expanded: isExpanded,
+          },
+          ...(isExpanded
+            ? children.length > 0
+              ? children.map((thread) => threadRow(thread, true))
+              : [{ kind: "placeholder" as const, id: `empty-${item.id}` }]
+            : []),
+        ];
+      });
+  const selectedRowId = browsingProjects ? state.projectId : state.threadId;
+  const selectedIndex = Math.max(
+    0,
+    rows.findIndex((row) => row.id === selectedRowId),
+  );
+  const emptyList = archived ? (
+    archivedStatus === "loading" ? (
+      <LoadingState title="Loading archived threads..." />
+    ) : archivedStatus === "error" ? (
+      <ErrorState title="Could not load archives. R retries." />
+    ) : (
+      <EmptyState title="No archived threads." />
+    )
+  ) : error ? (
+    <ErrorState title="Connection unavailable. R retries." />
+  ) : !loaded ? (
+    <LoadingState title="Loading your workspace..." />
+  ) : state.filter ? (
+    <EmptyState title="Nothing matches the filter." description="Esc clears it." />
+  ) : browsingProjects ? (
+    <EmptyState title="No projects in this environment." description="Press P to add one." />
+  ) : recent ? (
+    <EmptyState
+      title="No active threads in this environment."
+      description="Open a project and press N."
+    />
+  ) : (
+    <EmptyState title="No active threads in this project." description="Press N to start one." />
+  );
+  const showFilter = filtering || Boolean(state.filter);
   const navigation = (
-    <Stack flexDirection="column" height="100%" gap={1}>
-      <Text
+    <Stack flexDirection="column" height="100%">
+      <Tabs
         id="sidebar-view-toggle"
-        height={1}
-        tone="accent"
-        wrapMode="none"
-        truncate
-        onMouseDown={(event) => {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          event.stopPropagation();
-          onToggleSidebarView?.();
-        }}
-      >
-        {archived
-          ? "Projects Recent [Archived]"
-          : recent
-            ? "Projects [Recent] Archived"
-            : "[Projects] Recent Archived"}
-      </Text>
-      <List
-        items={items}
-        selectedId={browsingProjects ? state.projectId : state.threadId}
-        count={Math.max(1, Math.floor((layout.contentHeight - 4) / (recent ? 2 : 1)))}
-        empty={empty}
-        active={!conversation}
-        visible={!overlayOpen}
-        onContextMenu={(id, position) => {
-          if (browsingProjects) {
-            const project = projects.find((item) => item.id === id);
-            if (project) onProjectContextMenu?.(project.id, position);
-            return;
-          }
-          const thread = visibleThreads.find((item) => item.id === id);
-          if (thread) onThreadContextMenu?.(thread, position);
-        }}
-        onActivate={(id) => {
-          if (browsingProjects) {
-            const selected = projects.find((item) => item.id === id);
-            if (selected) onOpenProject?.(selected.id);
-            return;
-          }
-          const selected = visibleThreads.find((item) => item.id === id);
-          if (selected) onOpenThread?.(selected.projectId, selected.id);
-        }}
+        tabs={SIDEBAR_TABS}
+        selected={state.sidebarView ?? "projects"}
+        {...(onToggleSidebarView ? { onPress: onToggleSidebarView } : {})}
       />
-      <Text height={1} tone="muted" wrapMode="none" truncate>
-        {browsingProjects
-          ? "Enter to browse threads"
-          : conversation
-            ? "Esc to browse threads"
-            : archived
-              ? "Enter to manage / restore"
-              : recent
-                ? "Ctrl+B to archived"
-                : "Esc to projects"}
-      </Text>
+      <Stack height={1} flexShrink={0} flexDirection="row">
+        {showFilter ? (
+          <>
+            <Text height={1} flexShrink={0} tone="accent">
+              {"/ "}
+            </Text>
+            <FormInput
+              id="sidebar-filter"
+              value={state.filter ?? ""}
+              placeholder="Filter..."
+              focused={filtering && !overlayOpen && !conversation}
+              onInput={(value) => onFilterChange?.(value)}
+            />
+          </>
+        ) : null}
+      </Stack>
+      <ListView
+        items={rows}
+        selected={selectedIndex}
+        height={Math.max(1, layout.contentHeight - 2)}
+        rowHeight={recent ? 2 : 1}
+        itemKey={(row) => `${row.kind}:${row.id}`}
+        itemId={(row) => `navigation-${row.id}`}
+        empty={emptyList}
+        onActivate={(row) => {
+          if (row.kind === "project") onOpenProject?.(row.id);
+          else if (row.kind === "thread") onOpenThread?.(row.thread.projectId, row.id);
+        }}
+        onContextMenu={(row, position) => {
+          if (row.kind === "project") onProjectContextMenu?.(row.id, position);
+          else if (row.kind === "thread") onThreadContextMenu?.(row.thread, position);
+        }}
+        renderItem={(row) =>
+          row.kind === "placeholder" ? (
+            <Text height={1} tone="muted" dim wrapMode="none" truncate>
+              {"    No active threads. N starts one."}
+            </Text>
+          ) : row.kind === "project" ? (
+            <SelectionRow
+              selected={browsingProjects && row.id === state.projectId}
+              active={!conversation}
+              label={inlineTerminalText(row.project.title)}
+              trailing={
+                <Stack flexDirection="row" flexShrink={0}>
+                  <ThreadActivityIndicator phase={row.phase} compact visible={!overlayOpen} />
+                  <Text height={1} flexShrink={0} tone="muted" wrapMode="none">
+                    {` ${row.count} ${resolveGlyph(row.expanded ? "expanded" : "collapsed", capabilities.unicode)}`}
+                  </Text>
+                </Stack>
+              }
+            />
+          ) : (
+            <Stack flexDirection="column" width="100%" {...(row.indent ? { paddingLeft: 2 } : {})}>
+              <SelectionRow
+                selected={row.id === state.threadId && !browsingProjects}
+                active={!conversation}
+                label={`${row.thread.title}${row.thread.worktreePath ? " [WT]" : ""}`}
+                trailing={
+                  <ThreadRowTrailing
+                    phase={row.phase}
+                    latestTurn={row.thread.latestTurn}
+                    runningSince={row.thread.session?.updatedAt ?? null}
+                    visible={!overlayOpen}
+                  />
+                }
+              />
+              {row.subline ? (
+                <Text height={1} tone="muted" dim wrapMode="none" truncate>
+                  {`    ${inlineTerminalText(row.subline)}`}
+                </Text>
+              ) : null}
+            </Stack>
+          )
+        }
+      />
     </Stack>
   );
   const preview = (
-    <Stack flexDirection="column" paddingTop={2} gap={1}>
-      <Text strong tone="accent">
+    <Stack flexDirection="column" paddingTop={1} gap={1}>
+      <Text strong tone="accent" wrapMode="none" truncate>
         {inlineTerminalText(
           browsingProjects
             ? (project?.title ?? "Your workspace")
             : (selectedThread?.title ?? "Choose a thread"),
         )}
       </Text>
-      {project ? <Text tone="muted">{inlineTerminalText(project.workspaceRoot)}</Text> : null}
-      <Text>
+      {project ? (
+        <Text tone="muted" wrapMode="none" truncate>
+          {inlineTerminalText(project.workspaceRoot)}
+        </Text>
+      ) : null}
+      <Text wrapMode="none" truncate>
         {browsingProjects
           ? `${projectThreads.length} active threads`
           : selectedThread
             ? `Model  ${inlineTerminalText(selectedThread.modelSelection.model)}`
-            : empty}
+            : "No thread selected."}
       </Text>
       <Text tone="muted">
         {browsingProjects
-          ? "Open a project to choose a conversation."
-          : "Press Enter to open the conversation."}
+          ? "Enter opens the project. N starts a thread."
+          : "Enter opens the conversation."}
       </Text>
-      <Stack height={1} />
-      <Text tone="muted">Shared with your existing T3 environment.</Text>
-      <Text tone="muted">Your agents keep running when this client closes.</Text>
+      <Text tone="muted">
+        Shared with your T3 environment. Agents keep running when this client closes.
+      </Text>
     </Stack>
+  );
+  const breadcrumb = inlineTerminalText(
+    [project?.title, conversation || !browsingProjects ? selectedThread?.title : undefined]
+      .filter(Boolean)
+      .join(capabilities.unicode ? " › " : " > "),
   );
   return (
     <Stack
@@ -400,173 +536,78 @@ export function AppShellView({
       overflow="hidden"
       {...(background ? { backgroundColor: background } : {})}
     >
-      <Stack height={1} flexShrink={0} flexDirection="row">
-        <Text strong tone="accent" width={9}>
-          T3 TUI
-        </Text>
-        <Text tone="muted" flexGrow={1} wrapMode="none" truncate>
-          {inlineTerminalText(label)}
-        </Text>
-        {onNewProject ? (
-          <Stack
-            id="new-project-action"
-            height={1}
-            width={17}
-            flexShrink={0}
-            onMouseDown={(event) => {
-              if (event.button !== 0 || overlayOpen) return;
-              event.preventDefault();
-              event.stopPropagation();
-              onNewProject();
-            }}
-          >
-            <Text tone="accent" strong height={1}>
-              [+ New project]
-            </Text>
-          </Stack>
-        ) : null}
-        {onOpenPalette && width >= 90 ? (
-          <Stack
-            id="open-command-palette"
-            height={1}
-            width={12}
-            flexShrink={0}
-            onMouseDown={(event) => {
-              if (event.button !== 0 || overlayOpen) return;
-              event.preventDefault();
-              event.stopPropagation();
-              onOpenPalette();
-            }}
-          >
-            <Text tone="accent" strong height={1}>
-              [ Search ]
-            </Text>
-          </Stack>
-        ) : null}
-        {project && onNewThread ? (
-          <Stack
-            id="new-thread-action"
-            height={1}
-            width={16}
-            flexShrink={0}
-            onMouseDown={(event) => {
-              if (event.button !== 0 || overlayOpen) return;
-              event.preventDefault();
-              event.stopPropagation();
-              onNewThread();
-            }}
-          >
-            <Text tone="accent" strong height={1}>
-              [+ New thread]
-            </Text>
-          </Stack>
-        ) : null}
-        {selectedThread && onManageThread ? (
-          <Stack
-            id="manage-thread-action"
-            height={1}
-            width={11}
-            flexShrink={0}
-            onMouseDown={(event) => {
-              if (event.button !== 0 || overlayOpen) return;
-              event.preventDefault();
-              event.stopPropagation();
-              onManageThread();
-            }}
-          >
-            <Text tone="accent" strong height={1}>
-              [ Manage ]
-            </Text>
-          </Stack>
-        ) : null}
-        {onOpenArchived ? (
-          <Stack
-            id="archived-threads-action"
-            height={1}
-            width={12}
-            flexShrink={0}
-            onMouseDown={(event) => {
-              if (event.button !== 0 || overlayOpen) return;
-              event.preventDefault();
-              event.stopPropagation();
-              onOpenArchived();
-            }}
-          >
-            <Text tone="accent" strong height={1}>
-              [ Archived ]
-            </Text>
-          </Stack>
-        ) : null}
-        <Text
-          tone={error ? "danger" : status === "Connected" ? "success" : "warning"}
-          flexShrink={0}
-        >{` ${status}`}</Text>
-      </Stack>
-      <Stack height={1} flexShrink={0} />
+      <Header
+        width={Math.max(1, width - 2)}
+        breadcrumb={breadcrumb}
+        label={label}
+        status={status}
+        error={error}
+        overlayOpen={overlayOpen}
+        onNewProject={onNewProject}
+        onNewThread={project ? onNewThread : undefined}
+        onOpenPalette={onOpenPalette}
+        onManageThread={selectedThread ? onManageThread : undefined}
+        onOpenArchived={onOpenArchived}
+      />
+      {layout.headerGap ? <Stack height={1} flexShrink={0} /> : null}
       <Stack height={layout.bodyHeight} flexShrink={0} flexDirection="row" gap={1}>
-        <Stack visible={!bodyCovered} width="100%" height="100%" flexDirection="row" gap={1}>
-          {layout.split ? (
+        <AnimationGate visible={!bodyCovered}>
+          <Stack visible={!bodyCovered} width="100%" height="100%" flexDirection="row" gap={1}>
+            {layout.split ? (
+              <Panel
+                title={title}
+                width={layout.sidebarWidth}
+                height="100%"
+                borderTone={conversation ? "border" : "borderFocused"}
+                flexDirection="column"
+              >
+                {navigation}
+              </Panel>
+            ) : null}
             <Panel
-              title={title}
-              width={layout.sidebarWidth}
+              width={layout.mainWidth}
               height="100%"
-              borderTone={conversation ? "border" : "borderFocused"}
+              title={
+                conversation
+                  ? inlineTerminalText(selectedThread?.title ?? "Conversation")
+                  : layout.split
+                    ? "Workspace"
+                    : title
+              }
+              borderTone={conversation || !layout.split ? "borderFocused" : "border"}
               flexDirection="column"
             >
-              {navigation}
+              {conversation ? children : layout.split ? preview : navigation}
             </Panel>
-          ) : null}
-          <Panel
-            width={layout.mainWidth}
-            height="100%"
-            title={
-              conversation
-                ? inlineTerminalText(selectedThread?.title ?? "Conversation")
-                : layout.split
-                  ? "Workspace"
-                  : title
-            }
-            borderTone={conversation || !layout.split ? "borderFocused" : "border"}
-            flexDirection="column"
-          >
-            {conversation ? children : layout.split ? preview : navigation}
-          </Panel>
-        </Stack>
+          </Stack>
+        </AnimationGate>
         {overlays
           .filter((overlay) => !overlay.floating)
-          .map((overlay) => (
-            <Panel
-              key={overlay.key}
-              id="thread-management-overlay"
-              visible={overlay.visible}
-              position="absolute"
-              top={0}
-              left={0}
-              width="100%"
-              height="100%"
-              {...(overlay.title ? { title: overlay.title } : {})}
-              borderTone="borderFocused"
-              flexDirection="column"
-            >
-              {overlay.content}
-            </Panel>
-          ))}
+          .map((overlay) => {
+            const box = overlay.size
+              ? clampBox({ width: Math.max(1, width - 2), height: layout.bodyHeight }, overlay.size)
+              : { left: 0, top: 0, width: "100%" as const, height: "100%" as const };
+            return (
+              <Panel
+                key={overlay.key}
+                id="thread-management-overlay"
+                visible={overlay.visible}
+                position="absolute"
+                top={box.top}
+                left={box.left}
+                width={box.width}
+                height={box.height}
+                zIndex={50}
+                {...(overlay.title ? { title: overlay.title } : {})}
+                borderTone="borderFocused"
+                flexDirection="column"
+              >
+                {overlay.content}
+              </Panel>
+            );
+          })}
       </Stack>
-      {notice ? (
-        <Stack height={2} flexShrink={0}>
-          <Text
-            height={1}
-            flexShrink={0}
-            tone={notice.failed ? "danger" : "success"}
-            wrapMode="none"
-            truncate
-          >
-            {notice.text}
-          </Text>
-        </Stack>
-      ) : (
-        <HotkeyBar width={Math.max(1, width - 2)} />
-      )}
+      <HotkeyBar width={Math.max(1, width - 2)} notice={notice ?? null} />
       {overlays
         .filter((overlay) => overlay.floating)
         .map((overlay) => (
@@ -583,6 +624,7 @@ export function AppShellView({
             {overlay.content}
           </Stack>
         ))}
+      {layout.tooSmall ? <TooSmall width={width} height={height} /> : null}
     </Stack>
   );
 }

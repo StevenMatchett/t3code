@@ -1,8 +1,9 @@
 import stringWidth from "string-width";
-import { actionKeyLabel, asciiKeyLabel, formatChord } from "../app/actions.ts";
+import { actionKeyLabel, formatChord } from "../app/actions.ts";
 import { Stack, Text } from "./primitives.tsx";
 import { useThemeColor, useUi } from "./context.tsx";
 import { useActiveActions, type ActiveAction } from "./keymap.ts";
+import { ToastLine, type Toast } from "./StatusLine.tsx";
 
 export interface HotkeyHint {
   readonly key: string;
@@ -21,7 +22,11 @@ function hintKey(action: ActiveAction, unicode: boolean) {
   return first === undefined ? null : formatChord(first, unicode);
 }
 
+/** The focused region's own keys outrank anything lower layers offer at the same priority. */
+const FOCUSED_BOOST = 10;
+
 export function hintsFromActions(actions: readonly ActiveAction[], unicode = true) {
+  const focusedScope = actions[0]?.scope;
   return actions
     .flatMap((action) => {
       const key = hintKey(action, unicode);
@@ -31,8 +36,13 @@ export function hintsFromActions(actions: readonly ActiveAction[], unicode = tru
           id: action.id,
           key,
           label: action.label ?? action.title,
-          priority: action.definition.hint,
-          // Layers arrive top first, so the focused region wins ties.
+          priority:
+            action.definition.hint >= 100
+              ? action.definition.hint
+              : Math.min(
+                  99,
+                  action.definition.hint + (action.scope === focusedScope ? FOCUSED_BOOST : 0),
+                ),
         },
       ];
     })
@@ -47,6 +57,7 @@ export function layoutHints(
   context: string,
   hints: readonly (HotkeyHint & { readonly priority: number })[],
   width: number,
+  rows = 2,
 ) {
   // Below this width the pinned keys drop their labels rather than disappear.
   const pinned = hints
@@ -55,22 +66,23 @@ export function layoutHints(
   const pinnedWidth = pinned.reduce((sum, hint) => sum + hintWidth(hint) + 1, 0);
   const contextWidth = stringWidth(context) + 1;
   const showContext = contextWidth + 18 <= width;
-  const rows: [HotkeyHint[], HotkeyHint[]] = [[], []];
-  let first = showContext ? contextWidth : 0;
+  const hintRows: [HotkeyHint[], HotkeyHint[]] = [[], []];
+  // With one row left, everything goes on the row that holds the pinned keys.
+  let first = rows === 1 ? width + 1 : showContext ? contextWidth : 0;
   let second = pinnedWidth;
   for (const hint of hints) {
     if (hint.priority >= 100) continue;
     const size = hintWidth(hint) + 1;
     if (first + size <= width) {
-      rows[0].push(hint);
+      hintRows[0].push(hint);
       first += size;
     } else if (second + size <= width) {
-      rows[1].push(hint);
+      hintRows[1].push(hint);
       second += size;
     }
   }
-  if (second > width) return { showContext, rows: [rows[0], rows[1]] as const, pinned: [] };
-  return { showContext, rows: [rows[0], rows[1]] as const, pinned };
+  const shownRows = [hintRows[0], hintRows[1]] as const;
+  return { showContext, rows: shownRows, pinned: second > width ? [] : pinned };
 }
 
 function Hint({ hint, keyBackground }: { hint: HotkeyHint; keyBackground: string | undefined }) {
@@ -94,13 +106,13 @@ export function HotkeyBar({
   notice,
 }: {
   readonly width: number;
-  readonly notice?: string | null;
+  readonly notice?: Toast | null;
 }) {
   const keyBackground = useThemeColor("selection");
   const { capabilities } = useUi();
   const { actions, context } = useActiveActions();
   const hints = hintsFromActions(actions, capabilities.unicode);
-  const layout = layoutHints(context, hints, width);
+  const layout = layoutHints(context, hints, width, notice ? 1 : 2);
   return (
     <Stack
       id="active-hotkeys"
@@ -110,16 +122,20 @@ export function HotkeyBar({
       flexDirection="column"
       overflow="hidden"
     >
-      <Stack height={1} width="100%" flexShrink={0} flexDirection="row" overflow="hidden" gap={1}>
-        {layout.showContext ? (
-          <Text height={1} flexShrink={0} tone="muted" strong>
-            {context.toUpperCase()}
-          </Text>
-        ) : null}
-        {layout.rows[0].map((hint) => (
-          <Hint key={`${hint.key}:${hint.label}`} hint={hint} keyBackground={keyBackground} />
-        ))}
-      </Stack>
+      {notice ? (
+        <ToastLine toast={notice} />
+      ) : (
+        <Stack height={1} width="100%" flexShrink={0} flexDirection="row" overflow="hidden" gap={1}>
+          {layout.showContext ? (
+            <Text height={1} flexShrink={0} tone="muted" strong>
+              {context.toUpperCase()}
+            </Text>
+          ) : null}
+          {layout.rows[0].map((hint) => (
+            <Hint key={`${hint.key}:${hint.label}`} hint={hint} keyBackground={keyBackground} />
+          ))}
+        </Stack>
+      )}
       <Stack height={1} width="100%" flexShrink={0} flexDirection="row" overflow="hidden" gap={1}>
         {layout.rows[1].map((hint) => (
           <Hint key={`${hint.key}:${hint.label}`} hint={hint} keyBackground={keyBackground} />
@@ -132,5 +148,3 @@ export function HotkeyBar({
     </Stack>
   );
 }
-
-export { asciiKeyLabel };

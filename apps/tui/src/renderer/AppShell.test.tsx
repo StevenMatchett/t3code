@@ -872,7 +872,7 @@ describeWithNativeFfi("connected AppShell", () => {
     expect(activity!.screenY + activity!.height).toBe(composer!.screenY);
   });
 
-  it("lists subagents below the composer and opens their attributed output", async () => {
+  it("lists subagents above the composer and opens their attributed output", async () => {
     const { driver, fixture } = await renderShell({ width: 96, height: 30 });
     const thread = fixture.details[0]!;
     await driver.input.pressKey("RETURN");
@@ -922,7 +922,8 @@ describeWithNativeFfi("connected AppShell", () => {
     const composer = driver.renderer.root.findDescendantById("conversation-composer");
     expect(swarm).toBeDefined();
     expect(composer).toBeDefined();
-    expect(swarm!.screenY).toBeGreaterThan(composer!.screenY);
+    // The composer stays anchored to the bottom, so agents appearing can never move it.
+    expect(swarm!.screenY).toBeLessThan(composer!.screenY);
     expect(driver.captureFrame()).toContain("[x] Show agents (2)");
     expect(driver.captureFrame()).toContain("Researcher");
     expect(driver.captureFrame()).toContain("Reviewer");

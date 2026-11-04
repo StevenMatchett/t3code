@@ -226,6 +226,26 @@ export function openTuiSessionState(options: {
         report();
       }
     },
+    themePreference: () => {
+      if (closed) return "auto";
+      try {
+        const row = db.prepare("SELECT value FROM ui_preferences WHERE field = 'theme'").get();
+        return row?.value === "dark" || row?.value === "light" ? row.value : "auto";
+      } catch {
+        report();
+        return "auto";
+      }
+    },
+    saveThemePreference: (preference) => {
+      if (closed) return;
+      try {
+        db.prepare(
+          "INSERT INTO ui_preferences (field, value) VALUES ('theme', ?) ON CONFLICT (field) DO UPDATE SET value = excluded.value",
+        ).run(preference);
+      } catch {
+        report();
+      }
+    },
     shell: shell ? { ...shell, overlays: [] } : undefined,
     interactions,
     saveShell: ({ route, sidebarView, projectId, threadId, expandedProjects }) =>

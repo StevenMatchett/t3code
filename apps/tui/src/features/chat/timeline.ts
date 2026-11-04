@@ -274,20 +274,21 @@ function activityOrder(left: TuiActivity, right: TuiActivity): number {
   return left.id.localeCompare(right.id);
 }
 
-function collapseToolLifecycle(rows: ReadonlyArray<TimelineActivityRow>): TimelineActivityRow[] {
-  const collapsed: TimelineActivityRow[] = [];
-  const rowIndexById = new Map<string, number>();
+// A merged tool row keeps its identity while both lifecycle rows do, so it is not re-rendered.
+const mergedToolRows = new WeakMap<
+  TimelineActivityRow,
+  WeakMap<TimelineActivityRow, TimelineActivityRow>
+>();
 
-  for (const row of rows) {
-    const previousIndex = rowIndexById.get(row.id);
-    const previous = previousIndex === undefined ? undefined : collapsed[previousIndex];
-    if (previousIndex === undefined || previous === undefined || row.toolCallId === undefined) {
-      rowIndexById.set(row.id, collapsed.length);
-      collapsed.push(row);
-      continue;
-    }
-
-    collapsed[previousIndex] = {
+function mergeToolRow(previous: TimelineActivityRow, row: TimelineActivityRow) {
+  let merges = mergedToolRows.get(previous);
+  if (!merges) {
+    merges = new WeakMap();
+    mergedToolRows.set(previous, merges);
+  }
+  let merged = merges.get(row);
+  if (!merged) {
+    merged = {
       ...previous,
       sourceId: row.sourceId,
       kind: row.kind,
@@ -302,6 +303,25 @@ function collapseToolLifecycle(rows: ReadonlyArray<TimelineActivityRow>): Timeli
         ? { files: [...new Set([...(previous.files ?? []), ...(row.files ?? [])])] }
         : {}),
     };
+    merges.set(row, merged);
+  }
+  return merged;
+}
+
+function collapseToolLifecycle(rows: ReadonlyArray<TimelineActivityRow>): TimelineActivityRow[] {
+  const collapsed: TimelineActivityRow[] = [];
+  const rowIndexById = new Map<string, number>();
+
+  for (const row of rows) {
+    const previousIndex = rowIndexById.get(row.id);
+    const previous = previousIndex === undefined ? undefined : collapsed[previousIndex];
+    if (previousIndex === undefined || previous === undefined || row.toolCallId === undefined) {
+      rowIndexById.set(row.id, collapsed.length);
+      collapsed.push(row);
+      continue;
+    }
+
+    collapsed[previousIndex] = mergeToolRow(previous, row);
   }
 
   return collapsed;
@@ -337,17 +357,42 @@ function compareRows(left: TimelineRow, right: TimelineRow): number {
   return kind !== 0 ? kind : left.id.localeCompare(right.id);
 }
 
+// Streaming updates replace one message and keep every other object, so unchanged sources reuse
+// their row. Only default options are cached; custom limits are rare and always recompute.
+const messageRowCache = new WeakMap<TuiMessage, TimelineMessageRow>();
+const activityRowCache = new WeakMap<TuiActivity, TimelineActivityRow>();
+
+function cachedMessageRow(message: TuiMessage, options: TerminalTextOptions) {
+  if (Object.keys(options).length > 0) return messageRow(message, options);
+  let row = messageRowCache.get(message);
+  if (!row) {
+    row = messageRow(message, options);
+    messageRowCache.set(message, row);
+  }
+  return row;
+}
+
+function cachedActivityRow(activity: TuiActivity, options: TerminalTextOptions) {
+  if (Object.keys(options).length > 0) return activityRow(activity, options);
+  let row = activityRowCache.get(activity);
+  if (!row) {
+    row = activityRow(activity, options);
+    activityRowCache.set(activity, row);
+  }
+  return row;
+}
+
 /** Projects a recorded normalized thread into stable, renderer-neutral terminal rows. */
 export function projectRecordedThreadTimeline(
   thread: RecordedThreadTimeline,
   options: TimelineProjectionOptions = {},
 ): ReadonlyArray<TimelineRow> {
   const messages = deduplicateMessages(thread.messages).map((message) =>
-    messageRow(message, options),
+    cachedMessageRow(message, options),
   );
   const orderedActivities = deduplicateActivities(thread.activities).toSorted(activityOrder);
   const activities = collapseToolLifecycle(
-    orderedActivities.map((activity) => activityRow(activity, options)),
+    orderedActivities.map((activity) => cachedActivityRow(activity, options)),
   );
   const byTurn = new Map<string, TuiCheckpoint>();
   for (const checkpoint of thread.checkpoints ?? []) {

@@ -1,15 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "@effect/vitest";
-import { MouseButtons } from "@opentui/core/testing";
+import { afterEach, describe, expect, it } from "@effect/vitest";
 import type { ReactNode } from "react";
 
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
 import { basicTerminalCapabilities, richTerminalCapabilities } from "./capabilities.ts";
 import { UiProvider } from "./context.tsx";
-import { formatKeySequence } from "./KeyHint.tsx";
+import { formatChord } from "../app/actions.ts";
 import { Panel } from "./Panel.tsx";
 import { EmptyState, ErrorState } from "./StateMessage.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
-import { KeyHint } from "./KeyHint.tsx";
 import { resolveGlyph } from "./glyphs.tsx";
 
 const activeDrivers = new Set<TuiTestDriver>();
@@ -26,7 +24,6 @@ async function renderDriver(
 afterEach(async () => {
   await Promise.all([...activeDrivers].map((driver) => driver.close()));
   activeDrivers.clear();
-  vi.restoreAllMocks();
 });
 
 describe("glyph and key fallbacks", () => {
@@ -34,8 +31,8 @@ describe("glyph and key fallbacks", () => {
     expect(resolveGlyph("success", true)).toBe("✓");
     expect(resolveGlyph("success", false)).toBe("OK");
     expect(resolveGlyph("pending", false)).toBe("...");
-    expect(formatKeySequence(["ctrl", "up"], true)).toBe("Ctrl+↑");
-    expect(formatKeySequence(["ctrl", "up"], false)).toBe("Ctrl+Up");
+    expect(formatChord("ctrl+up", true)).toBe("Ctrl+↑");
+    expect(formatChord("ctrl+up", false)).toBe("Ctrl+Up");
   });
 });
 
@@ -51,7 +48,6 @@ function ComponentFrame({ width }: { readonly width: number }) {
     <UiProvider capabilities={richTerminalCapabilities}>
       <Panel flexDirection="column" gap={1} height={14} title="T3 Code" width={width}>
         <StatusBadge label="Connected" tone="success" />
-        <KeyHint keys={["ctrl", "k"]} label="Commands" />
         <EmptyState description="Choose a project to begin." title="No project selected" />
         <ErrorState description="The server closed the connection." title="Connection lost" />
       </Panel>
@@ -72,7 +68,6 @@ describeWithNativeFfi("TUI component frames", () => {
       expect(lines[0]).toHaveLength(width);
       expect(lines.at(-1)).toHaveLength(width);
       expect(frame).toContain("✓ Connected");
-      expect(frame).toContain("[Ctrl+K] Commands");
       expect(frame).toContain("◇ No project selected");
       expect(frame).toContain("× Connection lost");
     });
@@ -83,7 +78,6 @@ describeWithNativeFfi("TUI component frames", () => {
       <UiProvider capabilities={basicTerminalCapabilities}>
         <Panel flexDirection="column" height={8} title="T3 Code" width={40}>
           <StatusBadge label="Connected" tone="success" />
-          <KeyHint keys={["ctrl", "up"]} label="Move" />
           <ErrorState title="Connection lost" />
         </Panel>
       </UiProvider>,
@@ -93,23 +87,7 @@ describeWithNativeFfi("TUI component frames", () => {
     const frame = driver.captureFrame();
     expect(frame.split("\n")[0]).toMatch(/^\+-T3 Code-+/);
     expect(frame).toContain("OK Connected");
-    expect(frame).toContain("[Ctrl+Up] Move");
     expect(frame).toContain("X Connection lost");
     expect(frame).not.toContain("✓");
-  });
-
-  it("runs the focused error action from the keyboard and mouse", async () => {
-    const onRetry = vi.fn();
-    const driver = await renderDriver(
-      <ErrorState focused onRetry={onRetry} title="Connection lost" />,
-      { width: 40, height: 4 },
-    );
-
-    await driver.input.pressKey("x");
-    expect(onRetry).not.toHaveBeenCalled();
-    await driver.input.pressKey("RETURN");
-    expect(onRetry).toHaveBeenCalledOnce();
-    await driver.mouse.click(0, 0, MouseButtons.LEFT, { delayMs: 0 });
-    expect(onRetry).toHaveBeenCalledTimes(2);
   });
 });

@@ -784,7 +784,7 @@ describe("conversation interaction", () => {
       ],
     });
 
-    expect(driver.captureFrame()).toContain("E type answer");
+    expect(driver.captureFrame()).toMatch(/E\s+Type answer/);
     await driver.input.pressKey("e");
     await driver.input.typeText("Straight ahead");
     await driver.input.pressKey("RETURN");

@@ -4,8 +4,9 @@ import { RegistryContext } from "@effect/atom-react";
 import { useContext, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { useKeyLayer } from "../ui/keymap.ts";
-import { Panel } from "../ui/Panel.tsx";
-import { SelectionRow } from "../ui/SelectionRow.tsx";
+import { Button } from "../ui/Button.tsx";
+import { Dialog } from "../ui/Dialog.tsx";
+import { FormInput } from "../ui/FormField.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 
 export function RenameThreadDialog({
@@ -59,70 +60,47 @@ export function RenameThreadDialog({
     },
   });
   return (
-    <Stack
-      position="absolute"
-      top={0}
-      left={0}
-      width="100%"
-      height="100%"
-      zIndex={100}
-      alignItems="center"
-      justifyContent="center"
-      onMouseDown={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      }}
+    <Dialog
+      id="thread-rename-dialog"
+      title="Rename thread"
+      width={46}
+      height={error ? 9 : 7}
+      gap={1}
+      paddingTop={1}
     >
-      <Panel
-        id="thread-rename-dialog"
-        title="Rename thread"
-        width={46}
-        maxWidth="100%"
-        height={error ? 9 : 7}
-        flexDirection="column"
-        gap={1}
-        paddingTop={1}
-        borderTone="borderFocused"
-      >
-        <input
-          id="thread-rename-title"
-          width="100%"
-          value={title}
-          focused={!pending && target === "title"}
-          onInput={setTitle}
-          onMouseDown={(event) => {
-            event.stopPropagation();
-            if (event.button === 0 && !pending) setTarget("title");
-          }}
+      <FormInput
+        id="thread-rename-title"
+        width="100%"
+        value={title}
+        focused={!pending && target === "title"}
+        onInput={setTitle}
+        onFocusRequest={() => {
+          if (!pending) setTarget("title");
+        }}
+      />
+      <Stack height={1} flexDirection="row" gap={2}>
+        <Button
+          id="thread-rename-save"
+          label={pending ? "Saving..." : "[ Save ]"}
+          width={14}
+          focused={target === "save"}
+          disabled={pending}
+          onPress={() => void save()}
         />
-        <Stack height={1} flexDirection="row" gap={2}>
-          {(["save", "cancel"] as const).map((action) => (
-            <Stack
-              key={action}
-              id={`thread-rename-${action}`}
-              width={14}
-              height={1}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                if (event.button !== 0 || pending) return;
-                if (action === "cancel") onClose();
-                else void save();
-              }}
-            >
-              <SelectionRow
-                label={action === "save" ? (pending ? "Saving..." : "[ Save ]") : "[ Cancel ]"}
-                selected={target === action}
-              />
-            </Stack>
-          ))}
-        </Stack>
-        {error ? (
-          <Text height={1} tone="danger">
-            {error}
-          </Text>
-        ) : null}
-      </Panel>
-    </Stack>
+        <Button
+          id="thread-rename-cancel"
+          label="[ Cancel ]"
+          width={14}
+          focused={target === "cancel"}
+          disabled={pending}
+          onPress={onClose}
+        />
+      </Stack>
+      {error ? (
+        <Text height={1} tone="danger">
+          {error}
+        </Text>
+      ) : null}
+    </Dialog>
   );
 }

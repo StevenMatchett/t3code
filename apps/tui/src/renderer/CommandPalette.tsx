@@ -3,6 +3,9 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 
 import { useKeyLayer } from "../ui/keymap.ts";
+import { fuzzyScore } from "../ui/fuzzy.ts";
+import { ListView } from "../ui/ListView.tsx";
+import { EmptyState } from "../ui/StateMessage.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
@@ -13,6 +16,10 @@ export interface CommandPaletteItem {
   readonly detail: string;
   readonly keywords?: string;
   readonly kind?: "command" | "entity";
+  /** The key that runs this directly, shown so the palette teaches it. */
+  readonly shortcut?: string;
+  /** Higher sorts first on an empty query, and breaks ties while filtering. */
+  readonly rank?: number;
 }
 
 /** A leading `>` keeps only commands, like editor palettes. */
@@ -21,13 +28,18 @@ function parseQuery(raw: string) {
   return { commandsOnly, query: commandsOnly ? raw.trimStart().slice(1) : raw };
 }
 
-function matches(item: CommandPaletteItem, query: string) {
+/** Label matches rank by quality. Keywords, details, and message text still find an item below them. */
+function score(item: CommandPaletteItem, query: string) {
+  const label = fuzzyScore(query, item.label);
+  if (label !== null) return label;
   const haystack = `${item.label} ${item.detail} ${item.keywords ?? ""}`.toLocaleLowerCase();
   return query
     .trim()
     .toLocaleLowerCase()
     .split(/\s+/u)
-    .every((token) => haystack.includes(token));
+    .every((token) => haystack.includes(token))
+    ? 100
+    : null;
 }
 
 export function CommandPalette({
@@ -58,9 +70,14 @@ export function CommandPalette({
   const parsed = parseQuery(query);
   const filtered = useMemo(() => {
     const { commandsOnly, query: needle } = parseQuery(query);
-    return items.filter(
-      (item) => (!commandsOnly || item.kind === "command") && matches(item, needle),
-    );
+    return items
+      .flatMap((item) => {
+        if (commandsOnly && item.kind !== "command") return [];
+        const value = score(item, needle);
+        return value === null ? [] : [{ item, value: value + (item.rank ?? 0) / 10_000 }];
+      })
+      .toSorted((left, right) => right.value - left.value)
+      .map(({ item }) => item);
   }, [items, query]);
   const normalizedQuery = parsed.commandsOnly ? "" : query.trim().slice(0, 200);
   const searchPending = normalizedQuery.length >= 2 && normalizedQuery !== searchedQuery;
@@ -76,8 +93,6 @@ export function CommandPalette({
     };
   }, [normalizedQuery, onSearchQueryChange, searchDebounceMs]);
   const selected = Math.max(0, Math.min(cursor, filtered.length - 1));
-  const count = Math.max(1, height - 3);
-  const start = Math.max(0, Math.min(selected - Math.floor(count / 2), filtered.length - count));
   const choose = () => {
     const item = filtered[selected];
     if (item) onChoose(item.id);
@@ -99,7 +114,7 @@ export function CommandPalette({
     },
   });
   return (
-    <Stack width="100%" height="100%" flexDirection="column" gap={1}>
+    <Stack width="100%" height="100%" flexDirection="column">
       <input
         id="command-palette-input"
         focused={active}
@@ -114,42 +129,38 @@ export function CommandPalette({
           else if (searchDebounceMs === 0) onSearchQueryChange(normalized);
         }}
       />
-      <Stack flexGrow={1} flexDirection="column" overflow="hidden">
-        {filtered.length === 0 ? (
-          <Text tone="muted">No matching projects, threads, or commands.</Text>
-        ) : (
-          filtered.slice(start, start + count).map((item, offset) => {
-            const index = start + offset;
-            return (
-              <Stack
-                key={item.id}
-                id={`command-palette-${item.id}`}
-                height={1}
-                flexShrink={0}
-                onMouseDown={(event) => {
-                  if (event.button !== 0) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setCursor(index);
-                  onChoose(item.id);
-                }}
-              >
-                <SelectionRow
-                  selected={index === selected}
-                  active={active}
-                  label={inlineTerminalText(`${item.label}  ${item.detail}`)}
-                />
-              </Stack>
-            );
-          })
+      <ListView
+        items={filtered}
+        selected={selected}
+        height={Math.max(1, height - 2)}
+        itemKey={(item) => item.id}
+        itemId={(item) => `command-palette-${item.id}`}
+        empty={<EmptyState title="No matches." description="Esc closes. > filters to commands." />}
+        onActivate={(item, index) => {
+          setCursor(index);
+          onChoose(item.id);
+        }}
+        renderItem={(item, index) => (
+          <SelectionRow
+            selected={index === selected}
+            active={active}
+            label={inlineTerminalText(item.detail ? `${item.label}  ${item.detail}` : item.label)}
+            trailing={
+              item.shortcut ? (
+                <Text height={1} flexShrink={0} tone="muted" wrapMode="none">
+                  {` ${item.shortcut} `}
+                </Text>
+              ) : undefined
+            }
+          />
         )}
-      </Stack>
-      <Text height={1} tone="muted">
+      />
+      <Text height={1} flexShrink={0} tone="muted" wrapMode="none" truncate>
         {searchFailed
           ? "Conversation search unavailable · local results shown"
           : searchPending || searching
             ? "Searching conversation output..."
-            : "Type to filter · ↑↓ select · Enter open · Esc close"}
+            : `${filtered.length} result${filtered.length === 1 ? "" : "s"}`}
       </Text>
     </Stack>
   );

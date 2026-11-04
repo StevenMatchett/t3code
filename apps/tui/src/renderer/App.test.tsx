@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import { MouseButtons } from "@opentui/core/testing";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
-import { PrototypeApp } from "./PrototypeApp.tsx";
+import { App } from "./App.tsx";
 
 const drivers = new Set<TuiTestDriver>();
 
@@ -15,19 +15,19 @@ async function setup() {
   const fixture = makeClientFixture();
   const onInterrupt = vi.fn();
   const driver = await createTuiTestDriver(
-    <PrototypeApp client={fixture.client} onInterrupt={onInterrupt} />,
+    <App client={fixture.client} onInterrupt={onInterrupt} />,
     { width: 80, height: 24 },
   );
   drivers.add(driver);
   return { driver, onInterrupt };
 }
 
-describe("PrototypeApp exit confirmation", () => {
+describe("App exit confirmation", () => {
   it("passes Ctrl+C through while the embedded terminal owns focus", async () => {
     const fixture = makeClientFixture();
     const onInterrupt = vi.fn();
     const driver = await createTuiTestDriver(
-      <PrototypeApp client={fixture.client} onInterrupt={onInterrupt} />,
+      <App client={fixture.client} onInterrupt={onInterrupt} />,
       { width: 96, height: 28, kittyKeyboard: true },
     );
     drivers.add(driver);

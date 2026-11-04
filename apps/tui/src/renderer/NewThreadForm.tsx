@@ -24,7 +24,8 @@ import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
-import { useThemeColor } from "../ui/context.tsx";
+import { Button } from "../ui/Button.tsx";
+import { FormInput, FormRow } from "../ui/FormField.tsx";
 
 interface Props {
   readonly client: TuiClient;
@@ -126,9 +127,6 @@ function Fields({
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const [confirmRestart, setConfirmRestart] = useState(false);
-  const background = useThemeColor("panel");
-  const foreground = useThemeColor("text");
-  const selectionColor = useThemeColor("selection");
   const locked = creation.attempt !== null;
   const busy =
     creation.phase === "worktree" || creation.phase === "thread" || creation.phase === "created";
@@ -262,34 +260,17 @@ function Fields({
     },
   });
   const button = (id: string, text: string, selected = false) => (
-    <Stack
+    <Button
       id={`new-thread-${id}`}
-      height={1}
+      label={text}
       flexGrow={1}
+      flexShrink={1}
       minWidth={0}
-      {...(focus === id && selectionColor ? { backgroundColor: selectionColor } : {})}
-      onMouseDown={(event) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        activate(id);
-      }}
-    >
-      <Text
-        height={1}
-        wrapMode="none"
-        truncate
-        strong={selected}
-        tone={focus === id || selected ? "accent" : "muted"}
-      >
-        {text}
-      </Text>
-    </Stack>
+      focused={focus === id}
+      selected={selected}
+      onPress={() => activate(id)}
+    />
   );
-  const inputColors = {
-    ...(background ? { backgroundColor: background, focusedBackgroundColor: background } : {}),
-    ...(foreground ? { textColor: foreground, focusedTextColor: foreground } : {}),
-  };
   const selectedChoice = choices.find(
     (choice) =>
       choice.provider.instanceId === selection?.instanceId && choice.model.slug === selection.model,
@@ -306,62 +287,51 @@ function Fields({
       <Text height={1} tone="muted" wrapMode="none" truncate>
         {inlineTerminalText(project.workspaceRoot)}
       </Text>
-      <Stack height={1} flexDirection="row">
-        <Text width={10}>Title</Text>
-        <input
+      <FormRow label="Title" focused={focus === "title"}>
+        <FormInput
           id="new-thread-title"
-          flexGrow={1}
-          minWidth={1}
           value={title}
           placeholder="New thread"
           focused={!locked && focus === "title" && !modelMenu && !permissionsMenu}
           onInput={setTitle}
-          onMouseDown={() => {
+          onFocusRequest={() => {
             if (!locked) setFocus("title");
           }}
-          {...inputColors}
         />
-      </Stack>
-      <Stack height={1} flexDirection="row">
-        <Text width={10}>Location</Text>
+      </FormRow>
+      <FormRow label="Location" focused={focus === "local" || focus === "worktree"}>
         {button("local", `${mode === "local" ? "[x]" : "[ ]"} Current checkout`, mode === "local")}
         {button(
           "worktree",
           `${mode === "worktree" ? "[x]" : "[ ]"} New worktree`,
           mode === "worktree",
         )}
-      </Stack>
+      </FormRow>
       {mode === "worktree" ? (
-        <Stack height={1} flexDirection="row">
-          <Text width={10}>Base ref</Text>
-          <input
+        <FormRow label="Base ref" focused={focus === "base"}>
+          <FormInput
             id="new-thread-base"
-            flexGrow={1}
-            minWidth={1}
             value={baseRef}
             focused={!locked && focus === "base" && !modelMenu && !permissionsMenu}
             onInput={setBaseRef}
-            onMouseDown={() => {
+            onFocusRequest={() => {
               if (!locked) setFocus("base");
             }}
-            {...inputColors}
           />
-        </Stack>
+        </FormRow>
       ) : null}
-      <Stack height={1} flexDirection="row">
-        <Text width={10}>Model</Text>
+      <FormRow label="Model" focused={focus === "model"}>
         {button(
           "model",
           `${selectedChoice?.provider.displayName ?? selection?.instanceId ?? "No provider"} / ${selectedChoice?.model.name ?? selection?.model ?? "No available model"} v`,
         )}
-      </Stack>
-      <Stack height={1} flexDirection="row">
-        <Text width={10}>Access</Text>
+      </FormRow>
+      <FormRow label="Access" focused={focus === "permissions"}>
         {button(
           "permissions",
           `${permissionChoices.find((choice) => choice.id === (creation.attempt?.input.runtimeMode ?? runtimeMode))?.label ?? "Permissions"} v`,
         )}
-      </Stack>
+      </FormRow>
       <Text height={2} tone="muted">
         {mode === "worktree"
           ? "New branch and worktree from the base ref's committed files. No setup scripts run automatically."
@@ -455,7 +425,7 @@ function Fields({
           borderTone="borderFocused"
           flexDirection="column"
         >
-          <input
+          <FormInput
             id="new-thread-model-search"
             width="100%"
             focused
@@ -465,7 +435,6 @@ function Fields({
               setQuery(value);
               setCursor(0);
             }}
-            {...inputColors}
           />
           {filtered.length === 0 ? (
             <Text tone="muted">No available models match. Configure providers in T3 settings.</Text>

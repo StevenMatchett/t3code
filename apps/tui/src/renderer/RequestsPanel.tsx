@@ -49,11 +49,8 @@ export function Approval({
   const selected = options[selectedIndex]!;
   const waiting =
     state.pending !== null || state.replies.some((reply) => reply.requestId === request.requestId);
-  const lines = wrapTerminalLines(
-    [request.detail ?? request.requestKind, selected.warning ?? ""].filter(Boolean).join("\n"),
-    width,
-  );
-  const count = Math.max(1, height - options.length - 4);
+  const lines = wrapTerminalLines(request.detail ?? request.requestKind, width);
+  const count = Math.max(1, height - options.length - 1);
   useKeyLayer("approval", {
     active,
     bindings: {
@@ -81,10 +78,6 @@ export function Approval({
   });
   return (
     <Stack flexDirection="column" height="100%" overflow="hidden">
-      <Text
-        height={1}
-        wrapMode="none"
-      >{`Approval: ${inlineTerminalText(request.appName ?? request.requestKind)}`}</Text>
       <Stack height={count} flexShrink={0} flexDirection="column" overflow="hidden">
         <Text height={count} wrapMode="none">
           {lines.slice(offset, offset + count).join("\n")}
@@ -98,16 +91,15 @@ export function Approval({
           active={active && !waiting}
         />
       ))}
-      <Text height={1} wrapMode="none">
-        {waiting
-          ? "Response queued; waiting for provider."
-          : "Up/Down choose | Enter submit | Esc chat"}
-      </Text>
-      <Text height={1} wrapMode="none">
-        PgUp/PgDn scroll full request details
-      </Text>
-      <Text height={1} wrapMode="none">
-        {state.error ?? ""}
+      <Text
+        height={1}
+        flexShrink={0}
+        wrapMode="none"
+        truncate
+        tone={state.error ? "danger" : "muted"}
+      >
+        {state.error ??
+          (waiting ? "Response queued; waiting for provider." : (selected.warning ?? ""))}
       </Text>
     </Stack>
   );
@@ -327,17 +319,19 @@ export function Questions({
           height={editorHeight}
         />
       ) : null}
-      <Text height={1} wrapMode="none">
-        {waiting
-          ? "Response queued; waiting for provider."
-          : editing
-            ? "Enter keeps answer | Shift+Enter newline | Esc cancel"
-            : canCustom
-              ? "Up/Down choose | Enter select | E type answer | Esc chat"
-              : "Up/Down choose | Space/Enter select | Esc chat"}
-      </Text>
-      <Text height={1} wrapMode="none">
-        {state.error ?? "Select an answer, then Continue or Submit. PgUp/PgDn scroll details."}
+      <Text
+        height={1}
+        flexShrink={0}
+        wrapMode="none"
+        truncate
+        tone={state.error ? "danger" : "muted"}
+      >
+        {state.error ??
+          (waiting
+            ? "Response queued; waiting for provider."
+            : editing
+              ? "Enter keeps answer · Shift+Enter new line · Esc cancels"
+              : "Select an answer, then Continue or Submit.")}
       </Text>
     </Stack>
   );

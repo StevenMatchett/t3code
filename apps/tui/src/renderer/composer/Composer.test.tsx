@@ -3,9 +3,9 @@ import { MouseButtons } from "@opentui/core/testing";
 import { TurnId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { act } from "react";
-import { makeClientFixture } from "../testing/clientFixture.ts";
-import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
-import { AppShell } from "./AppShell.tsx";
+import { makeClientFixture } from "../../testing/clientFixture.ts";
+import { createTuiTestDriver, type TuiTestDriver } from "../../testing/driver.tsx";
+import { AppShell } from "../AppShell.tsx";
 
 const drivers = new Set<TuiTestDriver>();
 afterEach(async () => {

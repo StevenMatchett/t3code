@@ -6,22 +6,23 @@ import * as Option from "effect/Option";
 import { useMemo, useState, useContext, useEffect, useRef } from "react";
 
 import { AgentOutputOverlay, AgentSwarmPanel, agentOutputLines } from "./AgentSwarm.tsx";
-import { Approval, Questions } from "./RequestsPanel.tsx";
-import { ComposerControls } from "./ProviderPicker.tsx";
+import { Composer } from "./composer/Composer.tsx";
+import { NoticeRow } from "./conversation/NoticeRow.tsx";
+import { RequestDock } from "./conversation/RequestDock.tsx";
+import { StatusRow } from "./conversation/StatusRow.tsx";
+import { useTranscript, type TranscriptAnchor } from "./conversation/useTranscript.ts";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import type { TuiAgent } from "../connection/models.ts";
-import { projectRecordedThreadTimeline } from "../features/chat/timeline.ts";
+import { approvalOptions } from "../features/chat/interactions.ts";
 import { threadActivityPhase } from "../features/chat/threadActivity.ts";
 import { pastedImagePaths } from "../features/chat/imageAttachments.ts";
 import { suggestedReplies as parseSuggestedReplies } from "../features/chat/suggestedReplies.ts";
-import { ThreadActivityIndicator } from "../ui/ThreadActivityIndicator.tsx";
-import { TurnTiming } from "../ui/TurnTiming.tsx";
-import { conversationLines } from "../ui/conversationLines.ts";
 import { ConversationText } from "../ui/ShellCommandText.tsx";
-import { textMatches } from "../ui/textSearch.ts";
+import { conversationRows, requestPanelHeight } from "../ui/layout.ts";
+import { EmptyState, ErrorState, LoadingState } from "../ui/StateMessage.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
-import { inlineTerminalText, wrapTerminalWords } from "../ui/textLayout.ts";
+import { inlineTerminalText, wrapTerminalLines, wrapTerminalWords } from "../ui/textLayout.ts";
 import { useOutputVim } from "./useOutputVim.ts";
 import { useOutputLinkMenu } from "../ui/OutputLinkMenu.tsx";
 import { ThreadTerminal } from "./ThreadTerminal.tsx";
@@ -76,9 +77,7 @@ export function Conversation({
     previousComposerFocusRequest.current = composerFocusRequest;
     setMode("composer");
   }, [composerFocusRequest]);
-  const [anchor, setAnchor] = useState<{ readonly id: string; readonly line: number } | null>(
-    savedView?.anchor ?? null,
-  );
+  const [anchor, setAnchor] = useState<TranscriptAnchor | null>(savedView?.anchor ?? null);
   const [terminalOpen, setTerminalOpen] = useState(savedView?.terminalOpen ?? false);
   const [showDetails, setShowDetails] = useState(savedView?.showDetails ?? false);
   const [renderMarkdown, setRenderMarkdown] = useState(savedView?.renderMarkdown ?? true);
@@ -244,103 +243,52 @@ export function Conversation({
     : editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4;
   const agentPanelHeight =
     agents.length > 0 ? (agentsExpanded ? Math.min(6, agents.length + 3) : 3) : 0;
-  const gap = height >= 12 ? 1 : 0;
+  const requestContent = approval
+    ? approvalOptions(approval).length +
+      Math.min(
+        4,
+        wrapTerminalLines(approval.detail ?? approval.requestKind, Math.max(1, width - 4)).length,
+      ) +
+      1
+    : question
+      ? 13
+      : 0;
   const requestHeight =
     approval || question
-      ? Math.max(
-          6,
-          Math.min(
-            15,
-            Math.floor(height / 2),
-            height -
-              composerHeight -
-              agentPanelHeight -
-              gap -
-              (interaction.error ? 1 : 0) -
-              (queued ? 2 : 0) -
-              3,
-          ),
-        )
+      ? requestPanelHeight(height, composerHeight, agentPanelHeight, requestContent)
       : 0;
-  const count = Math.max(
-    1,
-    height -
-      1 -
-      composerHeight -
-      gap -
-      agentPanelHeight -
-      requestHeight -
-      (search ? 1 : 0) -
-      (interaction.error ? 1 : 0) -
-      (queued ? 2 : 0),
-  );
-  const timeline = useMemo(
-    () => (thread === null ? [] : projectRecordedThreadTimeline(thread)),
-    [thread],
-  );
-  const lines = useMemo(
-    () =>
-      conversationLines(
-        timeline,
-        width,
-        showDetails,
-        expandedToolGroups,
-        renderMarkdown,
-        capabilities.unicode,
-      ),
-    [timeline, width, showDetails, expandedToolGroups, renderMarkdown, capabilities.unicode],
-  );
-  const maxStart = Math.max(0, lines.length - count);
-  const searchQuery = search?.query ?? "";
-  const matches = useMemo(
-    () =>
-      searchQuery
-        ? lines.flatMap((line, lineIndex) =>
-            textMatches(line.text, searchQuery).map((match) => ({ ...match, lineIndex })),
-          )
-        : [],
-    [lines, searchQuery],
-  );
-  const matchIndex = matches.length ? (search?.index ?? 0) % matches.length : 0;
-  const anchorIndex =
-    anchor === null
-      ? -1
-      : lines.findIndex((line) => line.id === anchor.id && line.line >= anchor.line);
-  const start =
-    search && matches.length
-      ? Math.min(maxStart, matches[matchIndex]!.lineIndex)
-      : anchor === null
-        ? maxStart
-        : Math.max(
-            0,
-            Math.min(
-              maxStart,
-              anchorIndex < 0 ? lines.findIndex((line) => line.id === anchor.id) : anchorIndex,
-            ),
-          );
+  const rowLayout = conversationRows({
+    height,
+    composer: composerHeight,
+    agents: agentPanelHeight,
+    request: requestHeight,
+    // Tiny terminals have no reserved row, so a notice there takes a transcript row.
+    extraNotice: height < 12 && (search || interaction.error || queued) ? 1 : 0,
+  });
+  const count = rowLayout.transcript;
+  const noticeHeight = height < 12 ? (search || interaction.error || queued ? 1 : 0) : 1;
   const page = state.history;
-  useEffect(() => {
-    if (
-      anchor &&
-      !lines.some((line) => line.id === anchor.id) &&
-      page?.hasMoreHistory &&
-      !page.loading
-    )
-      client.loadOlder(registry, threadId);
-  }, [client, threadId, anchor, lines, page]);
-  const scrollTo = (next: number) => {
-    const target = Math.max(0, Math.min(maxStart, next));
-    const line = lines[target];
-    setAnchor(target === maxStart || line === undefined ? null : { id: line.id, line: line.line });
-  };
+  const transcript = useTranscript({
+    client,
+    threadId,
+    thread,
+    page,
+    width,
+    count,
+    expanded: showDetails,
+    expandedToolGroups,
+    renderMarkdown,
+    unicode: capabilities.unicode,
+    search,
+    anchor,
+    setAnchor,
+  });
+  const { lines, matches, matchIndex, start, linesBelow, scrollTo, pinTo } = transcript;
   const vim = useOutputVim({
     lines,
     start,
     count,
-    scrollTo: (next) => {
-      const line = lines[Math.max(0, Math.min(maxStart, next))];
-      setAnchor(line ? { id: line.id, line: line.line } : null);
-    },
+    scrollTo: pinTo,
     onPaste: (text) => {
       if (readOnly) return;
       if (!client.actions.addPaste(registry, threadId, text)) {
@@ -550,14 +498,6 @@ export function Conversation({
       "history.openLink": () => false,
     },
   });
-  const empty =
-    state.status === "deleted"
-      ? "This thread was deleted."
-      : Option.isSome(state.error)
-        ? "Conversation unavailable. R retries the connection."
-        : thread === null
-          ? "Loading conversation..."
-          : "No messages in this thread.";
   const metadata = Option.getOrNull(shell.snapshot)?.threads.find((item) => item.id === threadId);
   const live =
     connection.phase === "connected" &&
@@ -632,7 +572,21 @@ export function Conversation({
         }}
       >
         {lines.length === 0 ? (
-          <Text tone="muted">{empty}</Text>
+          state.status === "deleted" ? (
+            <EmptyState
+              title="This thread was deleted."
+              description="Esc returns to your threads."
+            />
+          ) : Option.isSome(state.error) ? (
+            <ErrorState title="Conversation unavailable. R retries the connection." />
+          ) : thread === null ? (
+            <LoadingState title="Loading conversation..." />
+          ) : (
+            <EmptyState
+              title="No messages in this thread."
+              {...(readOnly ? {} : { description: "Press Enter to write the first one." })}
+            />
+          )
         ) : (
           lines.slice(start, start + count).map((line, offset) => (
             <ConversationText
@@ -657,182 +611,83 @@ export function Conversation({
           ))
         )}
       </Stack>
-      {search ? (
-        <Stack height={1} flexShrink={0} flexDirection="row">
-          <Text tone="accent">Find: </Text>
-          <input
-            id="thread-search-input"
-            flexGrow={1}
-            focused={active && mode === "history" && !terminalOpen && !selectedAgent}
-            value={search.query}
-            placeholder="Search loaded output..."
-            onInput={(query) => setSearch({ query, index: 0 })}
-          />
-          <Text tone={search.query && !matches.length ? "warning" : "muted"}>
-            {matches.length
-              ? `${matchIndex + 1}/${matches.length}`
-              : search.query
-                ? "No matches"
-                : "Type to search"}
-          </Text>
-        </Stack>
-      ) : null}
-      {interaction.error ? (
-        <Text height={1} flexShrink={0} tone="danger" wrapMode="none" truncate>
-          {interaction.error}
-        </Text>
-      ) : null}
-      {gap ? <Stack height={gap} flexShrink={0} /> : null}
-      {approval ? (
-        <Panel
-          id="inline-approval"
-          title={mode === "requests" ? "Agent approval" : "Agent approval · click to respond"}
-          height={requestHeight}
-          flexShrink={0}
-          width="100%"
-          flexDirection="column"
-          borderTone={mode === "requests" ? "borderFocused" : "warning"}
-          onMouseDown={(event) => {
-            if (!active || event.button !== 0 || mode === "requests") return;
-            event.preventDefault();
-            event.stopPropagation();
-            setMode("requests");
-          }}
-        >
-          <Approval
-            key={approval.requestId}
-            request={approval}
-            client={client}
-            threadId={threadId}
-            active={active && mode === "requests" && !selectedAgent}
-            width={Math.max(1, width - 2)}
-            height={requestHeight - 2}
-            onBack={() => setMode("history")}
-          />
-        </Panel>
-      ) : question ? (
-        <Panel
-          id="inline-question"
-          title={mode === "questions" ? "Agent question" : "Agent question · click to answer"}
-          height={requestHeight}
-          flexShrink={0}
-          width="100%"
-          flexDirection="column"
-          borderTone={mode === "questions" ? "borderFocused" : "warning"}
-          onMouseDown={(event) => {
-            if (!active || event.button !== 0 || mode === "questions") return;
-            event.preventDefault();
-            event.stopPropagation();
-            setMode("questions");
-          }}
-        >
-          <Questions
-            key={question.requestId}
-            request={question}
-            client={client}
-            threadId={threadId}
-            active={active && mode === "questions" && !selectedAgent}
-            width={Math.max(1, width - 2)}
-            height={requestHeight - 2}
-            onBack={() => setMode("history")}
-          />
-        </Panel>
-      ) : null}
-      {queued ? (
-        <Stack id="queued-message" height={2} flexShrink={0}>
-          <Text tone="warning" height={1} wrapMode="none" truncate>
-            {queued.status === "sending"
-              ? "Sending queued message"
-              : queued.status === "held"
-                ? "Queue paused"
-                : "Queued"}
-            {` (${interaction.queue.length}): ${inlineTerminalText(queued.command.message.text) || "[image]"}`}
-          </Text>
-          <Text tone="muted" height={1} wrapMode="none" truncate>
-            {queued.status === "sending"
-              ? "Sending to the agent..."
-              : "Ctrl+Y Send now · Ctrl+U Edit · Ctrl+X Stop/pause"}
-          </Text>
-        </Stack>
-      ) : null}
-      <Stack id="conversation-activity" height={1} flexShrink={0} flexDirection="row">
-        <Text id="thread-workspace-label" tone="accent" height={1} flexShrink={0} wrapMode="none">
-          {thread?.worktreePath ? "Worktree" : "Local"}
-          {"  "}
-        </Text>
-        <Text
-          id="thread-diff-action"
-          tone="accent"
-          flexShrink={0}
-          onMouseDown={(event) => {
-            if (!active || event.button !== 0) return;
-            event.preventDefault();
-            event.stopPropagation();
-            onDiff?.();
-          }}
-        >
-          [D Changes]{" "}
-        </Text>
-        {parentThreadId ? (
-          <Text
-            id="thread-parent-action"
-            tone="accent"
-            flexShrink={0}
-            onMouseDown={(event) => {
-              if (!active || event.button !== 0) return;
-              event.preventDefault();
-              event.stopPropagation();
-              openParent();
-            }}
-          >
-            [U Parent]{" "}
-          </Text>
-        ) : null}
-        <ThreadActivityIndicator phase={phase} visible={active} />
-        <TurnTiming turn={timingTurn} runningSince={runningSince} />
-        <Text
-          id="output-markdown-toggle"
-          tone="accent"
-          height={1}
-          minWidth={0}
-          wrapMode="none"
-          truncate
-          onMouseDown={(event) => {
-            if (!active || linkMenu.isOpen || event.button !== 0) return;
-            event.preventDefault();
-            event.stopPropagation();
-            setSearch(null);
-            toggleMarkdown();
-          }}
-        >
-          {renderMarkdown ? " [MD]" : " [Raw]"}
-        </Text>
-        <Text
-          tone={requestCount ? "warning" : "muted"}
-          flexGrow={1}
-          minWidth={0}
-          wrapMode="none"
-          truncate
-        >
-          {"  "}
-          {requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
+      <NoticeRow
+        height={noticeHeight}
+        search={search}
+        matchCount={matches.length}
+        matchIndex={matchIndex}
+        inputFocused={active && mode === "history" && !terminalOpen && !selectedAgent}
+        onSearchInput={(query) => setSearch({ query, index: 0 })}
+        error={interaction.error}
+        queued={queued}
+        queueLength={interaction.queue.length}
+      />
+      <RequestDock
+        approval={approval}
+        question={question}
+        focused={mode === (approval ? "requests" : "questions")}
+        active={active && !selectedAgent}
+        client={client}
+        threadId={threadId}
+        width={width}
+        height={requestHeight}
+        onFocus={() => setMode(requestMode)}
+        onBack={() => setMode("history")}
+      />
+      <StatusRow
+        worktree={Boolean(thread?.worktreePath)}
+        phase={phase}
+        animate={active}
+        timingTurn={timingTurn}
+        runningSince={runningSince}
+        showParent={parentThreadId !== null}
+        renderMarkdown={renderMarkdown}
+        message={
+          requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
             ? "A: respond to requests"
             : interaction.pending
               ? "Sending command..."
               : queued?.status === "queued"
                 ? "Sends after next tool call / turn end"
-                : (interaction.notice ?? "T: tool details")}
-        </Text>
-        <Text tone="muted" flexShrink={0} maxWidth="70%" wrapMode="none" truncate>
-          {"  "}
-          {linkMenu.notice
-            ? `${linkMenu.notice} · `
-            : mode === "history" && vim.status
-              ? `${vim.status} · `
-              : ""}
-          {anchor !== null ? "History / End: live" : ""}
-        </Text>
-      </Stack>
+                : (interaction.notice ?? "")
+        }
+        messageTone={requestCount ? "warning" : "muted"}
+        detail={[
+          linkMenu.notice,
+          mode === "history" ? vim.status : "",
+          anchor !== null
+            ? `${linesBelow > 0 ? `${linesBelow} below · ` : ""}History / End: live`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+        onDiff={() => {
+          if (active) onDiff?.();
+        }}
+        onParent={() => {
+          if (active) openParent();
+        }}
+        onToggleMarkdown={() => {
+          if (!active || linkMenu.isOpen) return;
+          setSearch(null);
+          toggleMarkdown();
+        }}
+      />
+      {agents.length > 0 ? (
+        <AgentSwarmPanel
+          agents={agents}
+          height={agentPanelHeight}
+          cursor={resolvedAgentCursor}
+          active={mode === "agents"}
+          expanded={agentsExpanded}
+          onSelect={setAgentCursor}
+          onToggle={() => setAgentsExpanded((current) => !current)}
+          onOpen={(agentId) => {
+            const agent = agents.find((candidate) => candidate.id === agentId);
+            if (agent) openAgent(agent);
+          }}
+        />
+      ) : null}
       {readOnly ? (
         <Panel id="provider-subagent-bar" height={composerHeight} flexShrink={0} width="100%">
           <Text height={1} tone="muted" wrapMode="none" truncate>
@@ -840,7 +695,7 @@ export function Conversation({
           </Text>
         </Panel>
       ) : (
-        <ComposerControls
+        <Composer
           client={client}
           threadId={threadId}
           active={active && !linkMenu.isOpen}
@@ -872,21 +727,6 @@ export function Conversation({
             : {})}
         />
       )}
-      {agents.length > 0 ? (
-        <AgentSwarmPanel
-          agents={agents}
-          height={agentPanelHeight}
-          cursor={resolvedAgentCursor}
-          active={mode === "agents"}
-          expanded={agentsExpanded}
-          onSelect={setAgentCursor}
-          onToggle={() => setAgentsExpanded((current) => !current)}
-          onOpen={(agentId) => {
-            const agent = agents.find((candidate) => candidate.id === agentId);
-            if (agent) openAgent(agent);
-          }}
-        />
-      ) : null}
       {selectedAgent ? (
         <AgentOutputOverlay
           agent={selectedAgent}

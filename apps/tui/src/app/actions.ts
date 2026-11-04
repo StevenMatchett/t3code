@@ -87,7 +87,7 @@ export const ACTIONS = {
     title: "Toggle notification sounds",
     keys: ["ctrl+g"],
     label: "Sounds",
-    hint: 55,
+    hint: 72,
     keywords: "audio mute unmute alerts approval finished",
   },
   "app.quit": {
@@ -130,7 +130,7 @@ export const ACTIONS = {
     title: "Manage thread",
     keys: ["m"],
     label: "Manage",
-    hint: 50,
+    hint: 73,
     keywords: "rename archive delete restore",
   },
   "diff.toggle": {
@@ -171,7 +171,7 @@ export const ACTIONS = {
     scope: "workspace",
     title: "Cycle sidebar: projects, recent, archived",
     keys: ["ctrl+b"],
-    label: "View",
+    label: "Cycle view",
     hint: 20,
     keywords: "view navigation",
   },
@@ -323,7 +323,7 @@ export const ACTIONS = {
     keys: ["escape", "left", "backspace"],
     keyLabel: "Esc",
     label: "Threads",
-    hint: 88,
+    hint: 78,
     ...keyOnly,
   },
   "history.nextRegion": {
@@ -331,7 +331,7 @@ export const ACTIONS = {
     title: "Move to the next region",
     keys: ["tab"],
     label: "Agents",
-    hint: 86,
+    hint: 76,
     ...keyOnly,
   },
   "history.previousRegion": {
@@ -345,7 +345,7 @@ export const ACTIONS = {
     title: "Find in thread",
     keys: ["/"],
     label: "Find",
-    hint: 84,
+    hint: 74,
     keywords: "search text",
   },
   "history.scrollUp": { scope: "history", title: "Scroll up", keys: ["up"], ...step },
@@ -488,7 +488,7 @@ export const ACTIONS = {
     title: "Back to the transcript",
     keys: ["escape"],
     label: "History",
-    hint: 88,
+    hint: 84,
     ...keyOnly,
   },
   "composer.nextControl": {

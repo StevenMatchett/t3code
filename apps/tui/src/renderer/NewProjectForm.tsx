@@ -8,11 +8,14 @@ import * as Option from "effect/Option";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { defaultCloneDestination } from "../features/projects/newProject.ts";
+import { ListView } from "../ui/ListView.tsx";
+import { EmptyState } from "../ui/StateMessage.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
-import { useThemeColor } from "../ui/context.tsx";
+import { Button } from "../ui/Button.tsx";
+import { FormInput, FormRow } from "../ui/FormField.tsx";
 
 interface Props {
   readonly client: TuiClient;
@@ -44,13 +47,6 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
   const [destinationEdited, setDestinationEdited] = useState(false);
   const [focus, setFocus] = useState("local");
   const browseGeneration = useRef(0);
-  const background = useThemeColor("panel");
-  const foreground = useThemeColor("text");
-  const selectionColor = useThemeColor("selection");
-  const inputColors = {
-    ...(background ? { backgroundColor: background, focusedBackgroundColor: background } : {}),
-    ...(foreground ? { textColor: foreground, focusedTextColor: foreground } : {}),
-  };
   const busy = creation.phase === "creating" || creation.phase === "cloning";
   const created = creation.projectId
     ? (Option.getOrNull(shell.snapshot)?.projects.some(
@@ -171,33 +167,22 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
   });
 
   const button = (id: string, label: string, selected = false) => (
-    <Stack
+    <Button
       id={`new-project-${id}`}
-      height={1}
+      label={label}
       flexGrow={1}
+      flexShrink={1}
       minWidth={0}
-      {...(focus === id && selectionColor ? { backgroundColor: selectionColor } : {})}
-      onMouseDown={(event) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        activate(id);
-      }}
-    >
-      <Text strong={selected} tone={focus === id || selected ? "accent" : "muted"} truncate>
-        {label}
-      </Text>
-    </Stack>
+      focused={focus === id}
+      selected={selected}
+      onPress={() => activate(id)}
+    />
   );
   const visibleCount = Math.max(1, height - 10);
-  const start = Math.max(
-    0,
-    Math.min(treeIndex - Math.floor(visibleCount / 2), treeEntries.length - visibleCount),
-  );
   const message = creation.error ?? browseError;
 
   return (
-    <Stack width="100%" height="100%" flexDirection="column" overflow="hidden" gap={1}>
+    <Stack width="100%" height="100%" flexDirection="column" overflow="hidden">
       <Text height={1} strong>
         Add a project
       </Text>
@@ -207,47 +192,41 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
       </Stack>
       {source === "local" ? (
         <>
-          <Stack height={1} flexDirection="row">
-            <Text width={8}>Folder</Text>
-            <input
+          <FormRow label="Folder" labelWidth={8} focused={focus === "path"}>
+            <FormInput
               id="new-project-path"
-              flexGrow={1}
-              minWidth={1}
               value={path}
               focused={!busy && focus === "path"}
               onInput={setPath}
-              onMouseDown={() => setFocus("path")}
-              {...inputColors}
+              onFocusRequest={() => setFocus("path")}
             />
-          </Stack>
+          </FormRow>
           <Text height={1} tone="muted">
             {loading ? "Loading folders..." : "Enter opens a folder · select .. to go up"}
           </Text>
-          <Stack flexDirection="column" flexGrow={1} overflow="hidden">
-            {treeEntries.length === 0 && !loading ? (
-              <Text tone="muted">No child folders. You can still add this folder.</Text>
-            ) : (
-              treeEntries.slice(start, start + visibleCount).map((entry, offset) => {
-                const index = start + offset;
-                return (
-                  <Stack
-                    key={entry.fullPath}
-                    onMouseDown={(event) => {
-                      if (event.button !== 0) return;
-                      setTreeIndex(index);
-                      setFocus("tree");
-                    }}
-                  >
-                    <SelectionRow
-                      label={`${entry.name}/`}
-                      selected={index === treeIndex}
-                      active={focus === "tree"}
-                    />
-                  </Stack>
-                );
-              })
+          <ListView
+            items={treeEntries}
+            selected={treeIndex}
+            height={visibleCount}
+            showCounter={false}
+            itemKey={(entry) => entry.fullPath}
+            empty={
+              loading ? null : (
+                <EmptyState title="No child folders. You can still add this folder." />
+              )
+            }
+            onActivate={(_entry, index) => {
+              setTreeIndex(index);
+              setFocus("tree");
+            }}
+            renderItem={(entry, index) => (
+              <SelectionRow
+                label={`${entry.name}/`}
+                selected={index === treeIndex}
+                active={focus === "tree"}
+              />
             )}
-          </Stack>
+          />
           <Stack height={1} flexDirection="row" gap={1}>
             {button("add", busy ? "Adding..." : "[ Add this folder ]")}
             {button("cancel", "[ Cancel ]")}
@@ -255,12 +234,9 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
         </>
       ) : (
         <>
-          <Stack height={1} flexDirection="row">
-            <Text width={13}>GitHub URL</Text>
-            <input
+          <FormRow label="GitHub URL" labelWidth={13} focused={focus === "url"}>
+            <FormInput
               id="new-project-url"
-              flexGrow={1}
-              minWidth={1}
               value={url}
               placeholder="https://github.com/owner/repository"
               focused={!busy && focus === "url"}
@@ -269,26 +245,21 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
                 if (!destinationEdited)
                   setDestination(defaultCloneDestination(initialDirectory, value));
               }}
-              onMouseDown={() => setFocus("url")}
-              {...inputColors}
+              onFocusRequest={() => setFocus("url")}
             />
-          </Stack>
-          <Stack height={1} flexDirection="row">
-            <Text width={13}>Destination</Text>
-            <input
+          </FormRow>
+          <FormRow label="Destination" labelWidth={13} focused={focus === "destination"}>
+            <FormInput
               id="new-project-destination"
-              flexGrow={1}
-              minWidth={1}
               value={destination}
               focused={!busy && focus === "destination"}
               onInput={(value) => {
                 setDestinationEdited(true);
                 setDestination(value);
               }}
-              onMouseDown={() => setFocus("destination")}
-              {...inputColors}
+              onFocusRequest={() => setFocus("destination")}
             />
-          </Stack>
+          </FormRow>
           <Text height={2} tone="muted">
             The connected environment clones the repository. Private repositories use its GitHub
             credentials.

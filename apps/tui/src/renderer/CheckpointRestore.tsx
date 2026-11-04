@@ -6,6 +6,8 @@ import type { TuiClient } from "../connection/clientRuntime.ts";
 import { checkpointRestoreTargets } from "../features/chat/checkpointRestore.ts";
 import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
+import { ListView } from "../ui/ListView.tsx";
+import { EmptyState } from "../ui/StateMessage.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 
@@ -78,10 +80,9 @@ export function CheckpointRestore({
       },
     },
   });
-  const count = Math.max(1, height - 7);
-  const start = Math.max(0, selected - count + 1);
+  const count = Math.max(1, height - 4);
   return (
-    <Stack flexDirection="column" width="100%" height="100%" gap={1}>
+    <Stack flexDirection="column" width="100%" height="100%">
       <Text strong>{messageId ? "Edit from here?" : "Select a prompt to edit from"}</Text>
       {messageId ? (
         <>
@@ -96,55 +97,51 @@ export function CheckpointRestore({
           <Text tone="warning">
             Reverting files also discards workspace changes after this checkpoint.
           </Text>
-          {["Cancel", "Revert files too", "Revert and keep changes"].map((label, index) => (
-            <Stack
-              key={label}
-              height={1}
-              onMouseDown={(event) => {
-                if (!active || event.button !== 0 || pending) return;
-                event.preventDefault();
-                event.stopPropagation();
-                void choose(index);
-              }}
-            >
+          <ListView
+            items={["Cancel", "Revert files too", "Revert and keep changes"]}
+            selected={choice}
+            height={3}
+            showCounter={false}
+            itemKey={(label) => label}
+            onActivate={(_label, index) => {
+              if (active && !pending) void choose(index);
+            }}
+            renderItem={(label, index) => (
               <SelectionRow selected={choice === index} active={active && !pending} label={label} />
-            </Stack>
-          ))}
+            )}
+          />
         </>
       ) : (
         <>
-          <Stack flexGrow={1} flexDirection="column" overflow="hidden">
-            {targets.length === 0 ? (
-              <Text tone="muted">No checkpointed prompts available.</Text>
-            ) : (
-              targets.slice(start, start + count).map((entry, index) => (
-                <Stack
-                  key={entry.message.id}
-                  height={1}
-                  onMouseDown={(event) => {
-                    if (!active || event.button !== 0) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    select(entry.message.id);
-                  }}
-                >
-                  <SelectionRow
-                    selected={start + index === selected}
-                    active={active}
-                    label={inlineTerminalText(
-                      `Before turn ${entry.turnCount + 1} · ${entry.message.text}`,
-                    )}
-                  />
-                </Stack>
-              ))
+          <ListView
+            items={targets}
+            selected={selected}
+            height={count}
+            itemKey={(entry) => entry.message.id}
+            empty={
+              <EmptyState
+                title="No checkpointed prompts available."
+                description="Checkpoints appear after a turn finishes."
+              />
+            }
+            onActivate={(entry) => {
+              if (active) select(entry.message.id);
+            }}
+            renderItem={(entry, index) => (
+              <SelectionRow
+                selected={index === selected}
+                active={active}
+                label={inlineTerminalText(
+                  `Before turn ${entry.turnCount + 1} · ${entry.message.text}`,
+                )}
+              />
             )}
-          </Stack>
+          />
           {page?.hasMoreHistory ? <Text tone="muted">L Load older prompts</Text> : null}
         </>
       )}
       {pending ? <Text tone="warning">Rewinding chat… Waiting for the environment.</Text> : null}
       {interaction.error ? <Text tone="danger">{interaction.error}</Text> : null}
-      <Text tone="muted">↑↓ Select · Enter Confirm · Esc Back</Text>
     </Stack>
   );
 }

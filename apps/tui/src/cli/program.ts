@@ -12,7 +12,7 @@ import { createTuiClient } from "../connection/clientRuntime.ts";
 import { makeTuiCredentialStore } from "../connection/credentialStore.ts";
 import { makeTuiLocalEnvironmentSupervisor } from "../connection/localEnvironmentSupervisor.ts";
 import { readPairingCredential } from "./pairingInput.ts";
-import { PrototypeApp } from "../renderer/PrototypeApp.tsx";
+import { App } from "../renderer/App.tsx";
 import { UiProvider } from "../ui/context.tsx";
 import { detectTerminalCapabilities } from "../ui/capabilities.ts";
 import { startRendererRuntime } from "../renderer/runtime.tsx";
@@ -89,7 +89,7 @@ export async function runTuiPrototype(options: RunTuiPrototypeOptions): Promise<
           children: createElement(
             UiProvider,
             { capabilities: detectTerminalCapabilities(NodeProcess.env) },
-            createElement(PrototypeApp, {
+            createElement(App, {
               onInterrupt,
               client: createTuiClient(lease.environment, sessionState),
             }),

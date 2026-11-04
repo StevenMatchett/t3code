@@ -1,29 +1,28 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import type { ScrollBoxRenderable } from "@opentui/core";
-import type { ModelSelection, ThreadId } from "@t3tools/contracts";
-import { formatProviderSkillDisplayName } from "@t3tools/client-runtime/providerSkills";
-import { getProviderOptionDescriptors, getProviderOptionCurrentLabel } from "@t3tools/shared/model";
+import type { ThreadId } from "@t3tools/contracts";
+import { getProviderOptionDescriptors } from "@t3tools/shared/model";
 import * as Option from "effect/Option";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { TuiClient } from "../connection/clientRuntime.ts";
-import { permissionChoices, planModeProblem } from "../features/chat/composerModes.ts";
-import { selectableSkills, selectionForModel } from "../features/chat/providerChoices.ts";
-import { completeSkillDraft, skillCompletionAt } from "../features/chat/skillCompletion.ts";
+import type { TuiClient } from "../../connection/clientRuntime.ts";
+import { skillCompletionAt } from "../../features/chat/skillCompletion.ts";
 import {
   buildComposerPromptHistoryEntries,
   stepComposerPromptHistory,
   type ComposerPromptHistoryPosition,
-} from "../features/chat/promptHistory.ts";
-import { trailingPastedImagePaths } from "../features/chat/imageAttachments.ts";
-import { useKeyLayer } from "../ui/keymap.ts";
-import { Panel } from "../ui/Panel.tsx";
-import { SelectionRow } from "../ui/SelectionRow.tsx";
-import { Stack, Text } from "../ui/primitives.tsx";
-import { inlineTerminalText } from "../ui/textLayout.ts";
-import { useThemeColor } from "../ui/context.tsx";
-import { PromptEditor, type PromptEditorControl, type PromptSnapshot } from "./PromptEditor.tsx";
+} from "../../features/chat/promptHistory.ts";
+import { trailingPastedImagePaths } from "../../features/chat/imageAttachments.ts";
+import { useKeyLayer } from "../../ui/keymap.ts";
+import { Panel } from "../../ui/Panel.tsx";
+import { Button } from "../../ui/Button.tsx";
+import { Stack, Text } from "../../ui/primitives.tsx";
+import { inlineTerminalText } from "../../ui/textLayout.ts";
+import { useThemeColor } from "../../ui/context.tsx";
+import { PromptEditor, type PromptEditorControl, type PromptSnapshot } from "../PromptEditor.tsx";
+import { ComposerMenu } from "./ComposerMenu.tsx";
+import { useComposerChoices } from "./useComposerChoices.ts";
 
-export function ComposerControls({
+export function Composer({
   client,
   threadId,
   active,
@@ -40,7 +39,6 @@ export function ComposerControls({
   onBlur,
   onSubmit,
   onFocusNext,
-  onMenuChange,
   onCancel,
   cancelPending = false,
   sendLabel,
@@ -61,7 +59,6 @@ export function ComposerControls({
   readonly onBlur: () => void;
   readonly onSubmit: () => void;
   readonly onFocusNext?: () => void;
-  readonly onMenuChange?: (open: boolean) => void;
   readonly onCancel?: () => void;
   readonly cancelPending?: boolean;
   readonly sendLabel: string;
@@ -89,8 +86,6 @@ export function ComposerControls({
     caps: model?.capabilities ?? {},
     selections: thread?.modelSelection.options,
   });
-  const background = useThemeColor("panel");
-  const foreground = useThemeColor("text");
   const dividerColor = useThemeColor("border");
   const selectedBackground = useThemeColor("selection");
   const [savedComposer] = useState(() => client.session?.composer(threadId));
@@ -126,9 +121,6 @@ export function ComposerControls({
     : null;
   const slashOpen = focused && focus === 0 && completion !== null && completionKey !== dismissed;
   const menu = active && focused ? (dropdown ?? (slashOpen ? "skills" : null)) : null;
-  useEffect(() => {
-    onMenuChange?.(menu !== null);
-  }, [menu, onMenuChange]);
   const refresh = (models: boolean) => {
     const generation = ++refreshGeneration.current;
     setRefreshing(true);
@@ -205,28 +197,27 @@ export function ComposerControls({
     client.actions.setDraft(registry, threadId, reply);
     onSubmit();
   };
-  const planProblem = planModeProblem(provider);
-  const runtimeMode = interaction.runtimeMode ?? thread?.runtimeMode;
-  const interactionMode =
-    interaction.interactionMode ?? (planProblem ? "default" : thread?.interactionMode);
-  const buttons = [
-    {
-      id: "models",
-      label: `Model: ${model?.shortName ?? model?.name ?? thread?.modelSelection.model ?? "Loading"} ▼`,
-    },
-    ...descriptors.map((item) => ({
-      id: `option:${item.id}`,
-      label: `${item.label}: ${getProviderOptionCurrentLabel(item) ?? "Default"} ▼`,
-    })),
-    {
-      id: "mode",
-      label: `${interactionMode === "plan" ? "Plan" : "Chat"} ▼`,
-    },
-    {
-      id: "permissions",
-      label: `${permissionChoices.find((choice) => choice.id === runtimeMode)?.label ?? "Permissions"} ▼`,
-    },
-  ];
+  const menuHandlers = useComposerChoices({
+    client,
+    threadId,
+    thread,
+    provider,
+    model,
+    descriptors,
+    interaction,
+    catalogStatus: catalog.status,
+    menu,
+    query,
+    cursor,
+    cwd,
+    completion,
+    refreshing,
+    editor,
+    menuGeneration,
+    mounted,
+    close,
+  });
+  const { buttons, rows, index, choose } = menuHandlers;
   // Whole cells keep every control the same size; flex rounding would make them differ by one.
   const controlWidth = Math.max(
     1,
@@ -234,127 +225,6 @@ export function ComposerControls({
   );
   const cancelIndex = suggestedReplies.length + buttons.length + 1;
   const focusCount = cancelIndex + (onCancel ? 1 : 0);
-  const needle = (menu === "skills" ? (completion?.query ?? "") : query).toLocaleLowerCase();
-  const skills = provider
-    ? selectableSkills(provider, cwd).filter((skill) =>
-        `${skill.name} ${skill.displayName ?? ""} ${skill.description ?? ""}`
-          .toLocaleLowerCase()
-          .includes(needle),
-      )
-    : [];
-  const models = (provider?.models ?? []).filter((item) =>
-    `${item.name} ${item.slug}`.toLocaleLowerCase().includes(needle),
-  );
-  const descriptor = descriptors.find((item) => `option:${item.id}` === menu);
-  const choices = descriptor
-    ? [
-        { label: "Provider default", value: undefined as string | boolean | undefined },
-        ...(descriptor.type === "boolean"
-          ? [
-              { label: "On", value: true },
-              { label: "Off", value: false },
-            ]
-          : descriptor.options.map((item) => ({ label: item.label, value: item.id }))),
-      ].filter((item) => item.label.toLocaleLowerCase().includes(needle))
-    : [];
-  const modeChoices = (
-    menu === "permissions"
-      ? permissionChoices
-      : [
-          { id: "default", label: "Chat", detail: "Work on the task normally." },
-          {
-            id: "plan",
-            label: `Plan${planProblem ? " (unavailable)" : ""}`,
-            detail: planProblem ?? "Plan the work before making changes.",
-          },
-        ]
-  ).filter((item) => item.label.toLocaleLowerCase().includes(needle));
-  const rows =
-    menu === "permissions" || menu === "mode"
-      ? modeChoices.map((item) => ({
-          ...item,
-          label: `${item.id === (menu === "permissions" ? runtimeMode : interactionMode) ? "* " : ""}${item.label}`,
-        }))
-      : menu === "skills"
-        ? skills.map((skill) => ({
-            id: skill.path,
-            label: `/${skill.name}  ${formatProviderSkillDisplayName(skill)}`,
-            detail: skill.shortDescription ?? skill.description ?? skill.path,
-          }))
-        : menu === "models"
-          ? models.map((item) => ({
-              id: item.slug,
-              label: `${item.slug === thread?.modelSelection.model ? "* " : ""}${item.name}  [${item.slug}]`,
-              detail:
-                thread?.latestTurn?.state === "running" || thread?.session?.status === "starting"
-                  ? "Applies to the next turn."
-                  : item.slug,
-            }))
-          : choices.map((item, index) => ({
-              id: String(index),
-              label: item.label,
-              detail: descriptor?.description ?? "",
-            }));
-  const index = Math.max(0, Math.min(cursor, rows.length - 1));
-  const busy =
-    refreshing ||
-    interaction.pending !== null ||
-    interaction.modelPending !== null ||
-    catalog.status !== "live";
-  const choose = (selected: number) => {
-    if (busy || !thread || !provider || !rows[selected]) return;
-    if (menu === "skills") {
-      const live = editor.current?.snapshot();
-      const trigger = live ? skillCompletionAt(live.text, live.cursor) : null;
-      if (!trigger || trigger.query !== completion?.query || trigger.text !== interaction.draft)
-        return;
-      const previousPrefix = interaction.skill?.prefix;
-      if (!client.actions.selectSkill(registry, threadId, skills[selected]!, trigger)) return;
-      const current = registry.get(client.actions.state(threadId));
-      const replacement = completeSkillDraft(
-        trigger.text,
-        current.skill!.prefix,
-        trigger,
-        previousPrefix,
-      );
-      close();
-      editor.current?.replace(replacement.text, replacement.cursor);
-      return;
-    }
-    if (menu === "permissions") {
-      const choice = permissionChoices.find((item) => item.id === rows[selected]!.id);
-      if (choice && client.actions.setRuntimeMode(registry, threadId, choice.id)) close();
-      return;
-    }
-    if (menu === "mode") {
-      const mode = rows[selected]!.id;
-      if (
-        (mode === "default" || mode === "plan") &&
-        client.actions.setInteractionMode(registry, threadId, mode)
-      )
-        close();
-      return;
-    }
-    let selection: ModelSelection;
-    if (menu === "models")
-      selection = selectionForModel(provider, models[selected]!.slug, thread.modelSelection);
-    else if (descriptor) {
-      const options = (thread.modelSelection.options ?? []).filter(
-        (option) => option.id !== descriptor.id,
-      );
-      const value = choices[selected]!.value;
-      if (value !== undefined) options.push({ id: descriptor.id, value });
-      selection = {
-        instanceId: provider.instanceId,
-        model: thread.modelSelection.model,
-        ...(options.length ? { options } : {}),
-      };
-    } else return;
-    const generation = menuGeneration.current;
-    void client.actions.changeModel(registry, threadId, selection).then((ok) => {
-      if (mounted.current && ok && generation === menuGeneration.current) close();
-    });
-  };
   const recallPrompt = (direction: "backward" | "forward") => {
     if (interaction.pending || interaction.attachments.length || interaction.attachmentPending)
       return false;
@@ -477,7 +347,6 @@ export function ComposerControls({
   const height = editorHeight + attachmentHeight + suggestedReplyHeight + pastePreviewHeight + 4;
   const menuHeight = Math.max(4, Math.min(10, availableHeight - height));
   const count = Math.max(1, menuHeight - (menu === "skills" ? 3 : 4));
-  const start = Math.max(0, Math.min(index - Math.floor(count / 2), rows.length - count));
   return (
     <Stack
       id="conversation-composer"
@@ -639,149 +508,70 @@ export function ComposerControls({
         />
         <Stack height={1} flexShrink={0} flexDirection="row" width="100%">
           {buttons.map((button, buttonIndex) => (
-            <Stack
+            <Button
               key={button.id}
               id={`composer-${button.id}`}
+              label={inlineTerminalText(button.label)}
               width={controlWidth}
-              flexShrink={0}
-              height={1}
-              {...(focused &&
-              focus === suggestedReplies.length + buttonIndex + 1 &&
-              selectedBackground
-                ? { backgroundColor: selectedBackground }
-                : {})}
-              onMouseDown={(event) => {
-                if (event.button !== 0) return;
-                event.preventDefault();
-                event.stopPropagation();
-                open(button.id, suggestedReplies.length + buttonIndex + 1);
-              }}
-            >
-              <Text
-                height={1}
-                wrapMode="none"
-                truncate
-                tone={
-                  dropdown === button.id ||
-                  (focused && focus === suggestedReplies.length + buttonIndex + 1)
-                    ? "accent"
-                    : "muted"
-                }
-              >
-                {inlineTerminalText(button.label)}
-              </Text>
-            </Stack>
+              focused={focused && focus === suggestedReplies.length + buttonIndex + 1}
+              selected={dropdown === button.id}
+              onPress={() => open(button.id, suggestedReplies.length + buttonIndex + 1)}
+            />
           ))}
           {onCancel ? (
-            <Stack
+            <Button
               id="conversation-cancel-turn"
-              height={1}
+              label="Cancel"
+              tone="danger"
               width={controlWidth}
-              flexShrink={0}
-              {...(focused && focus === cancelIndex && selectedBackground
-                ? { backgroundColor: selectedBackground }
-                : {})}
-              onMouseDown={(event) => {
-                if (event.button !== 0 || cancelPending) return;
-                event.preventDefault();
-                event.stopPropagation();
+              focused={focused && focus === cancelIndex}
+              disabled={cancelPending}
+              onPress={() => {
                 onActivate();
                 setDropdown(null);
                 setFocus(cancelIndex);
                 onCancel();
               }}
-            >
-              <Text height={1} tone="danger" strong wrapMode="none" truncate>
-                Cancel
-              </Text>
-            </Stack>
+            />
           ) : null}
         </Stack>
       </Panel>
       {menu ? (
-        <Panel
-          id="composer-dropdown"
-          position="absolute"
+        <ComposerMenu
+          menu={menu}
+          title={menuHandlers.title}
+          rows={rows}
+          selected={index}
           bottom={height}
-          left={0}
-          zIndex={20}
-          width="100%"
           height={menuHeight}
-          borderTone="borderFocused"
-          title={
-            menu === "skills"
-              ? "Skills"
-              : menu === "models"
-                ? "Models"
-                : menu === "permissions"
-                  ? "Permissions — next message"
-                  : menu === "mode"
-                    ? "Mode — next message"
-                    : (descriptor?.label ?? "Options")
+          count={count}
+          active={active}
+          query={query}
+          onQuery={(value) => {
+            setQuery(value);
+            setCursor(0);
+          }}
+          onChoose={choose}
+          status={
+            interaction.error ??
+            refreshError ??
+            (catalog.status === "error"
+              ? "Catalog unavailable. Reconnect from history."
+              : refreshing
+                ? "Refreshing..."
+                : interaction.pending || interaction.modelPending
+                  ? "Applying selection..."
+                  : rows[index]?.detail || "Enter chooses; Esc closes")
           }
-          flexDirection="column"
-        >
-          {menu !== "skills" ? (
-            <input
-              id="composer-filter"
-              focused={active}
-              width="100%"
-              value={query}
-              placeholder="Search..."
-              onInput={(value) => {
-                setQuery(value);
-                setCursor(0);
-              }}
-              {...(background
-                ? { backgroundColor: background, focusedBackgroundColor: background }
-                : {})}
-              {...(foreground ? { textColor: foreground, focusedTextColor: foreground } : {})}
-            />
-          ) : null}
-          <Stack height={count} flexShrink={0} flexDirection="column" overflow="hidden">
-            {rows.length ? (
-              rows.slice(start, start + count).map((row, rowIndex) => (
-                <Stack
-                  key={row.id}
-                  height={1}
-                  flexShrink={0}
-                  onMouseDown={(event) => {
-                    if (event.button !== 0) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    choose(start + rowIndex);
-                  }}
-                >
-                  <SelectionRow label={row.label} selected={start + rowIndex === index} />
-                </Stack>
-              ))
-            ) : (
-              <Text tone="muted">
-                {catalog.status === "loading" || refreshing
-                  ? "Loading..."
-                  : catalog.status === "error"
-                    ? "Catalog unavailable. Reconnect from history."
-                    : "No matches. Esc keeps the text."}
-              </Text>
-            )}
-          </Stack>
-          <Text
-            height={1}
-            tone={interaction.error || refreshError ? "danger" : "muted"}
-            wrapMode="none"
-            truncate
-          >
-            {interaction.error ??
-              refreshError ??
-              (catalog.status === "error"
+          statusFailed={Boolean(interaction.error || refreshError)}
+          empty={
+            catalog.status === "loading" || refreshing
+              ? "Loading..."
+              : catalog.status === "error"
                 ? "Catalog unavailable. Reconnect from history."
-                : refreshing
-                  ? "Refreshing..."
-                  : interaction.pending || interaction.modelPending
-                    ? "Applying selection..."
-                    : rows[index]?.detail || "Enter chooses; Esc closes")}
-          </Text>
-        </Panel>
+                : "No matches. Esc keeps the text."
+          }
+        />
       ) : null}
     </Stack>
   );

@@ -1,8 +1,6 @@
 import type { TuiThreadShell } from "../connection/models.ts";
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
 import { useRenderer, useSelectionHandler, useTerminalDimensions } from "@opentui/react";
-import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import { useMemo, useContext, useEffect, useState, useCallback, useRef } from "react";
@@ -10,6 +8,7 @@ import { sortSidebarThreads } from "../app/threadOrder.ts";
 import { calculateShellLayout } from "../ui/layout.ts";
 import { AppShellView, useAppShellState, type ShellOverlayView } from "../app/AppShell.tsx";
 import { useActiveActions, useKeyLayer } from "../ui/keymap.ts";
+import { useToast } from "../ui/StatusLine.tsx";
 import { actionKeyLabel } from "../app/actions.ts";
 import {
   nextSidebarView,
@@ -25,6 +24,8 @@ import { NewProjectForm } from "./NewProjectForm.tsx";
 import { ActivityClockProvider } from "../ui/ThreadActivityIndicator.tsx";
 import { ThreadActionsForm } from "./ThreadManagement.tsx";
 import { HelpPanel } from "./HelpPanel.tsx";
+import { ThemePicker } from "./ThemePicker.tsx";
+import { ThemeRoot } from "./ThemeRoot.tsx";
 import { CommandPalette, type CommandPaletteItem } from "./CommandPalette.tsx";
 import { FavoriteModelsPanel } from "./FavoriteModelsPanel.tsx";
 import type { FavoriteModel } from "../features/chat/providerChoices.ts";
@@ -73,7 +74,15 @@ export interface AppShellProps {
   readonly searchDebounceMs?: number;
 }
 
-export function AppShell({
+export function AppShell(props: AppShellProps) {
+  return (
+    <ThemeRoot client={props.client}>
+      <AppShellContent {...props} />
+    </ThemeRoot>
+  );
+}
+
+function AppShellContent({
   client,
   initialRoute = "projects",
   onStateChange,
@@ -91,10 +100,7 @@ export function AppShell({
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [paletteSearchQuery, setPaletteSearchQuery] = useState("");
   const threadSearch = useAtomValue(client.threadSearch(paletteSearchQuery));
-  const [notice, setNotice] = useState<{
-    readonly text: string;
-    readonly failed: boolean;
-  } | null>(null);
+  const [notice, setNotice] = useToast();
   useSelectionHandler((selection) => {
     const text = selection.getSelectedText();
     if (!text) return;
@@ -104,19 +110,6 @@ export function AppShell({
       failed: !copied,
     });
   });
-  useEffect(() => {
-    if (!notice) return;
-    const fiber = Effect.runFork(
-      Effect.sleep("2 seconds").pipe(
-        Effect.andThen(
-          Effect.sync(() => setNotice((current) => (current === notice ? null : current))),
-        ),
-      ),
-    );
-    return () => {
-      Effect.runFork(Fiber.interrupt(fiber));
-    };
-  }, [notice]);
   const snapshot = Option.getOrNull(shell.snapshot);
   const [soundsEnabled, setSoundsEnabled] = useState(client.session?.soundsEnabled ?? true);
   const [favoriteModels, setFavoriteModels] = useState<readonly FavoriteModel[]>(
@@ -332,6 +325,7 @@ export function AppShell({
         dispatch({ type: "set-sidebar-view", view: nextSidebarView(state.sidebarView, 1) }),
     },
   });
+  const [recentChoices, setRecentChoices] = useState<readonly string[]>([]);
   const paletteEntries = useMemo<readonly PaletteEntry[]>(() => {
     const contentMatchByThreadId = new Map(
       threadSearch.matches.map((match) => [match.threadId, match] as const),
@@ -344,9 +338,14 @@ export function AppShell({
           return {
             id: `action:${action.id}`,
             label: action.title,
-            detail: key ? `Command · ${key}` : "Command",
-            keywords: `${action.definition.keywords ?? ""} ${action.id}`,
+            detail: "",
+            keywords: `command ${action.definition.keywords ?? ""} ${action.id}`,
             kind: "command",
+            ...(key ? { shortcut: key } : {}),
+            rank:
+              recentChoices.indexOf(`action:${action.id}`) >= 0
+                ? 1_000 + recentChoices.indexOf(`action:${action.id}`)
+                : (action.definition.hint ?? 0),
             target: { type: "action", run: () => void action.run() },
           };
         }),
@@ -356,6 +355,9 @@ export function AppShell({
         detail: `Project · ${project.workspaceRoot}`,
         keywords: "workspace repository",
         kind: "entity",
+        rank: recentChoices.includes(`project:${project.id}`)
+          ? 1_000 + recentChoices.indexOf(`project:${project.id}`)
+          : 0,
         target: { type: "project", projectId: project.id },
       })),
       ...rows.threads
@@ -374,15 +376,27 @@ export function AppShell({
               : `Thread · ${project?.title ?? "Unknown project"}`,
             keywords: `${thread.modelSelection.model} conversation ${contentMatch?.snippet ?? ""}`,
             kind: "entity",
+            rank: recentChoices.includes(`thread:${thread.id}`)
+              ? 1_000 + recentChoices.indexOf(`thread:${thread.id}`)
+              : 0,
             target: { type: "thread", projectId: thread.projectId, threadId: thread.id },
           };
         }),
     ];
-  }, [paletteActions, paletteSearchQuery, rows.projects, rows.threads, threadSearch.matches]);
+  }, [
+    paletteActions,
+    paletteSearchQuery,
+    recentChoices,
+    rows.projects,
+    rows.threads,
+    threadSearch.matches,
+  ]);
   const choosePaletteEntry = (id: string) => {
     const entry = paletteEntries.find((item) => item.id === id);
     if (!entry) return;
     closePalette();
+    // Later entries rank higher, so the last choice is first the next time the palette opens.
+    setRecentChoices((current) => [...current.filter((item) => item !== id), id].slice(-20));
     switch (entry.target.type) {
       case "action":
         entry.target.run();
@@ -415,21 +429,25 @@ export function AppShell({
             : "Connecting";
   const renderOverlay = (overlay: ShellOverlay, isTop: boolean): ShellOverlayView | null => {
     const overlayActive = active && isTop;
+    const contentRows = (preferred: number) =>
+      Math.max(1, Math.min(preferred, layout.bodyHeight) - 2);
     switch (overlay.type) {
       case "help":
         return {
           title: "Keyboard help",
+          size: { width: 88, height: 40 },
           content: (
-            <HelpPanel active={overlayActive} height={layout.contentHeight} onClose={popOverlay} />
+            <HelpPanel active={overlayActive} height={contentRows(40)} onClose={popOverlay} />
           ),
         };
       case "palette":
         return {
           title: "Search and commands",
+          size: { width: 100, height: 28 },
           content: (
             <CommandPalette
               items={paletteEntries}
-              height={layout.contentHeight}
+              height={contentRows(28)}
               active={overlayActive}
               searching={threadSearch.loading}
               searchFailed={threadSearch.failed}
@@ -457,7 +475,11 @@ export function AppShell({
           ),
         };
       case "theme":
-        return null;
+        return {
+          title: "Theme",
+          size: { width: 52, height: 7 },
+          content: <ThemePicker active={overlayActive} onClose={popOverlay} />,
+        };
       case "diff":
         return state.threadId
           ? {
@@ -478,13 +500,14 @@ export function AppShell({
         return state.threadId
           ? {
               title: "Checkpoint restore",
+              size: { width: 100, height: 28 },
               content: (
                 <CheckpointRestore
                   key={state.threadId}
                   client={client}
                   threadId={state.threadId}
                   active={overlayActive}
-                  height={layout.contentHeight}
+                  height={contentRows(28)}
                   onClose={(restored) => {
                     popOverlay();
                     if (restored) setComposerFocusRequest((value) => value + 1);
@@ -496,6 +519,7 @@ export function AppShell({
       case "pull-request":
         return {
           title: "Pull request",
+          size: { width: 80, height: 10 },
           content: (
             <PullRequestPanel
               client={client}
@@ -509,10 +533,11 @@ export function AppShell({
       case "new-project":
         return {
           title: "New project",
+          size: { width: 96, height: 24 },
           content: (
             <NewProjectForm
               client={client}
-              height={layout.contentHeight}
+              height={contentRows(24)}
               onClose={popOverlay}
               onCreated={(projectId) => dispatch({ type: "open-project", projectId })}
             />
@@ -521,12 +546,13 @@ export function AppShell({
       case "new-thread":
         return {
           title: "New thread",
+          size: { width: 96, height: 20 },
           content: (
             <NewThreadForm
               client={client}
               projectId={state.projectId}
               favoriteModels={favoriteModels}
-              height={layout.contentHeight}
+              height={contentRows(20)}
               onClose={popOverlay}
               onCreated={(projectId, threadId) =>
                 dispatch({ type: "open-thread", projectId, threadId })
@@ -539,6 +565,7 @@ export function AppShell({
         return thread
           ? {
               title: thread.archivedAt ? "Manage archived thread" : "Manage thread",
+              size: { width: 72, height: 12 },
               content: (
                 <ThreadActionsForm
                   client={client}
@@ -660,7 +687,6 @@ export function AppShell({
             }
           : {})}
         onOpenProject={(projectId) => dispatch({ type: "open-project", projectId })}
-        onToggleProject={(projectId) => dispatch({ type: "toggle-project-expanded", projectId })}
         onOpenThread={(projectId, threadId) => {
           const thread = rows.threads.find((item) => item.id === threadId);
           if (thread?.archivedAt) pushOverlay({ type: "manage", threadId });

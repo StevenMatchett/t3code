@@ -58,7 +58,7 @@ export type TuiThreadCommand = Extract<
   }
 >;
 type PromptCommand = Extract<TuiThreadCommand, { readonly type: "thread.turn.start" }>;
-interface QueuedPrompt {
+export interface QueuedPrompt {
   readonly command: PromptCommand;
   readonly attachments: readonly (UploadChatImageAttachment | ChatAttachment)[];
   readonly afterTool: string | null;

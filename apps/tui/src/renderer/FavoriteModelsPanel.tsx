@@ -9,6 +9,7 @@ import {
   type FavoriteModel,
   type ModelChoice,
 } from "../features/chat/providerChoices.ts";
+import { FormInput } from "../ui/FormField.tsx";
 import { useKeyLayer } from "../ui/keymap.ts";
 import { Panel } from "../ui/Panel.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
@@ -144,7 +145,7 @@ export function FavoriteModelsPanel({
           {...panelLayout}
           onMouseDown={focusModels}
         >
-          <input
+          <FormInput
             id="favorite-models-search"
             focused={active && column === "models"}
             width="100%"

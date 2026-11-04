@@ -42,6 +42,7 @@ export function Panel({
   children,
   paddingX = 1,
   width,
+  title,
   ...props
 }: PanelProps) {
   const { capabilities } = useUi();
@@ -57,6 +58,12 @@ export function Panel({
   return (
     <box
       {...props}
+      {...(title === undefined
+        ? {}
+        : {
+            // Without color a border cannot show focus, so the title marks it.
+            title: !capabilities.color && borderTone === "borderFocused" ? `${title} *` : title,
+          })}
       border={bordered}
       paddingX={resolvedPadding}
       {...(backgroundColor ? { backgroundColor } : {})}

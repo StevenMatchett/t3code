@@ -10,6 +10,7 @@ import type { Atom } from "effect/reactivity";
 import type { ShellState } from "../app/state.ts";
 import type { ThreadInteractionState } from "../features/chat/interactions.ts";
 import type { FavoriteModel } from "../features/chat/providerChoices.ts";
+import type { ThemePreference } from "../ui/theme.ts";
 
 import { PromptCommand } from "../connection/commands.ts";
 export const SavedInteraction = Schema.Struct({
@@ -52,7 +53,12 @@ export const SavedShell = Schema.Struct({
 export const ConversationView = Schema.Struct({
   mode: Schema.Literals(["history", "composer", "requests", "questions", "agents"]),
   anchor: Schema.NullOr(
-    Schema.Struct({ id: Schema.String, line: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }),
+    Schema.Struct({
+      id: Schema.String,
+      line: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      width: Schema.optionalKey(Schema.Number),
+      of: Schema.optionalKey(Schema.Number),
+    }),
   ),
   terminalOpen: Schema.Boolean,
   showDetails: Schema.Boolean,
@@ -79,6 +85,9 @@ export interface TuiSessionState {
   /** Read fresh each call: favorites are shared by every TUI on this machine. */
   readonly favoriteModels: () => readonly FavoriteModel[];
   readonly saveFavoriteModels: (favorites: readonly FavoriteModel[]) => void;
+  /** Read fresh each call: the theme is shared by every TUI on this machine. */
+  readonly themePreference: () => ThemePreference;
+  readonly saveThemePreference: (preference: ThemePreference) => void;
   readonly shell: ShellState | undefined;
   readonly interactions: ReadonlyMap<ThreadId, SavedInteraction>;
   readonly saveShell: (state: ShellState) => void;

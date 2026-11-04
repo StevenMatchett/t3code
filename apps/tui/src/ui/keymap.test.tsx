@@ -125,6 +125,7 @@ describe("action table", () => {
       "composer.focus",
       "history.vimMove",
     ]);
+    expect(hints.find((hint) => hint.id === "composer.focus")?.priority).toBeLessThan(100);
     const narrow = layoutHints("Conversation", hints, 34);
     expect(narrow.pinned.map((hint) => hint.key)).toEqual(["Ctrl+K", "?"]);
     expect(narrow.rows[0].map((hint) => hint.label)).toContain("Write");

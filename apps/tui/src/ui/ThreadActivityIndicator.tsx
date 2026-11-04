@@ -6,18 +6,32 @@ import { Text } from "./primitives.tsx";
 import type { ThemeToken } from "./theme.ts";
 
 const ClockContext = createContext<ActivityClock | null>(null);
+const AnimationVisibleContext = createContext(true);
+
+/** Everything under a hidden gate stops animating, including components that don't know it's hidden. */
+export function AnimationGate({
+  visible,
+  children,
+}: {
+  readonly visible: boolean;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <AnimationVisibleContext.Provider value={visible}>{children}</AnimationVisibleContext.Provider>
+  );
+}
 const fallbackClock = createActivityClock();
 const frames = ["|", "/", "-", "\\"];
 const phases: Record<
   ThreadActivityPhase,
   { readonly label: string; readonly badge: string; readonly tone: ThemeToken }
 > = {
-  idle: { label: "Ready", badge: "[ ]", tone: "muted" },
+  idle: { label: "Ready", badge: "   ", tone: "muted" },
   starting: { label: "Starting", badge: "...", tone: "accent" },
   running: { label: "Working", badge: "...", tone: "accent" },
   waiting_for_approval: { label: "Approval needed", badge: "[!]", tone: "warning" },
   waiting_for_input: { label: "Needs input", badge: "[?]", tone: "warning" },
-  completed: { label: "Done", badge: "[+]", tone: "success" },
+  completed: { label: "Done", badge: "[+]", tone: "muted" },
   failed: { label: "Failed", badge: "[x]", tone: "danger" },
   stale: { label: "Status unavailable", badge: "[~]", tone: "muted" },
 };
@@ -36,14 +50,23 @@ export function ActivityClockProvider({
   );
 }
 
-export function useActivityClock() {
+const noSubscription = () => () => undefined;
+
+/** Hidden or animation-free screens read the clock once and never subscribe, so nothing ticks. */
+export function useActivityClock(live = true) {
   const clock = useContext(ClockContext) ?? fallbackClock;
-  return useSyncExternalStore(clock.subscribe, clock.snapshot, clock.snapshot);
+  const { capabilities } = useUi();
+  const visible = useContext(AnimationVisibleContext);
+  const subscribe =
+    live && visible && capabilities.animation !== false ? clock.subscribe : noSubscription;
+  const [frozen] = useState(() => ({ frame: 0, now: Date.now() }));
+  const snapshot = useSyncExternalStore(subscribe, clock.snapshot, clock.snapshot);
+  return subscribe === noSubscription ? { ...frozen, now: Date.now() } : snapshot;
 }
 
 export function useLocalDay() {
   const clock = useContext(ClockContext) ?? fallbackClock;
-  return useSyncExternalStore(clock.subscribe, clock.localDay, clock.localDay);
+  return useSyncExternalStore(clock.subscribeDay, clock.localDay, clock.localDay);
 }
 
 function Working({
@@ -77,7 +100,8 @@ export function ThreadActivityIndicator({
   readonly visible?: boolean;
 }) {
   const { capabilities } = useUi();
-  if (visible && capabilities.animation !== false && isThreadWorking(phase))
+  const gateVisible = useContext(AnimationVisibleContext);
+  if (visible && gateVisible && capabilities.animation !== false && isThreadWorking(phase))
     return <Working compact={compact} phase={phase} />;
   const style = phases[phase];
   return (
@@ -88,7 +112,11 @@ export function ThreadActivityIndicator({
       tone={style.tone}
       wrapMode="none"
     >
-      {compact ? ` ${style.badge}` : `${style.badge} ${style.label}`}
+      {compact
+        ? ` ${style.badge}`
+        : phase === "idle"
+          ? style.label
+          : `${style.badge} ${style.label}`}
     </Text>
   );
 }
