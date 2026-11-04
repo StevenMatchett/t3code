@@ -63,7 +63,7 @@ export type ShelfRow =
   | { readonly kind: "more"; readonly id: string; readonly count: number };
 
 export const shelfRowHeight = (row: ShelfRow) =>
-  row.kind !== "thread" ? 1 : row.variant === "card" ? 3 : row.variant === "search" ? 2 : 1;
+  row.kind !== "thread" ? 1 : row.variant === "card" ? 4 : row.variant === "search" ? 2 : 1;
 
 const MINUTE_MS = 60_000;
 

@@ -194,7 +194,15 @@ function Card({
             thread.branch
               ? middleTruncate(
                   inlineTerminalText(thread.branch),
-                  Math.max(8, width - provider.length - 10),
+                  Math.max(
+                    8,
+                    // Indent, the gap before the provider, and whatever else shares the line.
+                    width -
+                      provider.length -
+                      3 -
+                      (thread.worktreePath ? 2 : 0) -
+                      (visibleThreadPullRequests(thread.pullRequests).length > 0 ? 8 : 0),
+                  ),
                 )
               : ""
           }`}
@@ -385,21 +393,29 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
           const project = props.projectTitle(row.thread);
           const marked = props.marked.has(row.id);
           return (
-            <Stack flexDirection="column" width="100%" {...background}>
+            <>
+              <Stack flexDirection="column" width="100%" flexShrink={0} {...background}>
+                {row.variant === "card" ? (
+                  <Card
+                    row={row}
+                    project={project}
+                    width={props.width}
+                    selected={selected}
+                    marked={marked}
+                  />
+                ) : row.variant === "search" ? (
+                  <SearchResult row={row} project={project} selected={selected} marked={marked} />
+                ) : (
+                  <Slim row={row} selected={selected} marked={marked} />
+                )}
+              </Stack>
+              {/* Cards are several lines each, so without this they read as one block of text. */}
               {row.variant === "card" ? (
-                <Card
-                  row={row}
-                  project={project}
-                  width={props.width}
-                  selected={selected}
-                  marked={marked}
-                />
-              ) : row.variant === "search" ? (
-                <SearchResult row={row} project={project} selected={selected} marked={marked} />
-              ) : (
-                <Slim row={row} selected={selected} marked={marked} />
-              )}
-            </Stack>
+                <Text height={1} flexShrink={0} tone="border" wrapMode="none">
+                  {(capabilities.unicode ? "─" : "-").repeat(Math.max(0, props.width))}
+                </Text>
+              ) : null}
+            </>
           );
         }}
       />
