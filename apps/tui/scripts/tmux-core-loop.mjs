@@ -193,6 +193,23 @@ try {
   await timed("scroll by page", () => send("PageDown"), /\s(?!1-)\d+-\d+ of \d+/);
   capture("help-scrolled");
   await timed("close overlay", () => send("Escape"), /CONVERSATION|MESSAGE/);
+  // Enough samples of the slowest opens to judge them, from the thread list where both keys apply.
+  send("Escape");
+  await waitFor(/THREADS/, "the thread list");
+  for (let sample = 0; sample < 12; sample += 1) {
+    await timed("open new thread form", () => send("n"), /New thread in/);
+    await sleep(30);
+    send("Escape");
+    await waitFor(/THREADS/, "the form to close");
+    await sleep(30);
+    await timed("open new project form", () => send("p"), /Add a project/);
+    await sleep(30);
+    send("Escape");
+    await waitFor(/THREADS/, "the form to close");
+    await sleep(30);
+  }
+  send("Enter");
+  await waitFor(/CONVERSATION/, "the conversation");
   // An idle client must not repaint: output and CPU both stay flat while nothing changes.
   const cpuTicks = () => {
     const pid = tmux("list-panes", "-t", "core", "-F", "#{pane_pid}").trim();

@@ -422,7 +422,83 @@ describe("input bursts", () => {
   });
 });
 
+describe("repeated overlays", () => {
+  it.each([false, true])(
+    "keeps opening forms after closing them (kitty=%s)",
+    async (kittyKeyboard) => {
+      const fixture = makeDesignFixture();
+      const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+        width: 80,
+        height: 24,
+        kittyKeyboard,
+      });
+      drivers.push(driver);
+      await driver.input.pressKey("RETURN");
+      for (let round = 0; round < 3; round += 1) {
+        await driver.input.pressKey("n");
+        expect(driver.captureFrame()).toContain("New thread in");
+        await driver.input.pressKey("ESCAPE");
+        expect(driver.captureFrame()).toContain("THREADS");
+        await driver.input.pressKey("p");
+        expect(driver.captureFrame()).toContain("Add a project");
+        await driver.input.pressKey("ESCAPE");
+        expect(driver.captureFrame()).toContain("THREADS");
+      }
+    },
+  );
+});
+
+describe("forms after a working session", () => {
+  it.each([false, true])(
+    "opens the project form from the thread list (kitty=%s)",
+    async (kittyKeyboard) => {
+      const fixture = makeDesignFixture();
+      const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+        width: 80,
+        height: 24,
+        kittyKeyboard,
+      });
+      drivers.push(driver);
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("i");
+      await driver.input.typeText("hello");
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("ESCAPE");
+      await driver.input.pressKey("d");
+      await driver.input.pressKey("ESCAPE");
+      await driver.input.pressKey("k", { ctrl: true });
+      await driver.input.pressKey("ESCAPE");
+      await driver.input.pressKey("F1");
+      await driver.input.pressKey("\u001b[6~");
+      await driver.input.pressKey("ESCAPE");
+      await driver.input.pressKey("ESCAPE");
+      expect(driver.captureFrame()).toContain("THREADS");
+      await driver.input.pressKey("n");
+      await driver.input.pressKey("ESCAPE");
+      expect(driver.captureFrame()).toContain("THREADS");
+      await driver.input.pressKey("p");
+      expect(driver.captureFrame()).toContain("Add a project");
+    },
+  );
+});
+
 describe("folder form", () => {
+  it("opens again after a project was added", async () => {
+    const { driver, fixture } = await setup();
+    await driver.input.pressKey("p");
+    await driver.flush();
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(fixture.projects).toHaveLength(3);
+    expect(driver.captureFrame()).not.toContain("Add a project");
+    await driver.input.pressKey("p");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Add a project");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).not.toContain("Add a project");
+  });
+
   it("starts on the folder field and keeps text typed while folders load", async () => {
     const { driver, fixture } = await setup();
     await driver.input.pressKey("p");

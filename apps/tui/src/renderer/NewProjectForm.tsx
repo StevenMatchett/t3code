@@ -48,11 +48,15 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
   const [focus, setFocus] = useState("path");
   const browseGeneration = useRef(0);
   const busy = creation.phase === "creating" || creation.phase === "cloning";
-  const created = creation.projectId
-    ? (Option.getOrNull(shell.snapshot)?.projects.some(
-        (project) => project.id === creation.projectId,
-      ) ?? false)
-    : false;
+  // A project recorded before this form opened came from an earlier use of the form. Without this
+  // check the form reads as just created and closes itself the moment it opens.
+  const [priorProjectId] = useState(creation.projectId);
+  const created =
+    creation.projectId && creation.projectId !== priorProjectId
+      ? (Option.getOrNull(shell.snapshot)?.projects.some(
+          (project) => project.id === creation.projectId,
+        ) ?? false)
+      : false;
 
   const pathEdits = useRef(0);
   const load = async (nextPath: string) => {
