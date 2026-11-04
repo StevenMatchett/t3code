@@ -746,6 +746,46 @@ describe("inbox sidebar", () => {
     expect(row()).toBeDefined();
   });
 
+  it("pins and marks unread from the keyboard", async () => {
+    const { driver, fixture } = await setupInbox();
+    const first = fixture.threads[0]!;
+    const pinnedAt = () =>
+      Option.getOrThrow(driver.registry.get(fixture.client.shell).snapshot).threads.find(
+        (thread) => thread.id === first.id,
+      )?.pinnedAt;
+    expect(pinnedAt() ?? null).toBeNull();
+    await act(async () => {
+      await driver.input.pressKey("p", { shift: true });
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(pinnedAt()).toEqual(expect.any(String));
+
+    await act(async () => {
+      await driver.input.pressKey("u", { shift: true });
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+    expect(fixture.managementCommands.at(-1)).toMatchObject({
+      type: "thread.mark-unread",
+      threadId: first.id,
+    });
+  });
+
+  it("steps and jumps between threads with Alt", async () => {
+    const { driver, fixture } = await setupInbox();
+    const conversationTitle = (index: number) => fixture.threads[index]!.title;
+    await driver.input.pressKey("2", { meta: true });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain(`> ${conversationTitle(1)}`);
+    await driver.input.pressKey("ARROW_UP", { meta: true });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain(`> ${conversationTitle(0)}`);
+    await driver.input.pressKey("ARROW_DOWN", { meta: true });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain(`> ${conversationTitle(1)}`);
+  });
+
   it("selects threads with Space, settles them together, and undoes them together", async () => {
     const { driver } = await setupInbox();
     await driver.input.pressKey(" ");
