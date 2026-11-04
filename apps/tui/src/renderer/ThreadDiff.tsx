@@ -9,6 +9,7 @@ import { EmptyState, ErrorState, LoadingState } from "../ui/StateMessage.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText, wrapTerminalLines } from "../ui/textLayout.ts";
 import { Button } from "../ui/Button.tsx";
+import { ListFilterRow } from "../ui/FormField.tsx";
 import { ListView } from "../ui/ListView.tsx";
 import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { diffFiles } from "../ui/diffFiles.ts";
@@ -99,11 +100,18 @@ export function ThreadDiff({
     };
   }, [client, registry, cwd, selectedScope, latest, threadId]);
   const result = useAtomValue(query?.state ?? EMPTY_DIFF);
-  const files = useMemo(() => diffFiles(result.diff), [result.diff]);
+  const [filter, setFilter] = useState<string | null>(null);
+  const allFiles = useMemo(() => diffFiles(result.diff), [result.diff]);
+  const files = useMemo(() => {
+    const needle = filter?.trim().toLocaleLowerCase();
+    return needle
+      ? allFiles.filter((entry) => entry.path.toLocaleLowerCase().includes(needle))
+      : allFiles;
+  }, [allFiles, filter]);
   const selected = Math.max(0, Math.min(cursor, files.length - 1));
   const file = files[selected];
   const split = width >= 76;
-  const listWidth = split ? Math.min(32, Math.floor(width / 3)) : width;
+  const listWidth = split ? Math.min(48, Math.floor(width / 3)) : width;
   const count = Math.max(1, height - 2);
   const diffWidth = Math.max(1, split ? width - listWidth - 1 : width);
   const lines = useMemo(
@@ -145,17 +153,30 @@ export function ThreadDiff({
     if (focus === "files") selectFile(fileIndex);
     else scroll(lineIndex);
   };
+  const closeFilter = () => {
+    setFilter(null);
+    setCursor(0);
+    setOffset(0);
+  };
   useKeyLayer("diff", {
     active,
     modal: true,
+    typing: filter !== null,
     bindings: {
-      "diff.close": onClose,
-      "diff.saved": () => changeScope("saved"),
-      "diff.working": () => changeScope("working"),
-      "diff.previousScope": () => cycleScope(-1),
-      "diff.nextScope": () => cycleScope(1),
-      "diff.refresh": () => {
-        query?.refresh();
+      "diff.close": () => {
+        if (filter !== null) closeFilter();
+        else onClose();
+      },
+      "diff.filter": { enabled: filter === null, run: () => setFilter("") },
+      "diff.saved": { enabled: filter === null, run: () => changeScope("saved") },
+      "diff.working": { enabled: filter === null, run: () => changeScope("working") },
+      "diff.previousScope": { enabled: filter === null, run: () => cycleScope(-1) },
+      "diff.nextScope": { enabled: filter === null, run: () => cycleScope(1) },
+      "diff.refresh": {
+        enabled: filter === null,
+        run: () => {
+          query?.refresh();
+        },
       },
       "diff.switchPane": () => setFocus((value) => (value === "files" ? "diff" : "files")),
       "diff.openFile": () => setFocus("diff"),
@@ -191,7 +212,9 @@ export function ThreadDiff({
         : result.loading
           ? "Loading changes..."
           : files.length === 0
-            ? "No changes in this view."
+            ? filter
+              ? "No files match. Esc clears the filter."
+              : "No changes in this view."
             : null;
   return (
     <Stack width="100%" height="100%" flexDirection="column">
@@ -203,20 +226,31 @@ export function ThreadDiff({
         {scopeButton("previous", "[ Prev", false, () => cycleScope(-1))}
         {scopeButton("next", "Next ]", false, () => cycleScope(1))}
       </Stack>
-      <Text
-        height={1}
-        flexShrink={0}
-        tone={result.truncated ? "warning" : "muted"}
-        wrapMode="none"
-        truncate
+      <ListFilterRow
+        id="diff-filter"
+        value={filter}
+        focused={active}
+        onInput={(value) => {
+          setFilter(value);
+          setCursor(0);
+          setOffset(0);
+        }}
       >
-        {selectedScope === "saved"
-          ? `Saved changes through turn ${latest}`
-          : selectedScope === "working"
-            ? "Uncommitted workspace changes"
-            : `Turn ${selectedScope} changes`}
-        {` · ${files.length} files${result.truncated ? " · Preview truncated" : ""}`}
-      </Text>
+        <Text
+          height={1}
+          flexShrink={0}
+          tone={result.truncated ? "warning" : "muted"}
+          wrapMode="none"
+          truncate
+        >
+          {selectedScope === "saved"
+            ? `Saved changes through turn ${latest}`
+            : selectedScope === "working"
+              ? "Uncommitted workspace changes"
+              : `Turn ${selectedScope} changes`}
+          {` · ${files.length} files${result.truncated ? " · Preview truncated" : ""}`}
+        </Text>
+      </ListFilterRow>
       {message ? (
         <Stack flexGrow={1}>
           {result.failed ? (

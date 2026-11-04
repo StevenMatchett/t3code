@@ -347,6 +347,47 @@ describe("dialogs", () => {
   });
 });
 
+describe("list filters", () => {
+  it("filters the diff file list with /, and Esc clears the filter before closing", async () => {
+    const { driver } = await setup();
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("d");
+    expect(driver.captureFrame()).toContain("search.test.ts +3 -0");
+    await driver.input.pressKey("/");
+    await driver.input.typeText("test");
+    const filtered = driver.captureFrame();
+    expect(filtered).toContain("search.test.ts +3 -0");
+    expect(filtered).not.toContain("search.ts +4 -1");
+    // Letters type into the filter instead of switching scope.
+    await driver.input.typeText("s");
+    expect(driver.captureFrame()).toContain("/ tests");
+    expect(driver.captureFrame()).toContain("No files match");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("search.ts +4 -1");
+    expect(driver.captureFrame()).toContain("Thread changes");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).not.toContain("Thread changes");
+  });
+
+  it("filters checkpoint prompts with /", async () => {
+    const { driver, fixture } = await setup();
+    const release = driver.registry.mount(fixture.states[0]!);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("e");
+    expect(driver.captureFrame()).toContain("Add project search with keyboard");
+    await driver.input.pressKey("/");
+    await driver.input.typeText("zzz");
+    expect(driver.captureFrame()).toContain("No prompts match.");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("Add project search with keyboard");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).not.toContain("Checkpoint restore");
+    release();
+  });
+});
+
 describe("states", () => {
   it("names the next action when empty", async () => {
     const { driver, fixture } = await setup(80, 24);

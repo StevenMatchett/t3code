@@ -42,6 +42,7 @@ export function Composer({
   onCancel,
   cancelPending = false,
   sendLabel,
+  onMenuChange,
 }: {
   readonly client: TuiClient;
   readonly threadId: ThreadId;
@@ -62,6 +63,8 @@ export function Composer({
   readonly onCancel?: () => void;
   readonly cancelPending?: boolean;
   readonly sendLabel: string;
+  /** Lets the transcript hide when a menu floats over it without a background to cover it. */
+  readonly onMenuChange?: (open: boolean) => void;
 }) {
   const registry = useContext(RegistryContext);
   const catalog = useAtomValue(client.providers);
@@ -250,6 +253,9 @@ export function Composer({
     }
     return true;
   };
+  useEffect(() => {
+    onMenuChange?.(menu !== null);
+  }, [menu, onMenuChange]);
   const composerHasFocus = active && focused;
   useKeyLayer("menu", {
     active: composerHasFocus && menu !== null,

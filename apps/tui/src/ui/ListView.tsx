@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useThemeColor } from "./context.tsx";
 import { Stack, Text } from "./primitives.tsx";
 
 /** The first visible row that keeps the selection centered without leaving the list short. */
@@ -35,6 +36,8 @@ export function ListView<Item>({
   onContextMenu,
   showCounter = true,
 }: ListViewProps<Item>) {
+  const [hovered, setHovered] = useState<string | null>(null);
+  const hover = useThemeColor("hover");
   const rows = Math.max(1, height);
   const fits = items.length * rowHeight <= rows;
   const visible = Math.max(1, Math.floor((fits || !showCounter ? rows : rows - 1) / rowHeight));
@@ -53,6 +56,13 @@ export function ListView<Item>({
                 height={rowHeight}
                 flexDirection="column"
                 flexShrink={0}
+                {...(onActivate && hover && hovered === itemKey(item) && index !== selected
+                  ? { backgroundColor: hover }
+                  : {})}
+                onMouseOver={() => setHovered(itemKey(item))}
+                onMouseOut={() =>
+                  setHovered((current) => (current === itemKey(item) ? null : current))
+                }
                 onMouseDown={(event) => {
                   if (event.button === 2 && onContextMenu) {
                     event.preventDefault();

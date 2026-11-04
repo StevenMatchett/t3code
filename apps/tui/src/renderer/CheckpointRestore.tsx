@@ -4,6 +4,7 @@ import * as Option from "effect/Option";
 import { useContext, useState } from "react";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import { checkpointRestoreTargets } from "../features/chat/checkpointRestore.ts";
+import { ListFilterRow } from "../ui/FormField.tsx";
 import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { ListView } from "../ui/ListView.tsx";
@@ -29,7 +30,11 @@ export function CheckpointRestore({
   const interaction = useAtomValue(client.actions.state(threadId));
   const page = state.history;
   const thread = Option.getOrNull(state.data);
-  const targets = thread ? checkpointRestoreTargets(thread).toReversed() : [];
+  const [filter, setFilter] = useState<string | null>(null);
+  const needle = filter?.trim().toLocaleLowerCase();
+  const targets = (thread ? checkpointRestoreTargets(thread).toReversed() : []).filter(
+    (entry) => !needle || entry.message.text.toLocaleLowerCase().includes(needle),
+  );
   const [cursor, setCursor] = useState(0);
   const [messageId, setMessageId] = useState<MessageId | null>(null);
   const [choice, setChoice] = useState(0);
@@ -57,14 +62,35 @@ export function CheckpointRestore({
   useKeyLayer("restore", {
     active,
     modal: true,
+    typing: filter !== null,
     bindings: {
       "restore.back": () => {
         if (pending) return;
-        if (messageId) setMessageId(null);
+        if (filter !== null) setFilter(null);
+        else if (messageId) setMessageId(null);
         else onClose();
       },
-      "restore.up": { enabled: !pending, run: () => move(-1) },
-      "restore.down": { enabled: !pending, run: () => move(1) },
+      "restore.filter": {
+        enabled: !pending && !messageId && filter === null,
+        run: () => {
+          setFilter("");
+          setCursor(0);
+        },
+      },
+      "restore.up": {
+        enabled: !pending,
+        run: (key) => {
+          if (filter !== null && key?.name !== "up") return false;
+          move(-1);
+        },
+      },
+      "restore.down": {
+        enabled: !pending,
+        run: (key) => {
+          if (filter !== null && key?.name !== "down") return false;
+          move(1);
+        },
+      },
       "restore.confirm": {
         enabled: !pending,
         run: () => {
@@ -73,7 +99,12 @@ export function CheckpointRestore({
         },
       },
       "restore.loadOlder": {
-        enabled: !pending && !messageId && Boolean(page?.hasMoreHistory) && !page?.loading,
+        enabled:
+          !pending &&
+          !messageId &&
+          filter === null &&
+          Boolean(page?.hasMoreHistory) &&
+          !page?.loading,
         run: () => {
           client.loadOlder(registry, threadId);
         },
@@ -83,7 +114,19 @@ export function CheckpointRestore({
   const count = Math.max(1, height - 4);
   return (
     <Stack flexDirection="column" width="100%" height="100%">
-      <Text strong>{messageId ? "Edit from here?" : "Select a prompt to edit from"}</Text>
+      <ListFilterRow
+        id="restore-filter"
+        value={filter}
+        focused={active}
+        onInput={(value) => {
+          setFilter(value);
+          setCursor(0);
+        }}
+      >
+        <Text height={1} flexShrink={0} strong>
+          {messageId ? "Edit from here?" : "Select a prompt to edit from"}
+        </Text>
+      </ListFilterRow>
       {messageId ? (
         <>
           <Text>
@@ -120,8 +163,10 @@ export function CheckpointRestore({
             itemKey={(entry) => entry.message.id}
             empty={
               <EmptyState
-                title="No checkpointed prompts available."
-                description="Checkpoints appear after a turn finishes."
+                title={filter ? "No prompts match." : "No checkpointed prompts available."}
+                description={
+                  filter ? "Esc clears the filter." : "Checkpoints appear after a turn finishes."
+                }
               />
             }
             onActivate={(entry) => {

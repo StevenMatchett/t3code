@@ -72,12 +72,12 @@ try {
   await waitFor(/Connected/, "the connected shell");
   capture("launch-empty");
   send("?");
-  await waitFor(/Help|Keys/, "help");
+  await waitFor(/Keyboard help/, "help");
   capture("help");
   send("Escape");
   await waitFor(/PROJECTS/, "help to close");
   send("C-k");
-  await waitFor(/Search|Commands|Palette/i, "the palette");
+  await waitFor(/Search and commands/, "the palette");
   capture("palette");
   send("Escape");
   await waitFor(/PROJECTS/, "palette to close");

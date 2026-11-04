@@ -95,6 +95,7 @@ export function Conversation({
   );
   const [agentOutputStart, setAgentOutputStart] = useState(0);
   const [search, setSearch] = useState<{ query: string; index: number } | null>(null);
+  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   useEffect(() => {
     client.session?.saveConversation(threadId, {
       mode,
@@ -570,7 +571,8 @@ export function Conversation({
           if (event.button === 0) setMode("history");
         }}
       >
-        {lines.length === 0 ? (
+        {!capabilities.color &&
+        (composerMenuOpen || linkMenu.isOpen || selectedAgent) ? null : lines.length === 0 ? (
           state.status === "deleted" ? (
             <EmptyState
               title="This thread was deleted."
@@ -625,112 +627,121 @@ export function Conversation({
           }}
         />
       ) : null}
-      <NoticeRow
-        height={noticeHeight}
-        search={search}
-        matchCount={matches.length}
-        matchIndex={matchIndex}
-        inputFocused={active && mode === "history" && !terminalOpen && !selectedAgent}
-        onSearchInput={(query) => setSearch({ query, index: 0 })}
-        error={interaction.error}
-        queued={queued}
-        queueLength={interaction.queue.length}
-      />
-      <RequestDock
-        approval={approval}
-        question={question}
-        focused={mode === (approval ? "requests" : "questions")}
-        active={active && !selectedAgent}
-        client={client}
-        threadId={threadId}
-        width={width}
-        height={requestHeight}
-        onFocus={() => setMode(requestMode)}
-        onBack={() => setMode("history")}
-      />
-      <StatusRow
-        worktree={Boolean(thread?.worktreePath)}
-        phase={phase}
-        animate={active}
-        // While reading above the live edge, the way back matters more than when the turn ended.
-        timingTurn={
-          anchor !== null && runningSince === null && thread?.latestTurn?.state !== "running"
-            ? null
-            : timingTurn
-        }
-        runningSince={runningSince}
-        showParent={parentThreadId !== null}
-        renderMarkdown={renderMarkdown}
-        message={
-          requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
-            ? "A: respond to requests"
-            : interaction.pending
-              ? "Sending command..."
-              : queued?.status === "queued"
-                ? "Sends after next tool call / turn end"
-                : (interaction.notice ?? "")
-        }
-        messageTone={requestCount ? "warning" : "muted"}
-        detail={[
-          linkMenu.notice,
-          mode === "history" ? vim.status : "",
-          anchor !== null
-            ? `${linesBelow > 0 ? `${linesBelow} below · ` : ""}History / End: live`
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-        onDiff={() => {
-          if (active) onDiff?.();
-        }}
-        onParent={() => {
-          if (active) openParent();
-        }}
-        onToggleMarkdown={() => {
-          if (!active || linkMenu.isOpen) return;
-          setSearch(null);
-          toggleMarkdown();
-        }}
-      />
-      {readOnly ? (
-        <Panel id="provider-subagent-bar" height={composerHeight} flexShrink={0} width="100%">
-          <Text height={1} tone="muted" wrapMode="none" truncate>
-            {`${inlineTerminalText(thread?.modelSelection.model ?? "Provider")} subagent · Runs on its own; steer it from the parent thread`}
-          </Text>
-        </Panel>
-      ) : (
-        <Composer
+      <Stack
+        visible={capabilities.color || !selectedAgent}
+        flexDirection="column"
+        flexShrink={0}
+        width="100%"
+        overflow="visible"
+      >
+        <NoticeRow
+          height={noticeHeight}
+          search={search}
+          matchCount={matches.length}
+          matchIndex={matchIndex}
+          inputFocused={active && mode === "history" && !terminalOpen && !selectedAgent}
+          onSearchInput={(query) => setSearch({ query, index: 0 })}
+          error={interaction.error}
+          queued={queued}
+          queueLength={interaction.queue.length}
+        />
+        <RequestDock
+          approval={approval}
+          question={question}
+          focused={mode === (approval ? "requests" : "questions")}
+          active={active && !selectedAgent}
           client={client}
           threadId={threadId}
-          active={active && !linkMenu.isOpen}
-          focused={mode === "composer"}
-          editorHeight={editorHeight}
-          showPastes={showPastes}
-          pastePreviewHeight={pastePreviewHeight}
-          onTogglePastes={togglePastes}
-          suggestedReplies={suggestedReplies}
-          availableHeight={height - 1}
           width={width}
-          onActivate={() => {
-            vim.reset();
-            activateComposer();
-          }}
-          onDraftChange={() => setAnchor(null)}
-          onBlur={() => {
-            vim.reset();
-            setMode("history");
-          }}
-          sendLabel={thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send"}
-          {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
-          onSubmit={() => {
-            setAnchor(null);
-            void client.actions.send(registry, threadId);
-          }}
-          {...(thread?.latestTurn?.state === "running" || queued
-            ? { onCancel: cancelTurn, cancelPending: interaction.pending === "stop" }
-            : {})}
+          height={requestHeight}
+          onFocus={() => setMode(requestMode)}
+          onBack={() => setMode("history")}
         />
-      )}
+        <StatusRow
+          worktree={Boolean(thread?.worktreePath)}
+          phase={phase}
+          animate={active}
+          // While reading above the live edge, the way back matters more than when the turn ended.
+          timingTurn={
+            anchor !== null && runningSince === null && thread?.latestTurn?.state !== "running"
+              ? null
+              : timingTurn
+          }
+          runningSince={runningSince}
+          showParent={parentThreadId !== null}
+          renderMarkdown={renderMarkdown}
+          message={
+            requestCount || phase === "waiting_for_approval" || phase === "waiting_for_input"
+              ? "A: respond to requests"
+              : interaction.pending
+                ? "Sending command..."
+                : queued?.status === "queued"
+                  ? "Sends after next tool call / turn end"
+                  : (interaction.notice ?? "")
+          }
+          messageTone={requestCount ? "warning" : "muted"}
+          detail={[
+            linkMenu.notice,
+            mode === "history" ? vim.status : "",
+            anchor !== null
+              ? `${linesBelow > 0 ? `${linesBelow} below · ` : ""}History / End: live`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          onDiff={() => {
+            if (active) onDiff?.();
+          }}
+          onParent={() => {
+            if (active) openParent();
+          }}
+          onToggleMarkdown={() => {
+            if (!active || linkMenu.isOpen) return;
+            setSearch(null);
+            toggleMarkdown();
+          }}
+        />
+        {readOnly ? (
+          <Panel id="provider-subagent-bar" height={composerHeight} flexShrink={0} width="100%">
+            <Text height={1} tone="muted" wrapMode="none" truncate>
+              {`${inlineTerminalText(thread?.modelSelection.model ?? "Provider")} subagent · Runs on its own; steer it from the parent thread`}
+            </Text>
+          </Panel>
+        ) : (
+          <Composer
+            client={client}
+            threadId={threadId}
+            active={active && !linkMenu.isOpen}
+            focused={mode === "composer"}
+            editorHeight={editorHeight}
+            showPastes={showPastes}
+            pastePreviewHeight={pastePreviewHeight}
+            onTogglePastes={togglePastes}
+            suggestedReplies={suggestedReplies}
+            availableHeight={height - 1}
+            width={width}
+            onActivate={() => {
+              vim.reset();
+              activateComposer();
+            }}
+            onDraftChange={() => setAnchor(null)}
+            onBlur={() => {
+              vim.reset();
+              setMode("history");
+            }}
+            sendLabel={thread?.latestTurn?.state === "running" || queued ? "Queue" : "Send"}
+            onMenuChange={setComposerMenuOpen}
+            {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
+            onSubmit={() => {
+              setAnchor(null);
+              void client.actions.send(registry, threadId);
+            }}
+            {...(thread?.latestTurn?.state === "running" || queued
+              ? { onCancel: cancelTurn, cancelPending: interaction.pending === "stop" }
+              : {})}
+          />
+        )}
+      </Stack>
       {selectedAgent ? (
         <AgentOutputOverlay
           agent={selectedAgent}

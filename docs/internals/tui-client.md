@@ -63,6 +63,17 @@ and input RPC. The TUI feeds those byte streams to a real terminal emulator and 
 input back through typed terminal commands. Provider text, tool output, filenames, and logs never
 enter the emulator as trusted terminal bytes.
 
+## Key routing
+
+Every key goes through one listener in `apps/tui/src/ui/keymap.ts`. Actions are defined once in
+`apps/tui/src/app/actions.ts`, and screens only bind handlers to those ids, so the hotkey bar, help,
+and palette cannot disagree with what a key does. Do not call OpenTUI's `useKeyboard` from a screen.
+
+Scopes have fixed levels, higher first. An active modal layer blocks everything below it except the
+`app` scope, which keeps Ctrl+K and help reachable. A `typing` layer sends printable keys to its text
+field, so single-letter actions cannot fire while someone types. Overlays are a stack in shell state,
+and lower entries stay mounted, so closing one restores focus and selection without saving anything.
+
 ## Design feedback and verification
 
 Keep these loops running while changing anything visible. All of them run from `apps/tui` and write

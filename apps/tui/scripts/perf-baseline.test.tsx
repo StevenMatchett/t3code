@@ -17,8 +17,8 @@ const percentile = (values: readonly number[], p: number) => {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length * p) / 100))]!;
 };
-const summary = (name: string, values: readonly number[]) =>
-  `${name}: p50 ${percentile(values, 50).toFixed(1)}ms p95 ${percentile(values, 95).toFixed(1)}ms max ${Math.max(...values).toFixed(1)}ms (n=${values.length})`;
+const summary = (name: string, values: readonly number[], cpuMs = 0) =>
+  `${name}: p50 ${percentile(values, 50).toFixed(1)}ms p95 ${percentile(values, 95).toFixed(1)}ms max ${Math.max(...values).toFixed(1)}ms cpu/op ${(cpuMs / values.length).toFixed(1)}ms (n=${values.length})`;
 
 it.skipIf(!process.env.T3_TUI_PERF)(
   "measures input-to-frame on a 5,000-row thread",
@@ -34,25 +34,37 @@ it.skipIf(!process.env.T3_TUI_PERF)(
       updateThread(driver.registry, fixture, 0, (thread) => ({
         ...thread,
         latestTurn: runningTurn,
-        messages: longTranscript(5_000),
+        messages: longTranscript(Number(process.env.T3_TUI_PERF_ROWS ?? 5_000)),
       })),
     );
     await driver.input.pressKey("RETURN");
     await driver.input.pressKey("RETURN");
     await driver.flush();
+    const cpu: Record<string, number> = {};
+    let section = "";
     const timed = async (run: () => Promise<void>) => {
       const started = performance.now();
+      const startedCpu = process.cpuUsage();
       await run();
+      const used = process.cpuUsage(startedCpu);
+      cpu[section] = (cpu[section] ?? 0) + (used.user + used.system) / 1_000;
       return performance.now() - started;
     };
+    // The test renderer paces frames, so an empty flush shows the floor the numbers below sit on.
+    section = "empty flush";
+    const floor: number[] = [];
+    for (let index = 0; index < 60; index += 1) floor.push(await timed(() => driver.flush()));
+    section = "scroll";
     const scroll: number[] = [];
     for (let index = 0; index < 60; index += 1)
       scroll.push(await timed(() => driver.input.pressKey(index % 2 ? "ARROW_DOWN" : PAGE_UP)));
     await driver.input.pressKey("END");
     await driver.input.pressKey("i");
+    section = "typing";
     const typing: number[] = [];
     for (let index = 0; index < 120; index += 1)
       typing.push(await timed(() => driver.input.typeText("x")));
+    section = "streaming";
     const streaming: number[] = [];
     let text = "";
     for (let index = 0; index < 60; index += 1) {
@@ -74,9 +86,12 @@ it.skipIf(!process.env.T3_TUI_PERF)(
       );
     }
     process.stdout.write(
-      [summary("scroll", scroll), summary("typing", typing), summary("streaming", streaming)].join(
-        "\n",
-      ) + "\n",
+      [
+        summary("empty flush", floor, cpu["empty flush"]),
+        summary("scroll", scroll, cpu.scroll),
+        summary("typing", typing, cpu.typing),
+        summary("streaming", streaming, cpu.streaming),
+      ].join("\n") + "\n",
     );
     release();
     await driver.close();

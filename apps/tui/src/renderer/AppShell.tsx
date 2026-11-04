@@ -681,6 +681,7 @@ function AppShellContent({
         height={height}
         notice={sessionError ? { text: sessionError, failed: true } : notice}
         overlays={overlayViews}
+        behindDialog={!active && !capabilities.color}
         filtering={filtering}
         onFilterChange={(filter) => dispatch({ type: "set-filter", filter })}
         onOpenArchived={() => dispatch({ type: "set-sidebar-view", view: "archived" })}

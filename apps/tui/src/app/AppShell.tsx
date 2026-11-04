@@ -76,6 +76,8 @@ export interface AppShellViewProps {
   readonly overlays?: ReadonlyArray<
     ShellOverlayView & { readonly key: string; readonly visible: boolean }
   >;
+  /** Another dialog sits above the shell. Only matters when panels have no background to cover it. */
+  readonly behindDialog?: boolean;
   readonly filtering?: boolean;
   readonly onFilterChange?: (filter: string) => void;
   readonly onOpenArchived?: () => void;
@@ -297,6 +299,7 @@ export function AppShellView({
   onNewProject,
   onNewThread,
   overlays = [],
+  behindDialog = false,
   filtering = false,
   onFilterChange,
   onOpenArchived,
@@ -308,7 +311,10 @@ export function AppShellView({
   const { capabilities } = useUi();
   const overlayOpen = overlays.length > 0;
   // A sized or floating overlay leaves the workspace visible around it, so it keeps animating too.
-  const bodyCovered = overlays.some((overlay) => !overlay.floating && !overlay.size);
+  // Without color a panel has no background to cover it, so any overlay hides the body instead.
+  const bodyCovered =
+    behindDialog ||
+    overlays.some((overlay) => !capabilities.color || (!overlay.floating && !overlay.size));
   const background = useThemeColor("panel");
   const project = projects.find((item) => item.id === state.projectId);
   const archived = state.sidebarView === "archived";

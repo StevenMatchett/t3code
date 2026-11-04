@@ -67,3 +67,34 @@ export function FormInput({
     />
   );
 }
+
+/** A `/` filter row: shows the query while filtering, otherwise whatever the screen puts there. */
+export function ListFilterRow({
+  id,
+  value,
+  focused,
+  onInput,
+  children,
+}: {
+  readonly id: string;
+  readonly value: string | null;
+  readonly focused: boolean;
+  readonly onInput: (value: string) => void;
+  readonly children?: ReactNode;
+}) {
+  if (value === null) return <>{children}</>;
+  return (
+    <Stack height={1} flexShrink={0} flexDirection="row">
+      <Text height={1} flexShrink={0} tone="accent">
+        {"/ "}
+      </Text>
+      <FormInput
+        id={id}
+        value={value}
+        placeholder="Filter..."
+        focused={focused}
+        onInput={onInput}
+      />
+    </Stack>
+  );
+}

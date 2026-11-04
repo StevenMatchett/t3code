@@ -1009,6 +1009,14 @@ export const ACTIONS = {
     hint: 76,
     ...keyOnly,
   },
+  "diff.filter": {
+    scope: "diff",
+    title: "Filter files",
+    keys: ["/"],
+    label: "Filter",
+    hint: 86,
+    ...keyOnly,
+  },
   "diff.switchPane": {
     scope: "diff",
     title: "Switch between files and diff",
@@ -1072,6 +1080,14 @@ export const ACTIONS = {
     keys: ["escape"],
     label: "Back",
     hint: 88,
+    ...keyOnly,
+  },
+  "restore.filter": {
+    scope: "restore",
+    title: "Filter prompts",
+    keys: ["/"],
+    label: "Filter",
+    hint: 86,
     ...keyOnly,
   },
   "restore.loadOlder": {
