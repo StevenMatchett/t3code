@@ -661,9 +661,11 @@ export function Conversation({
           worktree={Boolean(thread?.worktreePath)}
           phase={phase}
           animate={active}
-          // While reading above the live edge, the way back matters more than when the turn ended.
+          // A notice or the way back to live output matters more than when the turn ended.
           timingTurn={
-            anchor !== null && runningSince === null && thread?.latestTurn?.state !== "running"
+            (anchor !== null || interaction.notice) &&
+            runningSince === null &&
+            thread?.latestTurn?.state !== "running"
               ? null
               : timingTurn
           }

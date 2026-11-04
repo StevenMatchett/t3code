@@ -83,6 +83,9 @@ outside the repository.
   200x60, ASCII without color, and scripted sequences with one frame per step.
 - `node scripts/tmux-smoke.mjs` (Node 26.4+) drives a disposable environment in a private `tmux`
   server. `HOME` and the state directory are temporary.
+- `node scripts/tmux-core-loop.mjs` (Node 26.4+) walks first launch through a live approval against a
+  real server and a synthetic Codex peer, pressing only keys the screen shows, and reports
+  key-to-screen latency.
 - `T3_TUI_PERF=1 node scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run --root .
 scripts/perf-baseline.test.tsx` measures input-to-frame on a 5,000-row thread.
 

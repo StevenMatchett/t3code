@@ -8,7 +8,11 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { threadActivityPhase, type ThreadActivityPhase } from "../features/chat/threadActivity.ts";
-import { AnimationGate, ThreadActivityIndicator } from "../ui/ThreadActivityIndicator.tsx";
+import {
+  AnimationGate,
+  ThreadActivityIndicator,
+  useChangeHighlight,
+} from "../ui/ThreadActivityIndicator.tsx";
 import { TurnTiming } from "../ui/TurnTiming.tsx";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { Panel } from "../ui/Panel.tsx";
@@ -143,6 +147,27 @@ type SidebarRow =
       readonly subline?: string;
     }
   | { readonly kind: "placeholder"; readonly id: string };
+
+/** A row flashes once when its state changes, so a thread needing attention is noticed. */
+function ChangeHighlight({
+  value,
+  children,
+}: {
+  readonly value: string;
+  readonly children?: ReactNode;
+}) {
+  const highlighted = useChangeHighlight(value);
+  const color = useThemeColor("hover");
+  return (
+    <Stack
+      flexDirection="column"
+      width="100%"
+      {...(highlighted && color ? { backgroundColor: color } : {})}
+    >
+      {children}
+    </Stack>
+  );
+}
 
 function ThreadRowTrailing({
   phase,
@@ -474,57 +499,69 @@ export function AppShellView({
               }
             />
           ) : (
-            <Stack flexDirection="column" width="100%" {...(row.indent ? { paddingLeft: 2 } : {})}>
-              <SelectionRow
-                selected={row.id === state.threadId && !browsingProjects}
-                active={!conversation}
-                label={`${row.thread.title}${row.thread.worktreePath ? " [WT]" : ""}`}
-                trailing={
-                  <ThreadRowTrailing
-                    phase={row.phase}
-                    latestTurn={row.thread.latestTurn}
-                    runningSince={row.thread.session?.updatedAt ?? null}
-                    visible={!overlayOpen}
-                  />
-                }
-              />
-              {row.subline ? (
-                <Text height={1} tone="muted" dim wrapMode="none" truncate>
-                  {`    ${inlineTerminalText(row.subline)}`}
-                </Text>
-              ) : null}
-            </Stack>
+            <ChangeHighlight value={row.phase}>
+              <Stack
+                flexDirection="column"
+                width="100%"
+                {...(row.indent ? { paddingLeft: 2 } : {})}
+              >
+                <SelectionRow
+                  selected={row.id === state.threadId && !browsingProjects}
+                  active={!conversation}
+                  label={`${row.thread.title}${row.thread.worktreePath ? " [WT]" : ""}`}
+                  trailing={
+                    <ThreadRowTrailing
+                      phase={row.phase}
+                      latestTurn={row.thread.latestTurn}
+                      runningSince={row.thread.session?.updatedAt ?? null}
+                      visible={!overlayOpen}
+                    />
+                  }
+                />
+                {row.subline ? (
+                  <Text height={1} tone="muted" dim wrapMode="none" truncate>
+                    {`    ${inlineTerminalText(row.subline)}`}
+                  </Text>
+                ) : null}
+              </Stack>
+            </ChangeHighlight>
           )
         }
       />
     </Stack>
   );
+  // Says only what is true right now: no promises about opening things that are not there.
+  const previewFacts: readonly string[] = browsingProjects
+    ? project
+      ? [`${projectThreads.length} active threads`, "Enter opens the project. N starts a thread."]
+      : !loaded
+        ? []
+        : ["P adds a project."]
+    : selectedThread
+      ? [
+          `Model  ${inlineTerminalText(selectedThread.modelSelection.model)}`,
+          archived ? "Enter restores or deletes it." : "Enter opens the conversation.",
+        ]
+      : [archived ? "Nothing is archived." : "No thread selected."];
   const preview = (
     <Stack flexDirection="column" paddingTop={1} gap={1}>
       <Text strong tone="accent" wrapMode="none" truncate>
         {inlineTerminalText(
           browsingProjects
             ? (project?.title ?? "Your workspace")
-            : (selectedThread?.title ?? "Choose a thread"),
+            : (selectedThread?.title ?? (archived ? "Archived threads" : "Choose a thread")),
         )}
       </Text>
-      {project ? (
+      {project && (browsingProjects || selectedThread) ? (
         <Text tone="muted" wrapMode="none" truncate>
           {inlineTerminalText(project.workspaceRoot)}
         </Text>
       ) : null}
-      <Text wrapMode="none" truncate>
-        {browsingProjects
-          ? `${projectThreads.length} active threads`
-          : selectedThread
-            ? `Model  ${inlineTerminalText(selectedThread.modelSelection.model)}`
-            : "No thread selected."}
-      </Text>
-      <Text tone="muted">
-        {browsingProjects
-          ? "Enter opens the project. N starts a thread."
-          : "Enter opens the conversation."}
-      </Text>
+      {previewFacts.map((fact) => (
+        <Text key={fact} tone="muted">
+          {fact}
+        </Text>
+      ))}
       <Text tone="muted">
         Shared with your T3 environment. Agents keep running when this client closes.
       </Text>

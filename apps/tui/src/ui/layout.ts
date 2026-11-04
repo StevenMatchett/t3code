@@ -37,6 +37,25 @@ export function calculateShellLayout(width: number, height: number) {
   };
 }
 
+/**
+ * Widths for a row of controls. Equal cells read best, so they are used whenever every label fits.
+ * Otherwise each control gets its own width, and only the longest labels give up space.
+ */
+export function fitControlWidths(labelWidths: readonly number[], available: number) {
+  const count = Math.max(1, labelWidths.length);
+  const cell = Math.max(1, Math.floor(available / count));
+  if (labelWidths.every((width) => width + 1 <= cell)) return labelWidths.map(() => cell);
+  const widths = labelWidths.map((width) => width + 1);
+  let excess = widths.reduce((sum, width) => sum + width, 0) - available;
+  while (excess > 0) {
+    const longest = widths.indexOf(Math.max(...widths));
+    if (widths[longest]! <= 1) break;
+    widths[longest]! -= 1;
+    excess -= 1;
+  }
+  return widths;
+}
+
 /** A centered box of the preferred size that can never leave the area it opens in. */
 export function clampBox(
   area: { readonly width: number; readonly height: number },

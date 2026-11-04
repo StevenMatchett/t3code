@@ -35,7 +35,7 @@ export function conversationLines(
       const open = expandedGroups.get(id) ?? expanded;
       result.push(
         ...wrapTerminalWords(
-          `${open ? "v" : ">"} ${tools.length} tool calls · click to ${open ? "collapse" : "expand"} · T details`,
+          `${open ? "v" : ">"} ${tools.length} tool calls ${unicode ? "·" : "-"} click to ${open ? "collapse" : "expand"} ${unicode ? "·" : "-"} T details`,
           width,
         ).map((text, line): ConversationLine => ({
           id,

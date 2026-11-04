@@ -3,9 +3,18 @@ import type { CapturedFrame } from "@opentui/core";
 import * as Option from "effect/Option";
 import { act } from "react";
 import { createTuiTestDriver, type TuiTestDriver } from "../testing/driver.tsx";
-import { makeDesignFixture, runningTurn, updateShellThread } from "../testing/designFixture.ts";
+import {
+  assistantMessage,
+  makeDesignFixture,
+  runningTurn,
+  updateShellThread,
+} from "../testing/designFixture.ts";
+import { projectRecordedThreadTimeline } from "../features/chat/timeline.ts";
+import { basicTerminalCapabilities } from "../ui/capabilities.ts";
+import { UiProvider } from "../ui/context.tsx";
+import { conversationLines } from "../ui/conversationLines.ts";
 import { fuzzyScore } from "../ui/fuzzy.ts";
-import { clampBox } from "../ui/layout.ts";
+import { clampBox, fitControlWidths } from "../ui/layout.ts";
 import { resolveThemeMode, themeModeFromColorfgbg } from "../ui/theme.ts";
 import { AppShell } from "./AppShell.tsx";
 import { App } from "./App.tsx";
@@ -303,6 +312,18 @@ describe("themes", () => {
   });
 });
 
+describe("composer controls", () => {
+  it("keeps equal cells while labels fit, and never clips a short label to save a long one", () => {
+    expect(fitControlWidths([15, 6, 13], 72)).toEqual([24, 24, 24]);
+    const crowded = fitControlWidths([20, 16, 6, 13, 6], 72);
+    expect(crowded.reduce((sum, width) => sum + width, 0)).toBeLessThanOrEqual(72);
+    expect(crowded).toEqual([21, 17, 7, 14, 7]);
+    const tight = fitControlWidths([40, 16, 6, 13, 6], 60);
+    expect(tight.reduce((sum, width) => sum + width, 0)).toBe(60);
+    expect(tight.slice(2)).toEqual([7, 14, 7]);
+  });
+});
+
 describe("dialogs", () => {
   it("clamps boxes to the area they open in", () => {
     expect(clampBox({ width: 40, height: 10 }, { width: 100, height: 28 })).toEqual({
@@ -388,6 +409,158 @@ describe("list filters", () => {
   });
 });
 
+describe("input bursts", () => {
+  it("routes each key to the layer the previous key opened, even in one chunk", async () => {
+    const { driver } = await setup();
+    await driver.input.typeText("?/zz");
+    expect(driver.captureFrame()).toContain("No actions match");
+    await driver.input.pressKey("ESCAPE");
+    await driver.input.pressKey("ESCAPE");
+    await driver.input.typeText("/design");
+    expect(rowOf(driver, "alpha")).toBeUndefined();
+    expect(rowOf(driver, "beta")).toBeDefined();
+  });
+});
+
+describe("folder form", () => {
+  it("starts on the folder field and keeps text typed while folders load", async () => {
+    const { driver, fixture } = await setup();
+    await driver.input.pressKey("p");
+    // The first browse has not settled yet when these keys arrive.
+    await driver.input.typeText("/srv/app");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("/srv/app");
+    expect(fixture.projects).toHaveLength(2);
+  });
+});
+
+describe("folder filter", () => {
+  it("filters folders with / when the list has focus", async () => {
+    const { driver } = await setup();
+    await driver.input.pressKey("p");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("code/");
+    await driver.input.pressKey("TAB");
+    await driver.input.pressKey("/");
+    await driver.input.typeText("proj");
+    expect(driver.captureFrame()).toContain("> projects/");
+    expect(driver.captureFrame()).not.toContain(" code/");
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).toContain("code/");
+    expect(driver.captureFrame()).toContain("Add a project");
+  });
+});
+
+describe("streaming stability", () => {
+  const reply = `Here is the plan for the change.
+
+1. Read the navigation module and note where the selection is stored.
+2. Add a filter that keeps the selected row **visible** while typing.
+
+\`\`\`ts
+const visible = rows.filter((row) => row.title.includes(query));
+\`\`\`
+
+Then run the focused tests and report what changed.`;
+
+  it("never rewrites earlier lines while a reply streams", () => {
+    const rowsFor = (text: string) =>
+      conversationLines(
+        projectRecordedThreadTimeline({
+          messages: [assistantMessage("stream", text, true)],
+          activities: [],
+        }),
+        60,
+        false,
+      ).map((line) => line.text);
+    const violations: string[] = [];
+    let previous: readonly string[] = [];
+    for (let end = 1; end <= reply.length; end += 3) {
+      const lines = rowsFor(reply.slice(0, end));
+      // The last few rows are still being written. Everything above them must hold still.
+      const settled = previous.slice(0, Math.max(0, previous.length - 4));
+      settled.forEach((line, index) => {
+        if (lines[index] !== line)
+          violations.push(
+            `at ${end}, row ${index}: ${JSON.stringify(line)} -> ${JSON.stringify(lines[index])}`,
+          );
+      });
+      previous = lines;
+    }
+    expect(violations).toEqual([]);
+  });
+});
+
+describe("ascii mode", () => {
+  it.each([
+    "projects",
+    "conversation",
+    "bullets",
+    "composer",
+    "help",
+    "palette",
+    "diff",
+    "new-thread",
+  ])("prints only ASCII on the %s screen", async (screen) => {
+    const fixture = makeDesignFixture();
+    const driver = await createTuiTestDriver(
+      <UiProvider capabilities={basicTerminalCapabilities}>
+        <AppShell client={fixture.client} searchDebounceMs={0} />
+      </UiProvider>,
+      { width: 80, height: 24, kittyKeyboard: true },
+    );
+    drivers.push(driver);
+    const open = async () => {
+      await driver.input.pressKey("RETURN");
+      await driver.input.pressKey("RETURN");
+    };
+    if (screen === "conversation") await open();
+    if (screen === "bullets") {
+      await open();
+      await driver.input.pressKey("HOME");
+    }
+    if (screen === "composer") {
+      await open();
+      await driver.input.pressKey("i");
+    }
+    if (screen === "help") await driver.input.typeText("?");
+    if (screen === "palette") await driver.input.pressKey("k", { ctrl: true });
+    if (screen === "diff") {
+      await open();
+      await driver.input.pressKey("d");
+    }
+    if (screen === "new-thread") await driver.input.pressKey("n");
+    const nonAscii = [...driver.captureRawFrame()].filter(
+      (character) => character.charCodeAt(0) > 126,
+    );
+    expect([...new Set(nonAscii)]).toEqual([]);
+  });
+});
+
+describe("workspace preview", () => {
+  it("promises only what is possible on the current selection", async () => {
+    const { driver, fixture } = await setup(120, 40);
+    expect(driver.captureFrame()).toContain("Enter opens the project.");
+    await act(async () =>
+      driver.registry.update(fixture.shell, (shell) => ({
+        ...shell,
+        snapshot: Option.map(shell.snapshot, (snapshot) => ({
+          ...snapshot,
+          projects: [],
+          threads: [],
+        })),
+      })),
+    );
+    await driver.flush();
+    expect(driver.captureFrame()).not.toContain("Enter opens");
+    expect(driver.captureFrame()).toContain("P adds a project.");
+    await driver.input.pressKey("ARROW_RIGHT");
+    await driver.input.pressKey("ARROW_RIGHT");
+    expect(driver.captureFrame()).toContain("Nothing is archived.");
+    expect(driver.captureFrame()).not.toContain("Enter opens");
+  });
+});
+
 describe("states", () => {
   it("names the next action when empty", async () => {
     const { driver, fixture } = await setup(80, 24);
@@ -402,7 +575,12 @@ describe("states", () => {
       })),
     );
     await driver.flush();
-    expect(driver.captureFrame()).toContain("Press P to add one.");
+    const frame = driver.captureFrame();
+    expect(frame).toContain("Press P to add one.");
+    // Nothing offers to open or expand a row that does not exist.
+    const footer = frame.split("\n").slice(-2).join("\n");
+    expect(footer).not.toMatch(/Enter\s+Open/u);
+    expect(footer).not.toContain("Expand");
     await driver.input.pressKey("p");
     expect(driver.captureFrame()).toContain("Add a project");
   });

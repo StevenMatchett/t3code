@@ -291,15 +291,27 @@ function AppShellContent({
       },
     },
   });
+  // Keys that act on a row are only offered while there is a row to act on.
+  const hasRows =
+    !inConversation &&
+    (browsingProjects
+      ? rows.projects.length > 0
+      : rows.threads.some(
+          (thread) =>
+            Boolean(thread.archivedAt) === (state.sidebarView === "archived") &&
+            ((state.sidebarView ?? "projects") !== "projects" ||
+              thread.projectId === state.projectId),
+        ));
   useKeyLayer("navigation", {
     active: !inConversation,
     context: browsingProjects ? "Projects" : "Threads",
     bindings: {
-      "list.up": () => moveSelection(-1),
-      "list.down": () => moveSelection(1),
-      "list.next": () => moveSelection(1, true),
-      "list.previous": () => moveSelection(-1, true),
+      "list.up": { enabled: hasRows, run: () => moveSelection(-1) },
+      "list.down": { enabled: hasRows, run: () => moveSelection(1) },
+      "list.next": { enabled: hasRows, run: () => moveSelection(1, true) },
+      "list.previous": { enabled: hasRows, run: () => moveSelection(-1, true) },
       "list.open": {
+        enabled: hasRows,
         label: atArchivedRow ? "Manage" : "Open",
         run: () => {
           if (atArchivedRow) pushOverlay({ type: "manage", threadId: atArchivedRow.id });
@@ -318,7 +330,7 @@ function AppShellContent({
         dispatch({ type: "set-filter", filter: state.filter ?? "" });
       },
       "project.toggleExpanded": {
-        enabled: browsingProjects,
+        enabled: browsingProjects && hasRows,
         run: () => dispatch({ type: "toggle-project-expanded" }),
       },
       "sidebar.previousView": () =>

@@ -183,6 +183,18 @@ function Fields({
       return;
     }
     if (locked) return;
+    // Enter in the title is the short path: everything else already has a good default.
+    if (target === "title" && selection && !busy) {
+      void client.newThreads.create(registry, {
+        projectId: project.id,
+        title,
+        mode,
+        baseRef,
+        modelSelection: selection,
+        runtimeMode,
+      });
+      return;
+    }
     setFocus(target);
     if (target === "local" || target === "worktree") setMode(target);
     else if (target === "permissions") {
@@ -244,18 +256,22 @@ function Fields({
         enabled: !menuOpen && focus !== "title" && focus !== "base",
         run: () => advance(1),
       },
-      "newThread.activate": (key) => {
-        if (permissionsMenu) {
-          if (key?.name === "space") return false;
-          setRuntimeMode(permissionChoices[cursor]!.id);
-          setPermissionsMenu(false);
-        } else if (modelMenu) {
-          if (key?.name === "space") return false;
-          chooseModel(Math.min(cursor, filtered.length - 1));
-        } else {
-          if (key?.name === "space" && (focus === "title" || focus === "base")) return false;
-          activate(focus);
-        }
+      "newThread.activate": {
+        label:
+          focus === "title" && !menuOpen ? "Create" : focus === "create" ? "Create" : "Activate",
+        run: (key) => {
+          if (permissionsMenu) {
+            if (key?.name === "space") return false;
+            setRuntimeMode(permissionChoices[cursor]!.id);
+            setPermissionsMenu(false);
+          } else if (modelMenu) {
+            if (key?.name === "space") return false;
+            chooseModel(Math.min(cursor, filtered.length - 1));
+          } else {
+            if (key?.name === "space" && (focus === "title" || focus === "base")) return false;
+            activate(focus);
+          }
+        },
       },
     },
   });

@@ -1,5 +1,5 @@
 import type { CliRenderer, KeyEvent } from "@opentui/core";
-import { useRenderer } from "@opentui/react";
+import { flushSync, useRenderer } from "@opentui/react";
 import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import {
   ACTION_SCOPES,
@@ -264,7 +264,9 @@ export function keymapFor(renderer: CliRenderer) {
   if (existing) return existing;
   const store = createKeymapStore();
   stores.set(renderer, store);
-  renderer.keyInput.on("keypress", store.dispatch);
+  // Commit each key's effects before the next key, even when a paste or fast typing delivers several
+  // in one chunk. Otherwise a key can arrive before the layer the previous key opened is registered.
+  renderer.keyInput.on("keypress", (key) => flushSync(() => store.dispatch(key)));
   return store;
 }
 

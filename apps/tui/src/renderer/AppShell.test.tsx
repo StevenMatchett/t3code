@@ -1104,9 +1104,7 @@ describeWithNativeFfi("connected AppShell", () => {
     expect(driver.captureFrame()).toContain("Add a project");
     expect(driver.captureFrame()).toContain("code/");
 
-    await driver.input.pressKey("RETURN");
-    await driver.input.pressKey("TAB");
-    await driver.input.pressKey("TAB");
+    // The folder field starts focused, so Enter adds the folder already showing.
     await driver.input.pressKey("RETURN");
     await driver.flush();
 
@@ -1117,7 +1115,8 @@ describeWithNativeFfi("connected AppShell", () => {
   it("clones and adds a project from a GitHub URL", async () => {
     const { driver, fixture } = await renderShell({ width: 100, height: 24 });
     await driver.input.pressKey("p");
-    await driver.input.pressKey("TAB");
+    // The form starts on the folder field, one step past the GitHub choice.
+    await driver.input.pressKey("TAB", { shift: true });
     await driver.input.pressKey("RETURN");
     await driver.input.typeText("https://github.com/acme/widgets.git");
     expect(driver.captureFrame()).toContain("~/widgets");

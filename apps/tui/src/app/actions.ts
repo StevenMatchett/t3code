@@ -10,7 +10,7 @@ export const ACTION_SCOPES = {
   /** Reachable whenever no overlay is open. */
   workspace: { level: 1, title: "Workspace" },
   navigation: { level: 2, title: "Sidebar" },
-  conversation: { level: 3, title: "Conversation" },
+  conversation: { level: 3, title: "This thread" },
   history: { level: 4, title: "Conversation" },
   composer: { level: 4, title: "Message" },
   agents: { level: 4, title: "Agents" },
@@ -1352,6 +1352,14 @@ export const ACTIONS = {
     ...step,
   },
   "newProject.treeDown": { scope: "newProject", title: "Next folder", keys: ["down"], ...step },
+  "newProject.filter": {
+    scope: "newProject",
+    title: "Filter folders",
+    keys: ["/"],
+    label: "Filter",
+    hint: 85,
+    ...keyOnly,
+  },
   "newProject.activate": {
     scope: "newProject",
     title: "Activate the selected field",

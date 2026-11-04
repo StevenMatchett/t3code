@@ -15,7 +15,7 @@ import { useKeyLayer } from "../ui/keymap.ts";
 import { Stack, Text } from "../ui/primitives.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { Button } from "../ui/Button.tsx";
-import { FormInput, FormRow } from "../ui/FormField.tsx";
+import { FormInput, FormRow, ListFilterRow } from "../ui/FormField.tsx";
 
 interface Props {
   readonly client: TuiClient;
@@ -45,7 +45,7 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
   const [url, setUrl] = useState("");
   const [destination, setDestination] = useState(initialDirectory);
   const [destinationEdited, setDestinationEdited] = useState(false);
-  const [focus, setFocus] = useState("local");
+  const [focus, setFocus] = useState("path");
   const browseGeneration = useRef(0);
   const busy = creation.phase === "creating" || creation.phase === "cloning";
   const created = creation.projectId
@@ -54,15 +54,18 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
       ) ?? false)
     : false;
 
+  const pathEdits = useRef(0);
   const load = async (nextPath: string) => {
     const normalized = ensureBrowseDirectoryPath(nextPath);
     const generation = ++browseGeneration.current;
+    const editsAtStart = pathEdits.current;
     setLoading(true);
     setBrowseError(null);
     try {
       const result = await client.newProjects.browse(registry, normalized);
       if (generation !== browseGeneration.current) return;
-      setPath(normalized);
+      // Someone typing while a folder loads keeps what they typed.
+      if (pathEdits.current === editsAtStart) setPath(normalized);
       setBrowse(result);
       setBrowsedPath(normalized);
       setTreeIndex(0);
@@ -87,13 +90,18 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
     onCreated(creation.projectId);
   }, [created, creation.projectId, onCreated]);
 
-  const treeEntries = useMemo<readonly TreeEntry[]>(() => {
+  const allTreeEntries = useMemo<readonly TreeEntry[]>(() => {
     if (!browse) return [];
     const entries: TreeEntry[] = [...browse.entries].sort((a, b) => a.name.localeCompare(b.name));
     const parentPath = getBrowseParentPath(path);
     if (parentPath !== null) entries.unshift({ name: "..", fullPath: parentPath });
     return entries;
   }, [browse, path]);
+  const [treeFilter, setTreeFilter] = useState<string | null>(null);
+  const treeNeedle = treeFilter?.trim().toLocaleLowerCase();
+  const treeEntries = treeNeedle
+    ? allTreeEntries.filter((entry) => entry.name.toLocaleLowerCase().includes(treeNeedle))
+    : allTreeEntries;
   const normalizedPath = ensureBrowseDirectoryPath(path);
   const selectedFolder = browse && browsedPath === normalizedPath ? browse.parentPath : path;
   const localTargets = [
@@ -123,7 +131,10 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
       return;
     }
     if (target === "path") {
-      void load(path);
+      // Enter opens a typed folder. Once it is open, Enter adds it.
+      if (browse && browsedPath === ensureBrowseDirectoryPath(path) && !loading)
+        void client.newProjects.createLocal(registry, selectedFolder);
+      else void load(path);
       return;
     }
     if (target === "tree") {
@@ -149,9 +160,21 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
   const movingTree = focus === "tree";
   useKeyLayer("newProject", {
     modal: true,
-    typing: focus !== "tree" && focus !== "local" && focus !== "github",
+    typing: treeFilter !== null || (focus !== "tree" && focus !== "local" && focus !== "github"),
     bindings: {
-      "newProject.close": () => activate("cancel"),
+      "newProject.close": () => {
+        if (treeFilter !== null) {
+          setTreeFilter(null);
+          setTreeIndex(0);
+        } else activate("cancel");
+      },
+      "newProject.filter": {
+        enabled: movingTree && treeFilter === null,
+        run: () => {
+          setTreeFilter("");
+          setTreeIndex(0);
+        },
+      },
       "newProject.next": () => advance(1),
       "newProject.previous": () => advance(-1),
       "newProject.treeUp": {
@@ -197,13 +220,30 @@ export function NewProjectForm({ client, height, onClose, onCreated }: Props) {
               id="new-project-path"
               value={path}
               focused={!busy && focus === "path"}
-              onInput={setPath}
+              onInput={(value) => {
+                pathEdits.current += 1;
+                setPath(value);
+              }}
               onFocusRequest={() => setFocus("path")}
             />
           </FormRow>
-          <Text height={1} tone="muted">
-            {loading ? "Loading folders..." : "Enter opens a folder · select .. to go up"}
-          </Text>
+          <ListFilterRow
+            id="new-project-tree-filter"
+            value={treeFilter}
+            focused={!busy && focus === "tree"}
+            onInput={(value) => {
+              setTreeFilter(value);
+              setTreeIndex(0);
+            }}
+          >
+            <Text height={1} flexShrink={0} tone="muted">
+              {loading
+                ? "Loading folders..."
+                : focus === "path"
+                  ? "Enter adds this folder · Tab browses inside it"
+                  : "Enter opens a folder · select .. to go up"}
+            </Text>
+          </ListFilterRow>
           <ListView
             items={treeEntries}
             selected={treeIndex}

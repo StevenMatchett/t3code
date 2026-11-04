@@ -1,4 +1,12 @@
-import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { isThreadWorking, type ThreadActivityPhase } from "../features/chat/threadActivity.ts";
 import { createActivityClock, type ActivityClock } from "./activityClock.ts";
 import { useUi } from "./context.tsx";
@@ -62,6 +70,25 @@ export function useActivityClock(live = true) {
   const [frozen] = useState(() => ({ frame: 0, now: Date.now() }));
   const snapshot = useSyncExternalStore(subscribe, clock.snapshot, clock.snapshot);
   return subscribe === noSubscription ? { ...frozen, now: Date.now() } : snapshot;
+}
+
+/**
+ * True briefly after `value` changes, to point at a row whose state just changed. It never runs on
+ * first render, never repeats, and stays off when animation is off.
+ */
+export function useChangeHighlight(value: string, durationMs = 800) {
+  const clock = useContext(ClockContext) ?? fallbackClock;
+  const { capabilities } = useUi();
+  const [highlighted, setHighlighted] = useState(false);
+  const previous = useRef(value);
+  useEffect(() => {
+    if (previous.current === value) return;
+    previous.current = value;
+    if (capabilities.animation === false) return;
+    setHighlighted(true);
+    return clock.after(durationMs, () => setHighlighted(false));
+  }, [value, durationMs, clock, capabilities.animation]);
+  return highlighted;
 }
 
 export function useLocalDay() {

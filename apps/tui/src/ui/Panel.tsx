@@ -2,6 +2,7 @@ import type { BorderCharacters } from "@opentui/core";
 import type { BoxProps } from "@opentui/react";
 
 import { useThemeColor, useUi } from "./context.tsx";
+import { asciiPunctuation } from "./primitives.tsx";
 import { calculatePanelLayout } from "./layout.ts";
 import type { ThemeToken } from "./theme.ts";
 
@@ -36,6 +37,11 @@ export interface PanelProps extends Omit<BoxProps, OwnedPanelProps> {
   readonly paddingX?: number;
 }
 
+function panelTitle(title: string, markFocus: boolean, unicode: boolean) {
+  const text = unicode ? title : asciiPunctuation(title);
+  return markFocus ? `${text} *` : text;
+}
+
 export function Panel({
   bordered = true,
   borderTone = "border",
@@ -62,7 +68,11 @@ export function Panel({
         ? {}
         : {
             // Without color a border cannot show focus, so the title marks it.
-            title: !capabilities.color && borderTone === "borderFocused" ? `${title} *` : title,
+            title: panelTitle(
+              title,
+              !capabilities.color && borderTone === "borderFocused",
+              capabilities.unicode,
+            ),
           })}
       border={bordered}
       paddingX={resolvedPadding}

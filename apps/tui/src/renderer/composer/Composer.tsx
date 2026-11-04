@@ -3,6 +3,7 @@ import type { ScrollBoxRenderable } from "@opentui/core";
 import type { ThreadId } from "@t3tools/contracts";
 import { getProviderOptionDescriptors } from "@t3tools/shared/model";
 import * as Option from "effect/Option";
+import stringWidth from "string-width";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { TuiClient } from "../../connection/clientRuntime.ts";
 import { skillCompletionAt } from "../../features/chat/skillCompletion.ts";
@@ -13,6 +14,7 @@ import {
 } from "../../features/chat/promptHistory.ts";
 import { trailingPastedImagePaths } from "../../features/chat/imageAttachments.ts";
 import { useKeyLayer } from "../../ui/keymap.ts";
+import { fitControlWidths } from "../../ui/layout.ts";
 import { asciiBorderCharacters, Panel } from "../../ui/Panel.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Stack, Text } from "../../ui/primitives.tsx";
@@ -222,10 +224,9 @@ export function Composer({
     close,
   });
   const { buttons, rows, index, choose } = menuHandlers;
-  // Whole cells keep every control the same size; flex rounding would make them differ by one.
-  const controlWidth = Math.max(
-    1,
-    Math.floor(Math.max(1, width - 4) / (buttons.length + (onCancel ? 1 : 0))),
+  const controlWidths = fitControlWidths(
+    [...buttons.map((button) => stringWidth(button.label)), ...(onCancel ? [6] : [])],
+    Math.max(1, width - 4),
   );
   const cancelIndex = suggestedReplies.length + buttons.length + 1;
   const focusCount = cancelIndex + (onCancel ? 1 : 0);
@@ -520,7 +521,7 @@ export function Composer({
               key={button.id}
               id={`composer-${button.id}`}
               label={inlineTerminalText(button.label)}
-              width={controlWidth}
+              width={controlWidths[buttonIndex]!}
               focused={focused && focus === suggestedReplies.length + buttonIndex + 1}
               selected={dropdown === button.id}
               onPress={() => open(button.id, suggestedReplies.length + buttonIndex + 1)}
@@ -531,7 +532,7 @@ export function Composer({
               id="conversation-cancel-turn"
               label="Cancel"
               tone="danger"
-              width={controlWidth}
+              width={controlWidths.at(-1)!}
               focused={focused && focus === cancelIndex}
               disabled={cancelPending}
               onPress={() => {

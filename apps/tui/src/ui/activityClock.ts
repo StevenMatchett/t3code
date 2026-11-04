@@ -38,6 +38,8 @@ export function createActivityClock(
   return {
     snapshot: () => snapshot,
     localDay: () => day,
+    /** A one-shot delay for finite motion. It costs no wakeups once it has fired. */
+    after: (delayMs: number, run: () => void) => scheduleAt(Date.now() + delayMs, run),
     subscribeDay: (listener: () => void) => {
       dayListeners.add(listener);
       const arm = () => {

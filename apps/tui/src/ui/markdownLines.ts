@@ -240,7 +240,7 @@ function blocks(tokens: readonly Token[], width: number, unicode: boolean): Mark
         break;
       case "list":
         token.items.forEach((item, index) => {
-          const prefix = token.ordered ? `${Number(token.start) + index}. ` : "• ";
+          const prefix = token.ordered ? `${Number(token.start) + index}. ` : unicode ? "• " : "* ";
           const visiblePrefix = stringWidth(prefix) < width ? prefix : "";
           const content = blocks(
             item.tokens,
