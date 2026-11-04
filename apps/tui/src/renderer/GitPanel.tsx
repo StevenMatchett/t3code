@@ -46,6 +46,7 @@ export function GitPanel({
   readonly onClose: () => void;
   readonly onViewPullRequest: () => void;
   readonly onBranches: () => void;
+  readonly onPullRequests: () => void;
 }) {
   if (!client.git) return <NeedsNewerServer active={props.active} onClose={props.onClose} />;
   return <GitActions git={client.git} {...props} />;
@@ -73,6 +74,7 @@ function GitActions({
   onClose,
   onViewPullRequest,
   onBranches,
+  onPullRequests,
 }: {
   readonly git: TuiGit;
   readonly cwd: string;
@@ -84,6 +86,7 @@ function GitActions({
   readonly onClose: () => void;
   readonly onViewPullRequest: () => void;
   readonly onBranches: () => void;
+  readonly onPullRequests: () => void;
 }) {
   const registry = useContext(RegistryContext);
   const renderer = useRenderer();
@@ -171,6 +174,7 @@ function GitActions({
     const { action } = selected;
     if (action.kind === "view-pr") onViewPullRequest();
     else if (action.kind === "branches") onBranches();
+    else if (action.kind === "pull-requests") onPullRequests();
     else if (action.kind === "pull") void pull();
     else if (action.commits) setStep({ type: "message", action: action.action, message: "" });
     else proceed(action.action, false, "");

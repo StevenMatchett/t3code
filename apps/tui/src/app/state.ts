@@ -27,6 +27,7 @@ export type ShellOverlay =
   | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
   | { readonly type: "rename"; readonly threadId: ThreadId }
   | { readonly type: "plan"; readonly threadId: ThreadId }
+  | { readonly type: "pull-requests"; readonly threadId: ThreadId }
   | {
       readonly type: "git";
       readonly cwd: string;

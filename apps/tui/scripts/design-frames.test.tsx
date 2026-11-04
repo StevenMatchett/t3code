@@ -134,6 +134,24 @@ const screens: Record<string, (harness: Harness) => Promise<void>> = {
     });
     await harness.driver.flush();
   },
+  pulls: async (harness) => {
+    await openConversation(harness);
+    await harness.driver.input.pressKey("k", { ctrl: true });
+    await harness.driver.input.typeText("pull requests list");
+    await act(async () => {
+      await harness.driver.input.pressKey("RETURN");
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await harness.driver.flush();
+  },
+  "pull-detail": async (harness) => {
+    await screens.pulls!(harness);
+    await act(async () => {
+      await harness.driver.input.pressKey("RETURN");
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await harness.driver.flush();
+  },
   secret: async (harness) => {
     await openConversation(harness);
     await set(harness, 0, (thread) => ({

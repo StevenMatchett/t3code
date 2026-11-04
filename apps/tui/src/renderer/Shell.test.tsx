@@ -838,6 +838,118 @@ describe("fork from a run", () => {
   });
 });
 
+describe("pull requests", () => {
+  async function openList() {
+    const fixture = makeClientFixture();
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await tick(driver, () => driver.input.pressKey("k", { ctrl: true }));
+    await driver.input.typeText("pull requests list");
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    return { driver, fixture };
+  }
+  const tick = async (driver: TuiTestDriver, run: () => Promise<unknown>) => {
+    await act(async () => {
+      await run();
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+  };
+
+  it("lists open pull requests with their status, and Tab changes the state", async () => {
+    const { driver } = await openList();
+    const frame = driver.captureFrame();
+    expect(frame).toContain("#42 Add project search  ada · checks pass · approved");
+    expect(frame).toContain("#43 Tidy the header");
+    expect(frame).not.toContain("Old idea");
+
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    expect(driver.captureFrame()).toContain("[closed]");
+    expect(driver.captureFrame()).toContain("#7 Old idea");
+  });
+
+  it("filters with / and Esc clears the filter before closing", async () => {
+    const { driver } = await openList();
+    await driver.input.typeText("/");
+    await driver.input.typeText("tidy");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("#43 Tidy the header");
+    expect(driver.captureFrame()).not.toContain("#42");
+    await driver.input.pressKey("ESCAPE");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("#42");
+  });
+
+  it("shows detail and checks, and merging asks first", async () => {
+    const { driver, fixture } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(driver.captureFrame()).toContain("feature-42 into main");
+    expect(driver.captureFrame()).toContain("search index");
+    expect(driver.captureFrame()).toContain("tests: success");
+
+    await tick(driver, () => driver.input.pressKey("m"));
+    expect(driver.captureFrame()).toContain("Merge #42 into main? Enter confirms, Esc cancels.");
+    expect(fixture.pullRequestActionsRun).toEqual([]);
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    expect(fixture.pullRequestActionsRun).toEqual([]);
+
+    await tick(driver, () => driver.input.pressKey("m"));
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(fixture.pullRequestActionsRun).toMatchObject([{ number: 42, action: "merge" }]);
+    expect(driver.captureFrame()).toContain("Merge: done.");
+  });
+
+  it("shows a refused action and stays open", async () => {
+    const { driver, fixture } = await openList();
+    fixture.pullRequestFailure.current = "Required checks have not passed.";
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await tick(driver, () => driver.input.pressKey("u"));
+    expect(driver.captureFrame()).toContain("Required checks have not passed.");
+    expect(driver.captureFrame()).toContain("feature-42 into main");
+  });
+
+  it("offers only what the state allows, so a closed one can reopen but not merge", async () => {
+    const { driver, fixture } = await openList();
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await tick(driver, () => driver.input.pressKey("m"));
+    expect(driver.captureFrame()).not.toContain("Enter confirms");
+    await tick(driver, () => driver.input.pressKey("x"));
+    expect(fixture.pullRequestActionsRun).toMatchObject([{ number: 7, action: "reopen" }]);
+  });
+
+  it("starts a thread on the pull request", async () => {
+    const { driver, fixture } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await tick(driver, () => driver.input.pressKey("t"));
+    expect(fixture.pullRequestThreads).toEqual([42]);
+    expect(driver.captureFrame()).not.toContain("feature-42 into main");
+  });
+
+  it("says so on a server without pull requests", async () => {
+    const fixture = makeClientFixture();
+    const { pullRequests: _pullRequests, ...client } = fixture.client;
+    const driver = await createTuiTestDriver(<AppShell client={client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await tick(driver, () => driver.input.pressKey("k", { ctrl: true }));
+    await driver.input.typeText("pull requests list");
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(driver.captureFrame()).toContain("Pull requests need a newer T3 Code server.");
+  });
+});
+
 describe("git panel", () => {
   const clean = {
     hasWorkingTreeChanges: false,

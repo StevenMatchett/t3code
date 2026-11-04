@@ -454,6 +454,12 @@ function AppShellContent({
         enabled: selectedThread !== null,
         run: () => pushOverlay({ type: "diff" }),
       },
+      "pullRequests.show": {
+        enabled: selectedThread !== null,
+        run: () => {
+          if (selectedThread) pushOverlay({ type: "pull-requests", threadId: selectedThread.id });
+        },
+      },
       "thread.fork": {
         enabled:
           Boolean(client.forkThreadFromRun) &&

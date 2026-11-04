@@ -24,6 +24,8 @@ import {
   type VcsRef,
   type VcsStatusResult,
   type ProjectEntry,
+  type PullRequestActionInput,
+  type PullRequestListEntry,
   type ProjectSearchEntriesInput,
   type ProjectWriteFileInput,
   type SecretRequestAnswerInput,
@@ -437,6 +439,40 @@ export function makeClientFixture(
   const managementCommands: ThreadManagementCommand[] = [];
   const secretAnswers: SecretRequestAnswerInput[] = [];
   const writtenFiles: ProjectWriteFileInput[] = [];
+  const PR_ACTIONS = ["merge", "ready", "draft", "close", "reopen", "update-branch"] as const;
+  const pullRequestEntry = (number: number, title: string, state: "open" | "closed") =>
+    ({
+      provider: "github",
+      host: "github.com",
+      projectId: threads[0]?.projectId,
+      projectTitle: "Fixture",
+      repository: "example/repo",
+      number,
+      title,
+      url: `https://github.com/example/repo/pull/${number}`,
+      author: { login: "ada" },
+      headBranch: `feature-${number}`,
+      baseBranch: "main",
+      state,
+      isDraft: false,
+      mergeability: "mergeable",
+      additions: 3,
+      deletions: 1,
+      createdAt: time,
+      updatedAt: time,
+      viewerReviewRequested: false,
+      labels: [],
+      checksState: "passing",
+      reviewDecision: "approved",
+    }) as unknown as PullRequestListEntry;
+  const pullRequestEntries: PullRequestListEntry[] = [
+    pullRequestEntry(42, "Add project search", "open"),
+    pullRequestEntry(43, "Tidy the header", "open"),
+    pullRequestEntry(7, "Old idea", "closed"),
+  ];
+  const pullRequestActionsRun: PullRequestActionInput[] = [];
+  const pullRequestFailure: { current: string | null } = { current: null };
+  const pullRequestThreads: number[] = [];
   const forks: { sourceThreadId: string; runId: string; title: string }[] = [];
   const gitActionState = Atom.make(EMPTY_VCS_ACTION_STATE);
   const gitStatus: { current: VcsStatusResult } = {
@@ -567,6 +603,35 @@ export function makeClientFixture(
       forks.push(input);
       return threads[1]?.id ?? input.sourceThreadId;
     },
+    pullRequests: {
+      list: async (_registry, { state }) =>
+        pullRequestEntries.filter((entry) => state === "all" || entry.state === state),
+      detail: async (_registry, reference) => {
+        const entry = pullRequestEntries.find((item) => item.number === reference.number)!;
+        return {
+          ...entry,
+          capabilities: { actions: PR_ACTIONS, mergeMethods: ["squash"] },
+          viewerPermissions: { actions: PR_ACTIONS },
+          body: "Adds the **search** index.",
+        } as never;
+      },
+      checks: async () =>
+        ({
+          state: "open",
+          checks: [{ name: "tests", status: "success", description: null, url: null }],
+        }) as never,
+      runAction: async (_registry, input) => {
+        pullRequestActionsRun.push(input);
+        if (pullRequestFailure.current) throw new Error(pullRequestFailure.current);
+        const index = pullRequestEntries.findIndex((item) => item.number === input.number);
+        if (input.action === "merge")
+          pullRequestEntries[index] = { ...pullRequestEntries[index]!, state: "merged" };
+      },
+      startThread: async (_registry, entry) => {
+        pullRequestThreads.push(entry.number);
+        return threads[1]?.id ?? threads[0]!.id;
+      },
+    },
     pathSearchDebounceMs: 0,
     searchProjectEntries: async (_registry, input) => {
       pathSearches.push(input);
@@ -678,6 +743,10 @@ export function makeClientFixture(
     managementCommands,
     secretAnswers,
     writtenFiles,
+    pullRequestEntries,
+    pullRequestActionsRun,
+    pullRequestFailure,
+    pullRequestThreads,
     forks,
     gitStatus,
     gitActionState,

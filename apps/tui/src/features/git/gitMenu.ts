@@ -10,7 +10,8 @@ export type GitMenuAction =
   | { readonly kind: "stacked"; readonly action: GitStackedAction; readonly commits: boolean }
   | { readonly kind: "view-pr" }
   | { readonly kind: "pull" }
-  | { readonly kind: "branches" };
+  | { readonly kind: "branches" }
+  | { readonly kind: "pull-requests" };
 
 export interface GitMenuRow {
   readonly id: string;
@@ -105,6 +106,12 @@ export function gitMenuRows(status: VcsStatusResult, busy: boolean): readonly Gi
       action: { kind: "branches" },
       disabledReason: busy ? "Git action in progress." : null,
     },
+    {
+      id: "pull-requests",
+      label: "Pull requests...",
+      action: { kind: "pull-requests" },
+      disabledReason: null,
+    },
   ];
 }
 
@@ -125,6 +132,12 @@ export function gitMenuPlaceholderRows(): readonly GitMenuRow[] {
     stacked("pr", "Create PR", "create_pr", false),
     { id: "pull", label: "Pull", action: { kind: "pull" }, disabledReason },
     { id: "branches", label: "Switch branch...", action: { kind: "branches" }, disabledReason },
+    {
+      id: "pull-requests",
+      label: "Pull requests...",
+      action: { kind: "pull-requests" },
+      disabledReason: null,
+    },
   ];
 }
 

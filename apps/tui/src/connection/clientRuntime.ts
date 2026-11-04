@@ -64,10 +64,19 @@ import {
   type EnvironmentId,
   type FilesystemBrowseResult,
   type OrchestrationThreadSearchMatch,
+  CommandId,
   RunId,
   ThreadId,
   type GitResolvedPullRequest,
   type ExecutionEnvironmentCapabilities,
+  type ModelSelection,
+  type PullRequestActionInput,
+  type PullRequestChecks,
+  type PullRequestDetail,
+  type PullRequestListEntry,
+  type PullRequestListState,
+  type PullRequestRef,
+  type RuntimeMode,
   type VcsPullResult,
   type GitRunStackedActionResult,
   type GitStackedAction,
@@ -99,6 +108,7 @@ import * as HttpBody from "effect/http/HttpBody";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
 import {
   createVcsActionManager,
   createVcsEnvironmentAtoms,
@@ -145,10 +155,42 @@ export interface TuiGit {
   ) => Promise<string>;
 }
 
+/** Pull requests through the server's source control host. Rejects with a readable message. */
+export interface TuiPullRequests {
+  readonly list: (
+    registry: AtomRegistry.AtomRegistry,
+    input: { readonly state: PullRequestListState },
+  ) => Promise<readonly PullRequestListEntry[]>;
+  readonly detail: (
+    registry: AtomRegistry.AtomRegistry,
+    reference: PullRequestRef,
+  ) => Promise<PullRequestDetail>;
+  readonly checks: (
+    registry: AtomRegistry.AtomRegistry,
+    reference: PullRequestRef,
+  ) => Promise<PullRequestChecks | null>;
+  readonly runAction: (
+    registry: AtomRegistry.AtomRegistry,
+    input: PullRequestActionInput,
+  ) => Promise<void>;
+  /** Prepares a worktree on the pull request's branch and creates a thread there. */
+  readonly startThread: (
+    registry: AtomRegistry.AtomRegistry,
+    entry: PullRequestListEntry,
+    source: {
+      readonly modelSelection: ModelSelection;
+      readonly runtimeMode: RuntimeMode;
+      readonly workspaceRoot: (projectId: ProjectId) => string | null;
+    },
+  ) => Promise<ThreadId>;
+}
+
 export interface TuiClient {
   readonly session?: TuiSessionState;
   /** Absent on servers that speak the older protocol. */
   readonly git?: TuiGit;
+  /** Absent on servers that speak the older protocol. */
+  readonly pullRequests?: TuiPullRequests;
   /** A new thread with this thread's history up to the run. Absent on the older protocol. */
   readonly forkThreadFromRun?: (
     registry: AtomRegistry.AtomRegistry,
@@ -557,6 +599,90 @@ export function createTuiClient(
       return result.value.refName;
     },
   };
+  const pullRequestList = createEnvironmentRpcCommand(runtime, {
+    label: "tui.pull-requests.list",
+    tag: WS_METHODS.pullRequestsList,
+  });
+  const pullRequestDetail = createEnvironmentRpcCommand(runtime, {
+    label: "tui.pull-requests.detail",
+    tag: WS_METHODS.pullRequestsDetail,
+  });
+  const pullRequestChecks = createEnvironmentRpcCommand(runtime, {
+    label: "tui.pull-requests.checks",
+    tag: WS_METHODS.pullRequestsChecks,
+  });
+  const pullRequestAction = createEnvironmentRpcCommand(runtime, {
+    label: "tui.pull-requests.run-action",
+    tag: WS_METHODS.pullRequestsRunAction,
+  });
+  const preparePullRequestThread = createEnvironmentRpcCommand(runtime, {
+    label: "tui.pull-requests.prepare-thread",
+    tag: WS_METHODS.gitPreparePullRequestThread,
+  });
+  const settled = <A>(result: AsyncResult.AsyncResult<A, unknown>, fallback: string): A => {
+    if (AsyncResult.isSuccess(result)) return result.value;
+    if (AsyncResult.isFailure(result)) throw gitFailure(result, fallback);
+    throw new Error(fallback);
+  };
+  const pullRequests: TuiPullRequests = {
+    list: async (registry, input) =>
+      settled(
+        await pullRequestList.run(registry, { environmentId, input }),
+        "Could not list pull requests.",
+      ).entries,
+    detail: async (registry, input) =>
+      settled(
+        await pullRequestDetail.run(registry, { environmentId, input }),
+        "Could not read this pull request.",
+      ),
+    checks: async (registry, input) =>
+      settled(
+        await pullRequestChecks.run(registry, { environmentId, input }),
+        "Could not read the checks.",
+      ),
+    runAction: async (registry, input) => {
+      settled(
+        await pullRequestAction.run(registry, { environmentId, input }),
+        "The pull request action failed.",
+      );
+    },
+    startThread: async (registry, entry, source) => {
+      const cwd = source.workspaceRoot(entry.projectId);
+      if (!cwd) throw new Error("This pull request's project is not in this environment.");
+      const prepared = settled(
+        await preparePullRequestThread.run(registry, {
+          environmentId,
+          input: { cwd, reference: entry.url, mode: "worktree" },
+        }),
+        "Could not prepare a worktree for this pull request.",
+      );
+      const threadId = ThreadId.make(
+        Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16))),
+      );
+      settled(
+        await command.run(registry, {
+          environmentId,
+          input: {
+            type: "thread.create",
+            commandId: CommandId.make(
+              Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16))),
+            ),
+            threadId,
+            projectId: entry.projectId,
+            title: `#${entry.number} ${entry.title}`.slice(0, 80),
+            modelSelection: source.modelSelection,
+            runtimeMode: source.runtimeMode,
+            interactionMode: "default",
+            branch: prepared.branch,
+            worktreePath: prepared.worktreePath,
+            createdAt: DateTime.formatIso(DateTime.nowUnsafe()),
+          },
+        }),
+        "The thread was not created.",
+      );
+      return threadId;
+    },
+  };
   const searchProjectEntries = createEnvironmentRpcCommand(runtime, {
     label: "tui.search-project-entries",
     tag: WS_METHODS.projectsSearchEntries,
@@ -776,6 +902,7 @@ export function createTuiClient(
       ? {}
       : {
           git,
+          pullRequests,
           forkThreadFromRun: async (registry, { sourceThreadId, runId, title }) => {
             const targetThreadId = ThreadId.make(
               Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16))),

@@ -13,6 +13,7 @@ import { NewProjectForm } from "./NewProjectForm.tsx";
 import { NewThreadForm } from "./NewThreadForm.tsx";
 import { GitBranchPicker } from "./GitBranchPicker.tsx";
 import { GitPanel } from "./GitPanel.tsx";
+import { PullRequestsPanel } from "./PullRequestsPanel.tsx";
 import { ProposedPlanPanel } from "./ProposedPlanPanel.tsx";
 import { PullRequestPanel } from "./PullRequestPanel.tsx";
 import { RenameThreadDialog } from "./RenameThreadDialog.tsx";
@@ -225,6 +226,9 @@ export function renderShellOverlay(
                 branch: thread?.branch ?? null,
               });
             }}
+            onPullRequests={() =>
+              pushOverlay({ type: "pull-requests", threadId: overlay.threadId })
+            }
             onBranches={() =>
               pushOverlay({
                 type: "git-branches",
@@ -251,6 +255,32 @@ export function renderShellOverlay(
           />
         ),
       };
+    case "pull-requests": {
+      const thread = rows.threads.find((item) => item.id === overlay.threadId);
+      return {
+        title: "Pull requests",
+        size: { width: 110, height: 40 },
+        content: thread ? (
+          <PullRequestsPanel
+            client={client}
+            source={{
+              modelSelection: thread.modelSelection,
+              runtimeMode: thread.runtimeMode,
+              workspaceRoot: (projectId) =>
+                rows.projects.find((project) => project.id === projectId)?.workspaceRoot ?? null,
+            }}
+            active={overlayActive}
+            width={Math.max(1, Math.min(110, width - 6) - 2)}
+            height={contentRows(40)}
+            onClose={popOverlay}
+            onOpenThread={(projectId, threadId) => {
+              popOverlay();
+              dispatch({ type: "open-thread", projectId, threadId });
+            }}
+          />
+        ) : null,
+      };
+    }
     case "plan": {
       const thread = rows.threads.find((item) => item.id === overlay.threadId);
       return {
