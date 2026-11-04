@@ -1,7 +1,9 @@
 import { RegistryContext } from "@effect/atom-react";
 import { useRenderer } from "@opentui/react";
 import type {
+  PullRequestActivity,
   PullRequestChecks,
+  PullRequestReviewVerdict,
   PullRequestDetail,
   PullRequestListEntry,
   PullRequestListState,
@@ -23,6 +25,19 @@ import { SelectionRow } from "../ui/SelectionRow.tsx";
 import { EmptyState, ErrorState } from "../ui/StateMessage.tsx";
 import { inlineTerminalText } from "../ui/textLayout.ts";
 import { useUi } from "../ui/context.tsx";
+import { FormInput } from "../ui/FormField.tsx";
+import { useAtomValue } from "@effect/atom-react";
+import * as Option from "effect/Option";
+import { AsyncResult } from "effect/reactivity";
+import { parseDiffRows } from "../ui/diffRows.ts";
+import { DiffText } from "./ThreadDiff.tsx";
+
+const VIEWS = ["summary", "conversation", "code"] as const;
+const VERDICT_LABEL: Record<PullRequestReviewVerdict, string> = {
+  approve: "Approve",
+  "request-changes": "Request changes",
+  comment: "Comment",
+};
 
 const STATES: readonly PullRequestListState[] = ["open", "closed", "merged", "all"];
 const failureText = (failure: unknown, fallback: string) =>
@@ -203,6 +218,16 @@ function PullRequests({
   );
 }
 
+/** The file a diff row belongs to, so its code colors by that file's language. */
+function diffPath(rows: ReturnType<typeof parseDiffRows>, index: number) {
+  for (let at = index; at >= 0; at -= 1) {
+    const raw = rows[at]!.raw;
+    if (raw.startsWith("+++ b/")) return raw.slice(6);
+    if (raw.startsWith("diff --git ")) return raw.split(" b/").at(-1) ?? "";
+  }
+  return "";
+}
+
 function PullRequestDetailView({
   pulls,
   entry,
@@ -231,6 +256,12 @@ function PullRequestDetailView({
   const [confirming, setConfirming] = useState<PullRequestActionChoice | null>(null);
   const [busy, setBusy] = useState(false);
   const [offset, setOffset] = useState(0);
+  const [view, setView] = useState<(typeof VIEWS)[number]>("summary");
+  const [activity, setActivity] = useState<PullRequestActivity | null>(null);
+  const [review, setReview] = useState<{
+    readonly verdict: PullRequestReviewVerdict;
+    readonly body: string;
+  } | null>(null);
   const reference = useMemo(
     () => ({
       projectId: entry.projectId,
@@ -245,6 +276,7 @@ function PullRequestDetailView({
       setStatus({ text: failureText(failure, "Could not read this pull request."), failed: true });
     });
     pulls.checks(registry, reference).then(setChecks, () => setChecks(null));
+    pulls.activity(registry, reference).then(setActivity, () => setActivity(null));
   }, [pulls, registry, reference]);
   useEffect(load, [load]);
   const actions = detail ? pullRequestActions(detail) : [];
@@ -280,8 +312,30 @@ function PullRequestDetailView({
       setStatus({ text: failureText(failure, "Could not start a thread."), failed: true });
     }
   };
+  const diff = useAtomValue(pulls.diff(reference));
+  const patch = Option.getOrNull(AsyncResult.value(diff));
+  const codeRows = useMemo(() => parseDiffRows(patch?.patch ?? ""), [patch?.patch]);
   const lines = useMemo(() => {
     if (!detail) return [];
+    if (view === "code") return codeRows.map((row) => row.raw);
+    if (view === "conversation") {
+      const remarks = (activity?.comments ?? []).map(
+        (comment) => `**${comment.author?.login ?? "Someone"}**\n\n${comment.body}`,
+      );
+      const commits = (activity?.commits ?? []).map(
+        (commit) => `- ${commit.oid.slice(0, 7)} ${commit.messageHeadline}`,
+      );
+      return markdownLines(
+        [
+          ...(remarks.length ? remarks : ["No comments yet."]),
+          ...(commits.length ? ["**Commits**", commits.join("\n")] : []),
+          ...(activity?.commentsTruncated ? ["Older comments were not loaded."] : []),
+        ].join("\n\n"),
+        width,
+        true,
+        capabilities.unicode,
+      ).map((line) => line.text);
+    }
     const checkLines = (checks?.checks ?? []).map(
       (check) => `${check.name}: ${check.status.replaceAll("-", " ")}`,
     );
@@ -296,15 +350,66 @@ function PullRequestDetailView({
       true,
       capabilities.unicode,
     ).map((line) => line.text);
-  }, [detail, checks, width, capabilities.unicode]);
+  }, [detail, checks, activity, codeRows, view, width, capabilities.unicode]);
   const rows = Math.max(1, height - 3);
   const start = Math.min(offset, Math.max(0, lines.length - rows));
   const scroll = (next: number) =>
     setOffset(Math.max(0, Math.min(Math.max(0, lines.length - rows), next)));
+  const verdicts = detail?.viewerPermissions.verdicts ?? [];
+  const submitReview = async () => {
+    if (!review) return;
+    if (review.verdict !== "approve" && !review.body.trim()) {
+      setStatus({ text: `${VERDICT_LABEL[review.verdict]} needs a message.`, failed: true });
+      return;
+    }
+    const submitted = review;
+    setReview(null);
+    setBusy(true);
+    setStatus({ text: "Submitting the review...", failed: false });
+    try {
+      await pulls.submitReview(registry, {
+        ...reference,
+        verdict: submitted.verdict,
+        body: submitted.body,
+        comments: [],
+      });
+      setStatus({ text: "Review submitted.", failed: false });
+      load();
+    } catch (failure) {
+      setReview(submitted);
+      setStatus({ text: failureText(failure, "The review was not submitted."), failed: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+  useKeyLayer("pullRequestReview", {
+    active: active && review !== null,
+    modal: true,
+    typing: true,
+    bindings: {
+      "pullRequestReview.submit": () => void submitReview(),
+      "pullRequestReview.verdict": () => {
+        if (review)
+          setReview({
+            ...review,
+            verdict: verdicts[(verdicts.indexOf(review.verdict) + 1) % verdicts.length]!,
+          });
+      },
+      "pullRequestReview.cancel": () => setReview(null),
+    },
+  });
   useKeyLayer("pullRequestDetail", {
-    active: active && confirming === null,
+    active: active && confirming === null && review === null,
     modal: true,
     bindings: {
+      "pullRequestDetail.view": () => {
+        setView(VIEWS[(VIEWS.indexOf(view) + 1) % VIEWS.length]!);
+        setOffset(0);
+      },
+      "pullRequestDetail.review": {
+        enabled: !busy && verdicts.length > 0 && detail?.state === "open",
+        run: () => setReview({ verdict: verdicts[0]!, body: "" }),
+      },
       "pullRequestDetail.back": { enabled: !busy, run: onBack },
       "pullRequestDetail.up": () => scroll(start - 1),
       "pullRequestDetail.down": () => scroll(start + 1),
@@ -349,29 +454,82 @@ function PullRequestDetailView({
       <Text height={1} flexShrink={0} wrapMode="none" truncate strong>
         {inlineTerminalText(`#${entry.number} ${detail?.title ?? entry.title}`)}
       </Text>
-      <Text height={1} flexShrink={0} wrapMode="none" truncate tone="muted">
-        {inlineTerminalText(
-          `${entry.headBranch} into ${entry.baseBranch} · ${detail?.state ?? entry.state}${
-            detail?.isDraft ? " draft" : ""
-          } · ${detail?.mergeability ?? entry.mergeability} · +${detail?.additions ?? entry.additions} -${
-            detail?.deletions ?? entry.deletions
-          }`,
-        )}
-      </Text>
-      <Text height={rows} flexShrink={0} wrapMode="none">
-        {lines.slice(start, start + rows).join("\n")}
-      </Text>
       <Text
         height={1}
         flexShrink={0}
         wrapMode="none"
         truncate
-        tone={confirming ? "warning" : status?.failed ? "danger" : "muted"}
+        tone={review && status?.failed ? "danger" : "muted"}
       >
-        {confirming
-          ? `${confirming.confirm} Enter confirms, Esc cancels.`
-          : inlineTerminalText(status?.text ?? "")}
+        {/* The review input takes the status row, so its problems show up here instead. */}
+        {review && status?.failed
+          ? inlineTerminalText(status.text)
+          : inlineTerminalText(
+              `${entry.headBranch} into ${entry.baseBranch} · ${detail?.state ?? entry.state}${
+                detail?.isDraft ? " draft" : ""
+              } · ${detail?.mergeability ?? entry.mergeability} · +${detail?.additions ?? entry.additions} -${
+                detail?.deletions ?? entry.deletions
+              }`,
+            )}
       </Text>
+      {view === "code" ? (
+        <Stack height={rows} flexShrink={0} flexDirection="column" overflow="hidden">
+          {diff.waiting && !patch ? (
+            <Text tone="muted">Loading the changes...</Text>
+          ) : AsyncResult.isFailure(diff) ? (
+            <Text tone="danger">Could not load the changes. Esc and open it again to retry.</Text>
+          ) : (
+            codeRows
+              .slice(start, start + rows)
+              .map((row, index) => (
+                <DiffText
+                  key={start + index}
+                  row={row}
+                  path={diffPath(codeRows, start + index)}
+                  width={width}
+                />
+              ))
+          )}
+        </Stack>
+      ) : (
+        <Text height={rows} flexShrink={0} wrapMode="none">
+          {lines.slice(start, start + rows).join("\n")}
+        </Text>
+      )}
+      {review ? (
+        <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
+          <Text height={1} flexShrink={0} tone="accent" wrapMode="none">
+            {VERDICT_LABEL[review.verdict]}
+          </Text>
+          <FormInput
+            id="pull-request-review"
+            value={review.body}
+            placeholder={review.verdict === "approve" ? "Message (optional)" : "Message"}
+            focused={active}
+            onInput={(body) => {
+              setStatus(null);
+              setReview({ ...review, body });
+            }}
+          />
+        </Stack>
+      ) : (
+        <Text
+          height={1}
+          flexShrink={0}
+          wrapMode="none"
+          truncate
+          tone={confirming ? "warning" : status?.failed ? "danger" : "muted"}
+        >
+          {confirming
+            ? `${confirming.confirm} Enter confirms, Esc cancels.`
+            : inlineTerminalText(
+                status?.text ??
+                  `${VIEWS.map((item) => (item === view ? `[${item}]` : item)).join(" ")}${
+                    view === "code" && patch?.nextCursor ? " · Showing the first part" : ""
+                  }`,
+              )}
+        </Text>
+      )}
     </Stack>
   );
 }

@@ -28,7 +28,7 @@ const rowTone = (kind: DiffRow["kind"]): ThemeToken =>
   kind === "hunk" ? "accent" : kind === "add" ? "success" : kind === "del" ? "danger" : "text";
 
 /** One column of diff text: the code in syntax color, with the sign carrying the change. */
-function DiffText({
+export function DiffText({
   row,
   path,
   width,
@@ -109,6 +109,7 @@ export function ThreadDiff({
   const [cursor, setCursor] = useState(0);
   const [offset, setOffset] = useState(0);
   const [focus, setFocus] = useState<"files" | "diff">("files");
+  const [ignoreWhitespace, setIgnoreWhitespace] = useState(false);
   const query = useMemo(() => {
     const environmentId = client.environmentId;
     if (selectedScope === "working") {
@@ -132,12 +133,21 @@ export function ThreadDiff({
       };
     }
     if (!latest) return null;
+    const whitespace = ignoreWhitespace ? { ignoreWhitespace: true } : {};
     const atom =
       selectedScope === "saved"
-        ? client.diffs.fullThreadDiff({ environmentId, input: { threadId, toTurnCount: latest } })
+        ? client.diffs.fullThreadDiff({
+            environmentId,
+            input: { threadId, toTurnCount: latest, ...whitespace },
+          })
         : client.diffs.turnDiff({
             environmentId,
-            input: { threadId, fromTurnCount: selectedScope - 1, toTurnCount: selectedScope },
+            input: {
+              threadId,
+              fromTurnCount: selectedScope - 1,
+              toTurnCount: selectedScope,
+              ...whitespace,
+            },
           });
     return {
       refresh: () => registry.refresh(atom),
@@ -151,7 +161,7 @@ export function ThreadDiff({
         };
       }),
     };
-  }, [client, registry, cwd, selectedScope, latest, threadId]);
+  }, [client, registry, cwd, selectedScope, latest, threadId, ignoreWhitespace]);
   const result = useAtomValue(query?.state ?? EMPTY_DIFF);
   const [filter, setFilter] = useState<string | null>(null);
   const allFiles = useMemo(() => diffFiles(result.diff), [result.diff]);
@@ -259,6 +269,15 @@ export function ThreadDiff({
         if (filter !== null) closeFilter();
         else onClose(commentCount > 0);
       },
+      "diff.ignoreWhitespace": {
+        enabled: filter === null && selectedScope !== "working",
+        label: ignoreWhitespace ? "Show whitespace" : "Hide whitespace",
+        run: () => {
+          setIgnoreWhitespace((value) => !value);
+          setOffset(0);
+          setLineCursor(0);
+        },
+      },
       "diff.layout": {
         enabled: filter === null && canSplit,
         run: () => setSideBySide(!showSplit),
@@ -363,6 +382,7 @@ export function ThreadDiff({
                 ? "Uncommitted workspace changes"
                 : `Turn ${selectedScope} changes`}
             {` · ${files.length} files${result.truncated ? " · Preview truncated" : ""}`}
+            {ignoreWhitespace && selectedScope !== "working" ? " · Whitespace hidden" : ""}
             {commentCount > 0
               ? ` · ${commentCount} ${commentCount === 1 ? "comment" : "comments"} in your message`
               : ""}

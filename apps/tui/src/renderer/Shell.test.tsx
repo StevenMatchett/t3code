@@ -754,6 +754,37 @@ describe("diff viewer", () => {
     expect(frame.split("\n").find((line) => line.includes("const old"))).not.toContain("fresh");
   });
 
+  it("hides whitespace changes on request, by asking the server", async () => {
+    const requested: unknown[] = [];
+    const fixture = makeDesignFixture();
+    const client = {
+      ...fixture.client,
+      diffs: {
+        ...fixture.client.diffs,
+        fullThreadDiff: (target: { input: unknown }) => {
+          requested.push(target.input);
+          return Atom.make(AsyncResult.success({ diff: DIFF }));
+        },
+      } as never,
+    };
+    const driver = await createTuiTestDriver(<AppShell client={client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("d");
+    await driver.input.pressKey("i");
+    await driver.flush();
+    expect(requested.at(-1)).toMatchObject({ ignoreWhitespace: true });
+    expect(driver.captureFrame()).toContain("Whitespace hidden");
+    await driver.input.pressKey("i");
+    await driver.flush();
+    expect(requested.at(-1)).not.toHaveProperty("ignoreWhitespace");
+  });
+
   it("colors code by syntax", async () => {
     const { driver } = await openDiff(120, 40);
     await driver.input.pressKey("TAB");
@@ -922,6 +953,37 @@ describe("pull requests", () => {
     expect(driver.captureFrame()).not.toContain("Enter confirms");
     await tick(driver, () => driver.input.pressKey("x"));
     expect(fixture.pullRequestActionsRun).toMatchObject([{ number: 7, action: "reopen" }]);
+  });
+
+  it("moves between summary, conversation, and code with Tab", async () => {
+    const { driver } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    expect(driver.captureFrame()).toContain("Looks close.");
+    expect(driver.captureFrame()).toContain("abcdef1 Add the index");
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    expect(driver.captureFrame()).toContain("+const a = 2;");
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    expect(driver.captureFrame()).toContain("search index");
+  });
+
+  it("submits a review, and a verdict other than approve needs a message", async () => {
+    const { driver, fixture } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await tick(driver, () => driver.input.pressKey("r"));
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    expect(driver.captureFrame()).toContain("Request changes");
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(fixture.pullRequestReviews).toEqual([]);
+    expect(driver.captureFrame()).toContain("Request changes needs a message.");
+
+    await driver.input.typeText("Please split this.");
+    await driver.flush();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(fixture.pullRequestReviews).toMatchObject([
+      { number: 42, verdict: "request-changes", body: "Please split this.", comments: [] },
+    ]);
+    expect(driver.captureFrame()).toContain("Review submitted.");
   });
 
   it("starts a thread on the pull request", async () => {

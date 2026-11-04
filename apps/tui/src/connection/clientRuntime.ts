@@ -71,6 +71,9 @@ import {
   type ExecutionEnvironmentCapabilities,
   type ModelSelection,
   type PullRequestActionInput,
+  type PullRequestActivity,
+  type PullRequestDiffResult,
+  type PullRequestSubmitReviewInput,
   type PullRequestChecks,
   type PullRequestDetail,
   type PullRequestListEntry,
@@ -109,6 +112,10 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
+import {
+  createPullRequestEnvironmentAtoms,
+  PullRequestDiffLoader,
+} from "@t3tools/client-runtime/state/pull-requests";
 import {
   createVcsActionManager,
   createVcsEnvironmentAtoms,
@@ -172,6 +179,18 @@ export interface TuiPullRequests {
   readonly runAction: (
     registry: AtomRegistry.AtomRegistry,
     input: PullRequestActionInput,
+  ) => Promise<void>;
+  readonly activity: (
+    registry: AtomRegistry.AtomRegistry,
+    reference: PullRequestRef,
+  ) => Promise<PullRequestActivity>;
+  /** The first slice of the change. */
+  readonly diff: (
+    reference: PullRequestRef,
+  ) => Atom.Atom<AsyncResult.AsyncResult<PullRequestDiffResult, unknown>>;
+  readonly submitReview: (
+    registry: AtomRegistry.AtomRegistry,
+    input: PullRequestSubmitReviewInput,
   ) => Promise<void>;
   /** Prepares a worktree on the pull request's branch and creates a thread there. */
   readonly startThread: (
@@ -427,6 +446,7 @@ export function createTuiClient(
       ShellSnapshotLoader.layer,
       BoundedThreadSnapshotLoader.layer,
       ThreadHistoryController.layer,
+      PullRequestDiffLoader.layer,
     ).pipe(
       Layer.provideMerge(started),
       Layer.provideMerge(platformLayer()),
@@ -615,6 +635,15 @@ export function createTuiClient(
     label: "tui.pull-requests.run-action",
     tag: WS_METHODS.pullRequestsRunAction,
   });
+  const pullRequestActivity = createEnvironmentRpcCommand(runtime, {
+    label: "tui.pull-requests.activity",
+    tag: WS_METHODS.pullRequestsActivity,
+  });
+  const pullRequestReview = createEnvironmentRpcCommand(runtime, {
+    label: "tui.pull-requests.submit-review",
+    tag: WS_METHODS.pullRequestsSubmitReview,
+  });
+  const pullRequestEnvironment = createPullRequestEnvironmentAtoms(runtime);
   const preparePullRequestThread = createEnvironmentRpcCommand(runtime, {
     label: "tui.pull-requests.prepare-thread",
     tag: WS_METHODS.gitPreparePullRequestThread,
@@ -644,6 +673,18 @@ export function createTuiClient(
       settled(
         await pullRequestAction.run(registry, { environmentId, input }),
         "The pull request action failed.",
+      );
+    },
+    activity: async (registry, input) =>
+      settled(
+        await pullRequestActivity.run(registry, { environmentId, input }),
+        "Could not read the conversation.",
+      ),
+    diff: (input) => pullRequestEnvironment.diff({ environmentId, input }),
+    submitReview: async (registry, input) => {
+      settled(
+        await pullRequestReview.run(registry, { environmentId, input }),
+        "The review was not submitted.",
       );
     },
     startThread: async (registry, entry, source) => {

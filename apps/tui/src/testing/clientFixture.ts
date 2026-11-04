@@ -473,6 +473,7 @@ export function makeClientFixture(
   const pullRequestActionsRun: PullRequestActionInput[] = [];
   const pullRequestFailure: { current: string | null } = { current: null };
   const pullRequestThreads: number[] = [];
+  const pullRequestReviews: object[] = [];
   const forks: { sourceThreadId: string; runId: string; title: string }[] = [];
   const gitActionState = Atom.make(EMPTY_VCS_ACTION_STATE);
   const gitStatus: { current: VcsStatusResult } = {
@@ -611,7 +612,10 @@ export function makeClientFixture(
         return {
           ...entry,
           capabilities: { actions: PR_ACTIONS, mergeMethods: ["squash"] },
-          viewerPermissions: { actions: PR_ACTIONS },
+          viewerPermissions: {
+            actions: PR_ACTIONS,
+            verdicts: ["approve", "request-changes", "comment"],
+          },
           body: "Adds the **search** index.",
         } as never;
       },
@@ -626,6 +630,37 @@ export function makeClientFixture(
         const index = pullRequestEntries.findIndex((item) => item.number === input.number);
         if (input.action === "merge")
           pullRequestEntries[index] = { ...pullRequestEntries[index]!, state: "merged" };
+      },
+      activity: async () =>
+        ({
+          comments: [
+            {
+              id: "c1",
+              kind: "comment",
+              author: { login: "grace" },
+              body: "Looks close.",
+              createdAt: time,
+              url: null,
+              path: null,
+              reviewState: null,
+            },
+          ],
+          commentCount: 1,
+          commentsTruncated: false,
+          reviewThreads: [],
+          commits: [{ oid: "abcdef1234", messageHeadline: "Add the index", committedDate: time }],
+        }) as never,
+      diff: () =>
+        Atom.make(
+          AsyncResult.success({
+            patch:
+              "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,1 @@\n-const a = 1;\n+const a = 2;\n",
+            truncated: false,
+            nextCursor: null,
+          }),
+        ),
+      submitReview: async (_registry, input) => {
+        pullRequestReviews.push(input);
       },
       startThread: async (_registry, entry) => {
         pullRequestThreads.push(entry.number);
@@ -747,6 +782,7 @@ export function makeClientFixture(
     pullRequestActionsRun,
     pullRequestFailure,
     pullRequestThreads,
+    pullRequestReviews,
     forks,
     gitStatus,
     gitActionState,
