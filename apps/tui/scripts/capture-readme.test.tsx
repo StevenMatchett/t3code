@@ -3,7 +3,6 @@
 //   ../../node_modules/vite-plus/bin/vp test run --root . scripts/capture-readme.test.tsx
 // Requires ImageMagick, FFmpeg, and the DejaVu Sans Mono font.
 import { it, expect } from "@effect/vitest";
-import { TextAttributes, type CapturedFrame, type RGBA } from "@opentui/core";
 import { MouseButtons } from "@opentui/core/testing";
 import {
   CheckpointRef,
@@ -22,50 +21,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { makeClientFixture } from "../src/testing/clientFixture.ts";
 import { createTuiTestDriver } from "../src/testing/driver.tsx";
+import { frameToSvg } from "../src/testing/frameImage.ts";
 import { AppShell } from "../src/renderer/AppShell.tsx";
-
-const escapeXml = (text: string) =>
-  text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-const color = (value: RGBA) => `rgb(${value.toInts().slice(0, 3).join(",")})`;
-
-function svg(frame: CapturedFrame) {
-  const cell = 12,
-    line = 24,
-    padding = 24,
-    top = 60;
-  const width = frame.cols * cell + padding * 2;
-  const height = frame.rows * line + top + padding;
-  const parts = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`,
-    `<rect width="100%" height="100%" fill="#0d1117"/>`,
-    `<text x="24" y="32" font-family="DejaVu Sans Mono" font-size="16" fill="#8b949e">T3 TUI / interactive demo</text>`,
-    `<g font-family="DejaVu Sans Mono" font-size="20" xml:space="preserve">`,
-  ];
-  frame.lines.forEach((row, y) => {
-    let column = 0;
-    for (const span of row.spans) {
-      const x = padding + column * cell;
-      const py = top + y * line;
-      const inverse = (span.attributes & TextAttributes.INVERSE) !== 0;
-      const bg = inverse ? span.fg : span.bg;
-      const fg = inverse ? span.bg : span.fg;
-      if (bg.a > 0)
-        parts.push(
-          `<rect x="${x}" y="${py}" width="${span.width * cell}" height="${line}" fill="${color(bg)}"/>`,
-        );
-      if (span.text.trim())
-        parts.push(
-          `<text x="${x}" y="${py + 19}" fill="${color(fg)}" font-weight="${span.attributes & TextAttributes.BOLD ? "bold" : "normal"}">${escapeXml(span.text)}</text>`,
-        );
-      column += span.width;
-    }
-  });
-  return `${parts.join("\n")}</g></svg>`;
-}
 
 it.skipIf(!process.env.T3_TUI_MEDIA_DIR)(
   "captures README screenshots and scripted walkthroughs",
@@ -199,7 +156,10 @@ it.skipIf(!process.env.T3_TUI_MEDIA_DIR)(
       await driver.flush();
       expect(driver.captureFrame()).toContain(contains);
       const source = NodePath.join(scratch, `${name}.svg`);
-      NodeFS.writeFileSync(source, svg(driver.captureSpans()));
+      NodeFS.writeFileSync(
+        source,
+        frameToSvg(driver.captureSpans(), { title: "T3 TUI / interactive demo" }),
+      );
       const target = NodePath.join(output, `${name}.png`);
       NodeChildProcess.execFileSync("magick", ["-background", "#0d1117", source, "-strip", target]);
       frames[name] = target;

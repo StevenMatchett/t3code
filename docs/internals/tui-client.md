@@ -63,6 +63,18 @@ and input RPC. The TUI feeds those byte streams to a real terminal emulator and 
 input back through typed terminal commands. Provider text, tool output, filenames, and logs never
 enter the emulator as trusted terminal bytes.
 
+## Design feedback and verification
+
+Keep these loops running while changing anything visible. All of them run from `apps/tui` and write
+outside the repository.
+
+- `node scripts/design-frames.mjs [scene-regex]` renders canonical screens at 80x24, 120x40, and
+  200x60, ASCII without color, and scripted sequences with one frame per step.
+- `node scripts/tmux-smoke.mjs` (Node 26.4+) drives a disposable environment in a private `tmux`
+  server. `HOME` and the state directory are temporary.
+- `T3_TUI_PERF=1 node scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run --root .
+scripts/perf-baseline.test.tsx` measures input-to-frame on a 5,000-row thread.
+
 ## Fork rules
 
 - Keep provider behavior behind existing adapters and advertised capabilities.
