@@ -356,6 +356,19 @@ export function renderShellOverlay(
               <ThreadActionsForm
                 client={client}
                 initialAction={overlay.initialAction ?? "rename"}
+                orphanedWorktree={
+                  thread.worktreePath &&
+                  !rows.threads.some(
+                    (other) => other.id !== thread.id && other.worktreePath === thread.worktreePath,
+                  )
+                    ? {
+                        cwd:
+                          rows.projects.find((project) => project.id === thread.projectId)
+                            ?.workspaceRoot ?? thread.worktreePath,
+                        path: thread.worktreePath,
+                      }
+                    : null
+                }
                 thread={thread}
                 active={overlayActive}
                 onClose={popOverlay}

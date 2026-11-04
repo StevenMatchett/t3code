@@ -494,6 +494,8 @@ export function makeClientFixture(
       pr: null,
     },
   };
+  const removedWorktrees: { cwd: string; path: string }[] = [];
+  const worktreeFailure: { current: string | null } = { current: null };
   const gitRuns: { readonly target: object; readonly input: object }[] = [];
   const gitFailure: { current: string | null } = { current: null };
   const gitPulls = { current: 0 };
@@ -585,6 +587,10 @@ export function makeClientFixture(
         gitRuns.push({ target, input });
         if (gitFailure.current) throw new Error(gitFailure.current);
         return gitResult(input.action);
+      },
+      removeWorktree: async (_registry, input) => {
+        if (worktreeFailure.current) throw new Error(worktreeFailure.current);
+        removedWorktrees.push(input);
       },
       pull: async () => {
         gitPulls.current += 1;
@@ -787,6 +793,8 @@ export function makeClientFixture(
     gitStatus,
     gitActionState,
     gitRuns,
+    removedWorktrees,
+    worktreeFailure,
     gitFailure,
     gitPulls,
     gitSwitches,

@@ -8,6 +8,7 @@ import { useMemo, useState, useContext, useEffect, useRef } from "react";
 import { AgentOutputOverlay, AgentSwarmPanel, agentOutputLines } from "./AgentSwarm.tsx";
 import { Composer } from "./composer/Composer.tsx";
 import { NoticeRow } from "./conversation/NoticeRow.tsx";
+import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { RequestDock } from "./conversation/RequestDock.tsx";
 import { StatusRow } from "./conversation/StatusRow.tsx";
 import { useTranscript, type TranscriptAnchor } from "./conversation/useTranscript.ts";
@@ -126,6 +127,7 @@ export function Conversation({
     // oxlint-disable-next-line react/set-state-in-effect -- A restored or requested composer focus cannot land on a read-only thread.
     if (readOnly && mode === "composer") setMode("history");
   }, [readOnly, mode]);
+  const linkedPullRequest = visibleThreadPullRequests(thread?.pullRequests ?? [])[0];
   const requests = useMemo(() => thread?.requests ?? { approvals: [], userInputs: [] }, [thread]);
   const question = requests.userInputs.find(
     (request) =>
@@ -707,6 +709,9 @@ export function Conversation({
           }
           messageTone={approval || question || secretRequest ? "warning" : "muted"}
           detail={[
+            linkedPullRequest
+              ? `PR #${linkedPullRequest.number}${linkedPullRequest.snapshot?.state ? ` ${linkedPullRequest.snapshot.state}` : ""}`
+              : "",
             linkMenu.notice,
             mode === "history" ? vim.status : "",
             anchor !== null

@@ -785,6 +785,52 @@ describe("diff viewer", () => {
     expect(requested.at(-1)).not.toHaveProperty("ignoreWhitespace");
   });
 
+  it("compares the branch against a typed base, and Esc keeps the current one", async () => {
+    const requested: unknown[] = [];
+    const fixture = makeDesignFixture();
+    const client = {
+      ...fixture.client,
+      diffs: {
+        ...fixture.client.diffs,
+        fullThreadDiff: () => Atom.make(AsyncResult.success({ diff: DIFF })),
+      } as never,
+      review: {
+        ...fixture.client.review,
+        diffPreview: (target: { input: unknown }) => {
+          requested.push(target.input);
+          return Atom.make(
+            AsyncResult.success({
+              sources: [{ kind: "branch-range", diff: DIFF, truncated: false }],
+            }),
+          );
+        },
+      } as never,
+    };
+    const driver = await createTuiTestDriver(<AppShell client={client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("d");
+    await driver.input.pressKey("b");
+    await driver.flush();
+    await driver.input.pressKey("ESCAPE");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Saved changes");
+
+    await driver.input.pressKey("b");
+    await driver.flush();
+    await driver.input.typeText("release");
+    await driver.flush();
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(requested.at(-1)).toMatchObject({ baseRef: "release" });
+    expect(driver.captureFrame()).toContain("Branch against release");
+  });
+
   it("colors code by syntax", async () => {
     const { driver } = await openDiff(120, 40);
     await driver.input.pressKey("TAB");
@@ -838,6 +884,107 @@ describe("diff viewer", () => {
     await driver.flush();
     expect(driver.registry.get(fixture.client.actions.state(id)).draft).toBe("");
     expect(driver.captureFrame()).toContain("Thread changes");
+  });
+});
+
+describe("worktree cleanup and linked pull requests", () => {
+  async function setupDelete(worktreePath: string | null) {
+    const fixture = makeClientFixture();
+    const thread = fixture.threads[0]!;
+    Object.assign(thread, { worktreePath });
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("m");
+    await driver.flush();
+    return { driver, fixture, thread };
+  }
+  const press = async (driver: TuiTestDriver, key: string) => {
+    await act(async () => {
+      await driver.input.pressKey(key);
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    await driver.flush();
+  };
+  const toDelete = async (driver: TuiTestDriver) => {
+    for (let index = 0; index < 3; index += 1) await press(driver, "TAB");
+    await press(driver, "RETURN");
+    await press(driver, "RETURN");
+  };
+
+  it("asks about a worktree only this thread used, and Enter keeps it", async () => {
+    const { driver, fixture } = await setupDelete("/worktrees/solo");
+    await toDelete(driver);
+    expect(driver.captureFrame()).toContain("Also remove the worktree at /worktrees/solo?");
+    await press(driver, "RETURN");
+    expect(fixture.removedWorktrees).toEqual([]);
+    expect(fixture.managementCommands.at(-1)).toMatchObject({ type: "thread.delete" });
+    expect(driver.captureFrame()).not.toContain("Also remove");
+  });
+
+  it("Esc at the worktree question deletes nothing", async () => {
+    const { driver, fixture } = await setupDelete("/worktrees/solo");
+    await toDelete(driver);
+    await press(driver, "ESCAPE");
+    expect(fixture.removedWorktrees).toEqual([]);
+    expect(fixture.managementCommands.some((item) => item.type === "thread.delete")).toBe(false);
+  });
+
+  it("keeps the thread when its worktree cannot be removed", async () => {
+    const { driver, fixture } = await setupDelete("/worktrees/solo");
+    fixture.worktreeFailure.current = "The worktree has uncommitted changes.";
+    await toDelete(driver);
+    await press(driver, "TAB");
+    await press(driver, "RETURN");
+    expect(fixture.managementCommands.some((item) => item.type === "thread.delete")).toBe(false);
+    expect(driver.captureFrame()).toContain("The worktree has uncommitted changes.");
+  });
+
+  it("removes the worktree when asked", async () => {
+    const { driver, fixture } = await setupDelete("/worktrees/solo");
+    await toDelete(driver);
+    await press(driver, "TAB");
+    await press(driver, "RETURN");
+    expect(fixture.removedWorktrees).toMatchObject([{ path: "/worktrees/solo" }]);
+    expect(fixture.managementCommands.at(-1)).toMatchObject({ type: "thread.delete" });
+  });
+
+  it("does not ask when the thread has no worktree", async () => {
+    const { driver, fixture } = await setupDelete(null);
+    await toDelete(driver);
+    expect(driver.captureFrame()).not.toContain("Also remove");
+    expect(fixture.removedWorktrees).toEqual([]);
+  });
+
+  it("shows the linked pull request in the thread", async () => {
+    const fixture = makeDesignFixture();
+    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+      width: 120,
+      height: 40,
+      kittyKeyboard: true,
+    });
+    drivers.push(driver);
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("RETURN");
+    await act(async () =>
+      updateThread(driver.registry, fixture, 0, (thread) => ({
+        ...thread,
+        pullRequests: [
+          {
+            number: 42,
+            url: "https://github.com/example/repo/pull/42",
+            source: "git-action",
+            snapshot: { state: "open", title: "Add search" },
+          },
+        ] as never,
+      })),
+    );
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("PR #42 open");
   });
 });
 

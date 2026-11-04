@@ -148,6 +148,10 @@ export interface TuiGit {
     },
   ) => Promise<GitRunStackedActionResult>;
   readonly pull: (registry: AtomRegistry.AtomRegistry, cwd: string) => Promise<VcsPullResult>;
+  readonly removeWorktree: (
+    registry: AtomRegistry.AtomRegistry,
+    input: { readonly cwd: string; readonly path: string },
+  ) => Promise<void>;
   readonly listRefs: (
     registry: AtomRegistry.AtomRegistry,
     cwd: string,
@@ -587,6 +591,10 @@ export function createTuiClient(
       if (AsyncResult.isFailure(result)) throw gitFailure(result, "The Git action failed.");
       if (!AsyncResult.isSuccess(result)) throw new Error("The Git action failed.");
       return result.value as GitRunStackedActionResult;
+    },
+    removeWorktree: async (registry, input) => {
+      const result = await vcs.removeWorktree.run(registry, { environmentId, input });
+      if (AsyncResult.isFailure(result)) throw gitFailure(result, "Could not remove the worktree.");
     },
     pull: async (registry, cwd) => {
       const result = await vcs.pull.run(registry, { environmentId, input: { cwd } });

@@ -254,7 +254,7 @@ function Header({
     width -
     8 -
     STATUS_WIDTH -
-    1 -
+    2 -
     Math.max(16, Math.min(breadcrumb.length, Math.floor(width * 0.6)));
   const candidates = [
     { id: "new-thread-action", label: "[+ New thread]", onPress: onNewThread },

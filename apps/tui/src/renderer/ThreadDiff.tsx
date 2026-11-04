@@ -19,7 +19,7 @@ import { diffSyntaxTokens, type DiffTokenKind } from "../ui/diffSyntax.ts";
 import { FormInput } from "../ui/FormField.tsx";
 import type { ThemeToken } from "../ui/theme.ts";
 
-type Scope = "saved" | "working" | number;
+type Scope = "saved" | "working" | "branch" | number;
 const EMPTY_DIFF = Atom.make({ diff: "", loading: false, failed: false, truncated: false });
 /** Below this a side-by-side pane is too narrow to read code in. */
 const SPLIT_MIN_WIDTH = 100;
@@ -110,6 +110,8 @@ export function ThreadDiff({
   const [offset, setOffset] = useState(0);
   const [focus, setFocus] = useState<"files" | "diff">("files");
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false);
+  const [baseRef, setBaseRef] = useState<string | null>(null);
+  const [baseInput, setBaseInput] = useState<string | null>(null);
   const query = useMemo(() => {
     const environmentId = client.environmentId;
     if (selectedScope === "working") {
@@ -122,6 +124,33 @@ export function ThreadDiff({
           const sources =
             Option.getOrNull(AsyncResult.value(result))?.sources.filter(
               (source) => source.kind === "working-tree",
+            ) ?? [];
+          return {
+            loading: result.waiting,
+            failed: AsyncResult.isFailure(result),
+            diff: sources.map((source) => source.diff).join("\n"),
+            truncated: sources.some((source) => source.truncated),
+          };
+        }),
+      };
+    }
+    if (selectedScope === "branch") {
+      if (!cwd) return null;
+      const atom = client.review.diffPreview({
+        environmentId,
+        input: {
+          cwd,
+          ...(baseRef ? { baseRef } : {}),
+          ...(ignoreWhitespace ? { ignoreWhitespace: true } : {}),
+        },
+      });
+      return {
+        refresh: () => registry.refresh(atom),
+        state: Atom.make((get) => {
+          const result = get(atom);
+          const sources =
+            Option.getOrNull(AsyncResult.value(result))?.sources.filter(
+              (source) => source.kind === "branch-range",
             ) ?? [];
           return {
             loading: result.waiting,
@@ -161,7 +190,7 @@ export function ThreadDiff({
         };
       }),
     };
-  }, [client, registry, cwd, selectedScope, latest, threadId, ignoreWhitespace]);
+  }, [client, registry, cwd, selectedScope, latest, threadId, ignoreWhitespace, baseRef]);
   const result = useAtomValue(query?.state ?? EMPTY_DIFF);
   const [filter, setFilter] = useState<string | null>(null);
   const allFiles = useMemo(() => diffFiles(result.diff), [result.diff]);
@@ -251,6 +280,19 @@ export function ThreadDiff({
     setCursor(0);
     setOffset(0);
   };
+  useKeyLayer("diffBase", {
+    active: active && baseInput !== null,
+    modal: true,
+    typing: true,
+    bindings: {
+      "diffBase.apply": () => {
+        setBaseRef(baseInput?.trim() || null);
+        setBaseInput(null);
+        changeScope("branch");
+      },
+      "diffBase.cancel": () => setBaseInput(null),
+    },
+  });
   useKeyLayer("diffComment", {
     active: active && comment !== null,
     modal: true,
@@ -261,13 +303,17 @@ export function ThreadDiff({
     },
   });
   useKeyLayer("diff", {
-    active: active && comment === null,
+    active: active && comment === null && baseInput === null,
     modal: true,
     typing: filter !== null,
     bindings: {
       "diff.close": () => {
         if (filter !== null) closeFilter();
         else onClose(commentCount > 0);
+      },
+      "diff.branch": {
+        enabled: filter === null,
+        run: () => setBaseInput(baseRef ?? ""),
       },
       "diff.ignoreWhitespace": {
         enabled: filter === null && selectedScope !== "working",
@@ -323,7 +369,7 @@ export function ThreadDiff({
       ? "Could not load thread."
       : "Loading thread..."
     : !query
-      ? selectedScope === "working"
+      ? selectedScope === "working" || selectedScope === "branch"
         ? "Workspace unavailable."
         : "No saved changes yet. Select W for working tree changes."
       : result.failed
@@ -345,7 +391,20 @@ export function ThreadDiff({
         {scopeButton("previous", "[ Prev", false, () => cycleScope(-1))}
         {scopeButton("next", "Next ]", false, () => cycleScope(1))}
       </Stack>
-      {comment !== null ? (
+      {baseInput !== null ? (
+        <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
+          <Text height={1} flexShrink={0} tone="muted" wrapMode="none">
+            Compare with
+          </Text>
+          <FormInput
+            id="diff-base"
+            value={baseInput}
+            placeholder="The default branch"
+            focused={active}
+            onInput={setBaseInput}
+          />
+        </Stack>
+      ) : comment !== null ? (
         <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
           <Text height={1} flexShrink={0} tone="muted" wrapMode="none">
             {`${file?.path ?? ""}:${targetLine ?? ""}`.slice(-Math.floor(width / 3))}
@@ -380,7 +439,9 @@ export function ThreadDiff({
               ? `Saved changes through turn ${latest}`
               : selectedScope === "working"
                 ? "Uncommitted workspace changes"
-                : `Turn ${selectedScope} changes`}
+                : selectedScope === "branch"
+                  ? `Branch against ${baseRef ?? "the default branch"}`
+                  : `Turn ${selectedScope} changes`}
             {` · ${files.length} files${result.truncated ? " · Preview truncated" : ""}`}
             {ignoreWhitespace && selectedScope !== "working" ? " · Whitespace hidden" : ""}
             {commentCount > 0

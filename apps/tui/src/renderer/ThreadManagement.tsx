@@ -19,7 +19,10 @@ export function ThreadActionsForm({
   onClose,
   onRemoved,
   initialAction = "rename",
+  orphanedWorktree = null,
 }: {
+  /** The worktree only this thread uses, which deleting it would strand. */
+  readonly orphanedWorktree?: { readonly cwd: string; readonly path: string } | null;
   readonly initialAction?: "rename" | "delete";
   readonly client: TuiClient;
   readonly thread: TuiThreadShell;
@@ -35,11 +38,40 @@ export function ThreadActionsForm({
   const [pending, setPending] = useState<ActionTarget | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(initialAction === "delete");
+  const [cleanup, setCleanup] = useState<"keep" | "remove" | null>(null);
   const archived = thread.archivedAt !== null;
   const targets: readonly ActionTarget[] = ["title", "save", "archive", "delete", "cancel"];
 
-  const run = async (action: Exclude<ActionTarget, "title" | "cancel">) => {
+  const run = async (
+    action: Exclude<ActionTarget, "title" | "cancel">,
+    worktreeChoice = cleanup,
+  ) => {
     if (pending) return;
+    if (
+      action === "delete" &&
+      worktreeChoice === null &&
+      confirmDelete &&
+      orphanedWorktree &&
+      client.git
+    ) {
+      // Asked before deleting, because a deleted thread takes this dialog with it. Keep comes
+      // first, so Enter on a prompt that just appeared cannot remove files.
+      setCleanup("keep");
+      setMessage(`Also remove the worktree at ${orphanedWorktree.path}?`);
+      return;
+    }
+    if (action === "delete" && worktreeChoice === "remove" && orphanedWorktree) {
+      setPending("delete");
+      try {
+        await client.git?.removeWorktree(registry, orphanedWorktree);
+      } catch (failure) {
+        // Removing first means a refusal leaves the thread and its history untouched.
+        setPending(null);
+        setCleanup(null);
+        setMessage(failure instanceof Error ? failure.message : "Could not remove the worktree.");
+        return;
+      }
+    }
     if (action === "delete" && !confirmDelete) {
       setConfirmDelete(true);
       setTarget("delete");
@@ -90,10 +122,25 @@ export function ThreadActionsForm({
     // A pending change cannot be interrupted, so the dialog keeps its keys until it settles.
     ...(pending ? { raw: () => true } : {}),
     bindings: {
-      "manage.close": onClose,
-      "manage.next": () => move(1),
-      "manage.previous": () => move(-1),
+      "manage.close": () => {
+        if (cleanup) {
+          setCleanup(null);
+          setMessage(null);
+        } else onClose();
+      },
+      "manage.next": () => {
+        if (cleanup) setCleanup(cleanup === "keep" ? "remove" : "keep");
+        else move(1);
+      },
+      "manage.previous": () => {
+        if (cleanup) setCleanup(cleanup === "keep" ? "remove" : "keep");
+        else move(-1);
+      },
       "manage.activate": () => {
+        if (cleanup) {
+          void run("delete");
+          return;
+        }
         if (target === "title") void run("save");
         else activate(target);
       },
@@ -144,16 +191,38 @@ export function ThreadActionsForm({
         )}
       </Stack>
       <Stack height={1} flexDirection="row" gap={1}>
-        {button(
-          "delete",
-          pending === "delete"
-            ? "[ Deleting... ]"
-            : confirmDelete
-              ? "[ Confirm delete ]"
-              : "[ Delete thread ]",
-          true,
+        {cleanup ? (
+          <>
+            <Button
+              id="thread-worktree-keep"
+              label="[ Keep worktree ]"
+              flexGrow={1}
+              focused={cleanup === "keep"}
+              onPress={() => void run("delete", "keep")}
+            />
+            <Button
+              id="thread-worktree-remove"
+              label="[ Remove worktree ]"
+              tone="danger"
+              flexGrow={1}
+              focused={cleanup === "remove"}
+              onPress={() => void run("delete", "remove")}
+            />
+          </>
+        ) : (
+          <>
+            {button(
+              "delete",
+              pending === "delete"
+                ? "[ Deleting... ]"
+                : confirmDelete
+                  ? "[ Confirm delete ]"
+                  : "[ Delete thread ]",
+              true,
+            )}
+            {button("cancel", "[ Close ]")}
+          </>
         )}
-        {button("cancel", "[ Close ]")}
       </Stack>
       <Text
         height={1}
