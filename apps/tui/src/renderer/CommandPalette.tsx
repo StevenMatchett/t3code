@@ -133,6 +133,7 @@ export function CommandPalette({
         items={filtered}
         selected={selected}
         height={Math.max(1, height - 2)}
+        showCounter={false}
         itemKey={(item) => item.id}
         itemId={(item) => `command-palette-${item.id}`}
         empty={<EmptyState title="No matches." description="Esc closes. > filters to commands." />}
@@ -160,7 +161,7 @@ export function CommandPalette({
           ? "Conversation search unavailable · local results shown"
           : searchPending || searching
             ? "Searching conversation output..."
-            : `${filtered.length} result${filtered.length === 1 ? "" : "s"}`}
+            : `${selected + 1} of ${filtered.length}`}
       </Text>
     </Stack>
   );

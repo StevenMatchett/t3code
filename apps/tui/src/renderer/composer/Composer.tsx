@@ -13,11 +13,11 @@ import {
 } from "../../features/chat/promptHistory.ts";
 import { trailingPastedImagePaths } from "../../features/chat/imageAttachments.ts";
 import { useKeyLayer } from "../../ui/keymap.ts";
-import { Panel } from "../../ui/Panel.tsx";
+import { asciiBorderCharacters, Panel } from "../../ui/Panel.tsx";
 import { Button } from "../../ui/Button.tsx";
 import { Stack, Text } from "../../ui/primitives.tsx";
 import { inlineTerminalText } from "../../ui/textLayout.ts";
-import { useThemeColor } from "../../ui/context.tsx";
+import { useThemeColor, useUi } from "../../ui/context.tsx";
 import { PromptEditor, type PromptEditorControl, type PromptSnapshot } from "../PromptEditor.tsx";
 import { ComposerMenu } from "./ComposerMenu.tsx";
 import { useComposerChoices } from "./useComposerChoices.ts";
@@ -86,6 +86,7 @@ export function Composer({
     caps: model?.capabilities ?? {},
     selections: thread?.modelSelection.options,
   });
+  const { capabilities } = useUi();
   const dividerColor = useThemeColor("border");
   const selectedBackground = useThemeColor("selection");
   const [savedComposer] = useState(() => client.session?.composer(threadId));
@@ -504,6 +505,7 @@ export function Composer({
           flexShrink={0}
           border={["top"]}
           borderStyle="single"
+          {...(capabilities.unicode ? {} : { customBorderChars: asciiBorderCharacters })}
           {...(dividerColor ? { borderColor: dividerColor } : {})}
         />
         <Stack height={1} flexShrink={0} flexDirection="row" width="100%">

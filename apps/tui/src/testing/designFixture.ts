@@ -3,6 +3,7 @@ import { CheckpointRef, EventId, MessageId, ProjectId, ThreadId, TurnId } from "
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import type * as AtomRegistry from "effect/reactivity/AtomRegistry";
+import type { TuiSessionState } from "../persistence/sessionState.ts";
 import { makeClientFixture } from "./clientFixture.ts";
 import { requestFixture } from "./requestFixture.ts";
 import { agentFixture } from "./agentFixture.ts";
@@ -82,8 +83,8 @@ const completedTurn = {
 };
 
 /** A recognisable workspace for frames, feel checks, and performance measurements. */
-export function makeDesignFixture() {
-  const fixture = makeClientFixture();
+export function makeDesignFixture(session?: TuiSessionState) {
+  const fixture = makeClientFixture(undefined, undefined, session);
   const titles = ["Add project search", "Improve onboarding copy", "Keyboard navigation audit"];
   const projectNames = [
     { title: "Atlas", root: "/home/dev/code/atlas" },
@@ -223,21 +224,31 @@ export const designAgents = () => [
 /** Long transcript for scrolling, streaming, and input-latency measurement. */
 export function longTranscript(rows: number) {
   const messages = [];
+  const at = (offset: number) => new Date(Date.UTC(2026, 2, 2, 12, 0, offset)).toISOString();
   for (let index = 0; index < rows; index += 2) {
     messages.push(
-      message(`long-user-${index}`, "user", `Prompt ${index}: keep going with the next step.`),
-      message(
-        `long-assistant-${index}`,
-        "assistant",
-        `Reply ${index}: finished step ${index} with a **short** summary, \`inline code\`, and enough text that it wraps once on a narrow terminal.`,
-      ),
+      {
+        ...message(`long-user-${index}`, "user", `Prompt ${index}: keep going with the next step.`),
+        createdAt: at(index),
+      },
+      {
+        ...message(
+          `long-assistant-${index}`,
+          "assistant",
+          `Reply ${index}: finished step ${index} with a **short** summary, \`inline code\`, and enough text that it wraps once on a narrow terminal.`,
+        ),
+        createdAt: at(index + 1),
+      },
     );
   }
   return messages;
 }
 
-export const assistantMessage = (id: string, text: string, streaming = false) =>
-  message(id, "assistant", text, streaming);
+/** A message newer than everything in the fixture, as a live reply would be. */
+export const assistantMessage = (id: string, text: string, streaming = false) => ({
+  ...message(id, "assistant", text, streaming),
+  createdAt: "2026-12-01T00:00:00.000Z",
+});
 
 export const DESIGN_THREAD_IDS = ["thread-0", "thread-1", "thread-2"].map((id) =>
   ThreadId.make(id),

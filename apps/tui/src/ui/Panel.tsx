@@ -5,7 +5,7 @@ import { useThemeColor, useUi } from "./context.tsx";
 import { calculatePanelLayout } from "./layout.ts";
 import type { ThemeToken } from "./theme.ts";
 
-const asciiBorderCharacters: BorderCharacters = Object.freeze({
+export const asciiBorderCharacters: BorderCharacters = Object.freeze({
   bottomLeft: "+",
   bottomRight: "+",
   bottomT: "+",
@@ -36,6 +36,18 @@ export interface PanelProps extends Omit<BoxProps, OwnedPanelProps> {
   readonly paddingX?: number;
 }
 
+/**
+ * Without color a panel has no background to cover what is behind it, so floating panels paint
+ * blank cells first. The parent clips them to its own size.
+ */
+function OpaqueFill() {
+  return (
+    <text position="absolute" top={0} left={0} wrapMode="none" selectable={false}>
+      {Array.from({ length: 120 }, () => " ".repeat(300)).join("\n")}
+    </text>
+  );
+}
+
 export function Panel({
   bordered = true,
   borderTone = "border",
@@ -58,6 +70,7 @@ export function Panel({
   return (
     <box
       {...props}
+      {...(props.position === "absolute" ? { overflow: "hidden" as const } : {})}
       {...(title === undefined
         ? {}
         : {
@@ -73,6 +86,7 @@ export function Panel({
       {...(titleColor ? { titleColor } : {})}
       {...(width === undefined ? {} : { width })}
     >
+      {props.position === "absolute" && !capabilities.color ? <OpaqueFill /> : null}
       {children}
     </box>
   );

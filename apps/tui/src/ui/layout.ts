@@ -19,7 +19,7 @@ export function calculateShellLayout(width: number, height: number) {
     ? 0
     : size === "ultra"
       ? 44
-      : Math.min(36, Math.max(32, Math.floor(width / 4)));
+      : Math.min(38, Math.max(34, Math.floor(width / 3.5)));
   const mainWidth = availableWidth - (split ? sidebarWidth + 1 : 0);
   // Short terminals give up the row under the header before they give up content.
   const headerGap = height >= 30 ? 1 : 0;
@@ -42,8 +42,9 @@ export function clampBox(
   area: { readonly width: number; readonly height: number },
   preferred: { readonly width: number; readonly height: number },
 ) {
-  const width = Math.max(1, Math.min(preferred.width, area.width));
-  const height = Math.max(1, Math.min(preferred.height, area.height));
+  // A sliver of what is behind reads as a rendering bug, so a near fit becomes a full fit.
+  const width = area.width - preferred.width <= 6 ? area.width : preferred.width;
+  const height = area.height - preferred.height <= 2 ? area.height : preferred.height;
   return {
     width,
     height,
@@ -58,19 +59,20 @@ export function conversationRows({
   composer,
   agents,
   request,
-  extraNotice = 0,
+  hasNotice,
 }: {
   readonly height: number;
   readonly composer: number;
   readonly agents: number;
   readonly request: number;
-  readonly extraNotice?: number;
+  readonly hasNotice: boolean;
 }) {
-  // One row above the status line is always reserved for find, queue, and errors.
-  const notice = height >= 12 ? 1 : 0;
+  // One row above the status line is reserved for find, queue, and errors, so they never shift
+  // anything. Tiny terminals and a docked request need the row more until a notice actually shows.
+  const notice = hasNotice || (height >= 12 && request === 0) ? 1 : 0;
   return {
     notice,
-    transcript: Math.max(1, height - 1 - composer - agents - request - notice - extraNotice),
+    transcript: Math.max(1, height - 1 - composer - agents - request - notice),
   };
 }
 

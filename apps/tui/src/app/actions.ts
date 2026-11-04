@@ -9,7 +9,7 @@ export const ACTION_SCOPES = {
   app: { level: 0, title: "Everywhere" },
   /** Reachable whenever no overlay is open. */
   workspace: { level: 1, title: "Workspace" },
-  navigation: { level: 2, title: "Threads" },
+  navigation: { level: 2, title: "Sidebar" },
   conversation: { level: 3, title: "Conversation" },
   history: { level: 4, title: "Conversation" },
   composer: { level: 4, title: "Message" },

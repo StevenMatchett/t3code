@@ -134,6 +134,14 @@ const screens: Record<string, (harness: Harness) => Promise<void>> = {
     await driver.input.typeText("theme");
     await driver.input.pressKey("RETURN");
   },
+  "light-theme": async (harness) => {
+    await openConversation(harness);
+    await harness.driver.input.pressKey("k", { ctrl: true });
+    await harness.driver.input.typeText("theme");
+    await harness.driver.input.pressKey("RETURN");
+    await harness.driver.input.pressKey("ARROW_DOWN");
+    await harness.driver.input.pressKey("ARROW_DOWN");
+  },
   terminal: async (harness) => {
     await openConversation(harness);
     await harness.driver.input.pressKey("t", { ctrl: true });

@@ -26,7 +26,15 @@ function CompletedTiming({ turn }: { readonly turn: TuiLatestTurn }) {
   const today = useLocalDay();
   const label = turnTimingLabel(turn, today);
   return label === null ? null : (
-    <Text id="thread-turn-timing" tone="muted" flexShrink={0} height={1} wrapMode="none" truncate>
+    <Text
+      id="thread-turn-timing"
+      tone="muted"
+      flexShrink={1}
+      minWidth={0}
+      height={1}
+      wrapMode="none"
+      truncate
+    >
       {`  ${label}`}
     </Text>
   );

@@ -251,7 +251,7 @@ export function Conversation({
       ) +
       1
     : question
-      ? 13
+      ? question.questions.reduce((largest, item) => Math.max(largest, item.options.length), 0) + 8
       : 0;
   const requestHeight =
     approval || question
@@ -262,11 +262,10 @@ export function Conversation({
     composer: composerHeight,
     agents: agentPanelHeight,
     request: requestHeight,
-    // Tiny terminals have no reserved row, so a notice there takes a transcript row.
-    extraNotice: height < 12 && (search || interaction.error || queued) ? 1 : 0,
+    hasNotice: Boolean(search || interaction.error || queued),
   });
   const count = rowLayout.transcript;
-  const noticeHeight = height < 12 ? (search || interaction.error || queued ? 1 : 0) : 1;
+  const noticeHeight = rowLayout.notice;
   const page = state.history;
   const transcript = useTranscript({
     client,
@@ -611,6 +610,21 @@ export function Conversation({
           ))
         )}
       </Stack>
+      {agents.length > 0 ? (
+        <AgentSwarmPanel
+          agents={agents}
+          height={agentPanelHeight}
+          cursor={resolvedAgentCursor}
+          active={mode === "agents"}
+          expanded={agentsExpanded}
+          onSelect={setAgentCursor}
+          onToggle={() => setAgentsExpanded((current) => !current)}
+          onOpen={(agentId) => {
+            const agent = agents.find((candidate) => candidate.id === agentId);
+            if (agent) openAgent(agent);
+          }}
+        />
+      ) : null}
       <NoticeRow
         height={noticeHeight}
         search={search}
@@ -638,7 +652,12 @@ export function Conversation({
         worktree={Boolean(thread?.worktreePath)}
         phase={phase}
         animate={active}
-        timingTurn={timingTurn}
+        // While reading above the live edge, the way back matters more than when the turn ended.
+        timingTurn={
+          anchor !== null && runningSince === null && thread?.latestTurn?.state !== "running"
+            ? null
+            : timingTurn
+        }
         runningSince={runningSince}
         showParent={parentThreadId !== null}
         renderMarkdown={renderMarkdown}
@@ -673,21 +692,6 @@ export function Conversation({
           toggleMarkdown();
         }}
       />
-      {agents.length > 0 ? (
-        <AgentSwarmPanel
-          agents={agents}
-          height={agentPanelHeight}
-          cursor={resolvedAgentCursor}
-          active={mode === "agents"}
-          expanded={agentsExpanded}
-          onSelect={setAgentCursor}
-          onToggle={() => setAgentsExpanded((current) => !current)}
-          onOpen={(agentId) => {
-            const agent = agents.find((candidate) => candidate.id === agentId);
-            if (agent) openAgent(agent);
-          }}
-        />
-      ) : null}
       {readOnly ? (
         <Panel id="provider-subagent-bar" height={composerHeight} flexShrink={0} width="100%">
           <Text height={1} tone="muted" wrapMode="none" truncate>

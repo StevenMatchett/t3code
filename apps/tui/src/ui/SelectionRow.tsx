@@ -26,6 +26,8 @@ export function SelectionRow({
       <Text
         height={1}
         flexGrow={1}
+        flexShrink={1}
+        flexBasis={0}
         minWidth={0}
         wrapMode="none"
         truncate

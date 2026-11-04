@@ -9,6 +9,7 @@ import { calculateShellLayout } from "../ui/layout.ts";
 import { AppShellView, useAppShellState, type ShellOverlayView } from "../app/AppShell.tsx";
 import { useActiveActions, useKeyLayer } from "../ui/keymap.ts";
 import { useToast } from "../ui/StatusLine.tsx";
+import { useUi } from "../ui/context.tsx";
 import { actionKeyLabel } from "../app/actions.ts";
 import {
   nextSidebarView,
@@ -91,6 +92,7 @@ function AppShellContent({
   searchDebounceMs = 200,
 }: AppShellProps) {
   const renderer = useRenderer();
+  const { capabilities } = useUi();
   const shell = useAtomValue(client.shell);
   const connection = useAtomValue(client.connection);
   const sessionError = useAtomValue(client.session?.error ?? NO_SESSION_ERROR);
@@ -334,7 +336,7 @@ function AppShellContent({
       ...paletteActions
         .filter((action) => action.definition.palette !== false)
         .map((action): PaletteEntry => {
-          const key = actionKeyLabel(action.definition);
+          const key = actionKeyLabel(action.definition, capabilities.unicode);
           return {
             id: `action:${action.id}`,
             label: action.title,
@@ -345,7 +347,8 @@ function AppShellContent({
             rank:
               recentChoices.indexOf(`action:${action.id}`) >= 0
                 ? 1_000 + recentChoices.indexOf(`action:${action.id}`)
-                : (action.definition.hint ?? 0),
+                : Math.min(99, action.definition.hint ?? 0) *
+                  (action.definition.hint === 100 ? 0 : 1),
             target: { type: "action", run: () => void action.run() },
           };
         }),
@@ -384,6 +387,7 @@ function AppShellContent({
         }),
     ];
   }, [
+    capabilities.unicode,
     paletteActions,
     paletteSearchQuery,
     recentChoices,
@@ -477,7 +481,7 @@ function AppShellContent({
       case "theme":
         return {
           title: "Theme",
-          size: { width: 52, height: 7 },
+          size: { width: 62, height: 7 },
           content: <ThemePicker active={overlayActive} onClose={popOverlay} />,
         };
       case "diff":

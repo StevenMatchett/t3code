@@ -153,6 +153,8 @@ function ThreadRowTrailing({
   readonly runningSince: string | null;
   readonly visible: boolean;
 }) {
+  // An idle row keeps the whole width for its title.
+  if (phase === "idle") return null;
   return (
     <Stack flexDirection="row" flexShrink={0}>
       {phase === "running" || phase === "starting" ? (
@@ -536,94 +538,99 @@ export function AppShellView({
       overflow="hidden"
       {...(background ? { backgroundColor: background } : {})}
     >
-      <Header
-        width={Math.max(1, width - 2)}
-        breadcrumb={breadcrumb}
-        label={label}
-        status={status}
-        error={error}
-        overlayOpen={overlayOpen}
-        onNewProject={onNewProject}
-        onNewThread={project ? onNewThread : undefined}
-        onOpenPalette={onOpenPalette}
-        onManageThread={selectedThread ? onManageThread : undefined}
-        onOpenArchived={onOpenArchived}
-      />
-      {layout.headerGap ? <Stack height={1} flexShrink={0} /> : null}
-      <Stack height={layout.bodyHeight} flexShrink={0} flexDirection="row" gap={1}>
-        <AnimationGate visible={!bodyCovered}>
-          <Stack visible={!bodyCovered} width="100%" height="100%" flexDirection="row" gap={1}>
-            {layout.split ? (
+      <Stack visible={!layout.tooSmall} width="100%" height="100%" flexDirection="column">
+        <Header
+          width={Math.max(1, width - 2)}
+          breadcrumb={breadcrumb}
+          label={label}
+          status={status}
+          error={error}
+          overlayOpen={overlayOpen}
+          onNewProject={onNewProject}
+          onNewThread={project ? onNewThread : undefined}
+          onOpenPalette={onOpenPalette}
+          onManageThread={selectedThread ? onManageThread : undefined}
+          onOpenArchived={onOpenArchived}
+        />
+        {layout.headerGap ? <Stack height={1} flexShrink={0} /> : null}
+        <Stack height={layout.bodyHeight} flexShrink={0} flexDirection="row" gap={1}>
+          <AnimationGate visible={!bodyCovered}>
+            <Stack visible={!bodyCovered} width="100%" height="100%" flexDirection="row" gap={1}>
+              {layout.split ? (
+                <Panel
+                  title={title}
+                  width={layout.sidebarWidth}
+                  height="100%"
+                  borderTone={conversation ? "border" : "borderFocused"}
+                  flexDirection="column"
+                >
+                  {navigation}
+                </Panel>
+              ) : null}
               <Panel
-                title={title}
-                width={layout.sidebarWidth}
+                width={layout.mainWidth}
                 height="100%"
-                borderTone={conversation ? "border" : "borderFocused"}
+                title={
+                  conversation
+                    ? inlineTerminalText(selectedThread?.title ?? "Conversation")
+                    : layout.split
+                      ? "Workspace"
+                      : title
+                }
+                borderTone={conversation || !layout.split ? "borderFocused" : "border"}
                 flexDirection="column"
               >
-                {navigation}
+                {conversation ? children : layout.split ? preview : navigation}
               </Panel>
-            ) : null}
-            <Panel
-              width={layout.mainWidth}
-              height="100%"
-              title={
-                conversation
-                  ? inlineTerminalText(selectedThread?.title ?? "Conversation")
-                  : layout.split
-                    ? "Workspace"
-                    : title
-              }
-              borderTone={conversation || !layout.split ? "borderFocused" : "border"}
-              flexDirection="column"
-            >
-              {conversation ? children : layout.split ? preview : navigation}
-            </Panel>
-          </Stack>
-        </AnimationGate>
+            </Stack>
+          </AnimationGate>
+          {overlays
+            .filter((overlay) => !overlay.floating)
+            .map((overlay) => {
+              const box = overlay.size
+                ? clampBox(
+                    { width: Math.max(1, width - 2), height: layout.bodyHeight },
+                    overlay.size,
+                  )
+                : { left: 0, top: 0, width: "100%" as const, height: "100%" as const };
+              return (
+                <Panel
+                  key={overlay.key}
+                  id="thread-management-overlay"
+                  visible={overlay.visible}
+                  position="absolute"
+                  top={box.top}
+                  left={box.left}
+                  width={box.width}
+                  height={box.height}
+                  zIndex={50}
+                  {...(overlay.title ? { title: overlay.title } : {})}
+                  borderTone="borderFocused"
+                  flexDirection="column"
+                >
+                  {overlay.content}
+                </Panel>
+              );
+            })}
+        </Stack>
+        <HotkeyBar width={Math.max(1, width - 2)} notice={notice ?? null} />
         {overlays
-          .filter((overlay) => !overlay.floating)
-          .map((overlay) => {
-            const box = overlay.size
-              ? clampBox({ width: Math.max(1, width - 2), height: layout.bodyHeight }, overlay.size)
-              : { left: 0, top: 0, width: "100%" as const, height: "100%" as const };
-            return (
-              <Panel
-                key={overlay.key}
-                id="thread-management-overlay"
-                visible={overlay.visible}
-                position="absolute"
-                top={box.top}
-                left={box.left}
-                width={box.width}
-                height={box.height}
-                zIndex={50}
-                {...(overlay.title ? { title: overlay.title } : {})}
-                borderTone="borderFocused"
-                flexDirection="column"
-              >
-                {overlay.content}
-              </Panel>
-            );
-          })}
+          .filter((overlay) => overlay.floating)
+          .map((overlay) => (
+            <Stack
+              key={overlay.key}
+              visible={overlay.visible}
+              position="absolute"
+              top={0}
+              left={0}
+              width="100%"
+              height="100%"
+              zIndex={100}
+            >
+              {overlay.content}
+            </Stack>
+          ))}
       </Stack>
-      <HotkeyBar width={Math.max(1, width - 2)} notice={notice ?? null} />
-      {overlays
-        .filter((overlay) => overlay.floating)
-        .map((overlay) => (
-          <Stack
-            key={overlay.key}
-            visible={overlay.visible}
-            position="absolute"
-            top={0}
-            left={0}
-            width="100%"
-            height="100%"
-            zIndex={100}
-          >
-            {overlay.content}
-          </Stack>
-        ))}
       {layout.tooSmall ? <TooSmall width={width} height={height} /> : null}
     </Stack>
   );

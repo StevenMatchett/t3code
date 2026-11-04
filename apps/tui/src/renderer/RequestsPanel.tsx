@@ -141,8 +141,8 @@ export function Questions({
     width,
   );
   const editorHeight = editing ? Math.max(1, Math.min(3, Math.floor(height / 3))) : 0;
-  const optionRows = Math.max(1, Math.min(continueIndex + 1, 6, height - editorHeight - 4));
-  const count = Math.max(1, height - optionRows - editorHeight - 3);
+  const optionRows = Math.max(1, Math.min(continueIndex + 1, 6, height - editorHeight - 3));
+  const count = Math.max(1, height - optionRows - editorHeight - 2);
   const toggle = (index = choice) => {
     const option = question.options[index];
     if (!option) return;
