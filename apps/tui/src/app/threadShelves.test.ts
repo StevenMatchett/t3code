@@ -159,6 +159,39 @@ describe("inbox shelves", () => {
   });
 });
 
+describe("all projects row", () => {
+  const threads = [
+    thread("first", { projectId: ProjectId.make("alpha") }),
+    thread("second", { projectId: ProjectId.make("alpha") }),
+    thread("elsewhere", { projectId: ProjectId.make("beta") }),
+  ];
+  const scoped = { projectScope: ProjectId.make("alpha") };
+
+  it("leads a list narrowed to one project, and only then", () => {
+    expect(ids(rowsFor(threads, scoped)).slice(0, 1)).toEqual(["all-projects"]);
+    expect(ids(rowsFor(threads))).not.toContain("all-projects");
+  });
+
+  it("stays when the project has no threads, so there is still a way out", () => {
+    expect(ids(rowsFor([], scoped))).toEqual(["all-projects"]);
+  });
+
+  it("leaves search results alone, so Enter still opens the top match", () => {
+    expect(ids(rowsFor(threads, { ...scoped, filter: "first" }))).not.toContain("all-projects");
+  });
+
+  it("is only reached by moving to it", () => {
+    const rows = rowsFor(threads, scoped);
+    const state = { route: "threads", threadId: null };
+    expect(rows[resolveShelfCursor(rows, state, 0)]?.kind).toBe("thread");
+    expect(rows[resolveShelfCursor(rows, { ...state, shelfCursor: "all-projects" }, 0)]?.kind).toBe(
+      "all-projects",
+    );
+    const alone = rowsFor([], scoped);
+    expect(resolveShelfCursor(alone, state, 0)).toBe(0);
+  });
+});
+
 describe("row status", () => {
   it("follows the GUI's precedence, with attention before work", () => {
     const status = (overrides: Partial<TuiThreadShell>) =>

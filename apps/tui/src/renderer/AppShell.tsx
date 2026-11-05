@@ -632,8 +632,18 @@ function AppShellContent({
       "project.toggleExpanded": shelvesActive
         ? {
             enabled: shelfRow !== undefined,
-            label: shelfRow?.kind === "thread" ? "Select" : "Expand",
-            title: shelfRow?.kind === "thread" ? "Select this thread" : "Open or close this shelf",
+            label:
+              shelfRow?.kind === "thread"
+                ? "Select"
+                : shelfRow?.kind === "all-projects"
+                  ? "All projects"
+                  : "Expand",
+            title:
+              shelfRow?.kind === "thread"
+                ? "Select this thread"
+                : shelfRow?.kind === "all-projects"
+                  ? "Show all projects"
+                  : "Open or close this shelf",
             run: () => {
               if (shelfRow?.kind === "thread") toggleRowMark(shelfRow.id);
               else if (shelfRow) activateShelfRow(shelfRow);

@@ -284,6 +284,8 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
   const selectionColor = useThemeColor("selection");
   const { rows, cursor, scopeTitle, filter, filtering } = props;
   const searching = filtering || filter !== undefined;
+  // The way out stays on a project with no threads, and the reason for the empty list stays too.
+  const onlyAllProjects = rows.length === 1 && rows[0]?.kind === "all-projects";
   const empty: ReactNode = props.error ? (
     <ErrorState title="Connection unavailable. R retries." />
   ) : !props.loaded ? (
@@ -348,7 +350,7 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
       <ListView<ShelfRow>
         items={rows}
         selected={cursor}
-        height={Math.max(1, props.height - 1)}
+        height={onlyAllProjects ? 1 : Math.max(1, props.height - 1)}
         rowHeight={shelfRowHeight}
         pushDown={(row) => row.kind === "shelf"}
         itemKey={(row) => row.id}
@@ -382,6 +384,20 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
               </Stack>
             );
           }
+          if (row.kind === "all-projects")
+            return (
+              <Stack height={1} width="100%" {...background}>
+                <Text
+                  height={1}
+                  wrapMode="none"
+                  truncate
+                  tone={selected && props.focused ? "accent" : "muted"}
+                  strong={selected && props.focused}
+                >
+                  {`${selected ? ">" : " "} ${capabilities.unicode ? "←" : "<"} All projects`}
+                </Text>
+              </Stack>
+            );
           if (row.kind === "more")
             return (
               <Stack height={1} width="100%" {...background}>
@@ -419,6 +435,7 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
           );
         }}
       />
+      {onlyAllProjects ? empty : null}
     </Stack>
   );
 }

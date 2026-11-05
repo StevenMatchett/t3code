@@ -652,7 +652,9 @@ export function AppShellView({
               ? "Enter or Space opens this shelf."
               : shelfRow?.kind === "more"
                 ? "Enter shows more."
-                : "No thread selected.",
+                : shelfRow?.kind === "all-projects"
+                  ? "Enter shows all projects."
+                  : "No thread selected.",
         ];
   const preview = (
     <Stack flexDirection="column" paddingTop={1} gap={1}>

@@ -1,3 +1,4 @@
+import { MouseButtons } from "@opentui/core/testing";
 import { makeClientFixture } from "../testing/clientFixture.ts";
 import { PlanId, type VcsStatusResult } from "@t3tools/contracts";
 import { afterEach, describe, expect, it } from "@effect/vitest";
@@ -1760,6 +1761,105 @@ describe("inbox sidebar", () => {
     await driver.input.typeText("inbox sidebar");
     await driver.input.pressKey("RETURN");
     expect(driver.captureFrame()).toContain("Projects (2)");
+  });
+
+  const filterTo = async (driver: TuiTestDriver, title: string) => {
+    await driver.input.pressKey("f");
+    await driver.input.typeText(title);
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+  };
+
+  it("offers a row back to all projects while filtered to one", async () => {
+    const { driver } = await setupInbox();
+    expect(rowOf(driver, "all-projects")).toBeUndefined();
+
+    await filterTo(driver, "Atlas");
+    expect(driver.captureFrame()).toContain("[Atlas");
+    expect(rowOf(driver, "all-projects")).toBeDefined();
+    // Filtering leaves the cursor on a thread, so Enter does not undo what was just chosen.
+    expect(driver.captureFrame()).toContain("  ← All projects");
+    expect(driver.captureFrame()).toContain("> Add project search");
+
+    await driver.input.pressKey("ARROW_UP");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("> ← All projects");
+    expect(driver.captureFrame()).toContain("Enter shows all projects.");
+
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("[All projects");
+    expect(rowOf(driver, "all-projects")).toBeUndefined();
+    expect(rowOf(driver, "thread-2")).toBeDefined();
+  });
+
+  it("reaches the row with Alt+Up from a conversation, and Alt+Down returns", async () => {
+    const { driver } = await setupInbox();
+    await filterTo(driver, "Atlas");
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    // Plain arrows belong to the conversation.
+    await driver.input.pressKey("ARROW_UP");
+    await driver.flush();
+    expect(driver.captureFrame()).not.toContain("> ← All projects");
+
+    await driver.input.pressKey("ARROW_UP", { meta: true });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("> ← All projects");
+    expect(driver.captureFrame()).toContain("Enter shows all projects.");
+
+    await driver.input.pressKey("ARROW_DOWN", { meta: true });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("  ← All projects");
+    expect(driver.captureFrame()).toContain("> Add project search");
+
+    await driver.input.pressKey("ARROW_UP", { meta: true });
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("[All projects");
+  });
+
+  it("still wraps with Alt+Up when no project is filtered", async () => {
+    const { driver } = await setupInbox();
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    await driver.input.pressKey("ARROW_UP", { meta: true });
+    await driver.flush();
+    expect(driver.captureFrame()).not.toContain("> Add project search");
+    expect(rowOf(driver, "all-projects")).toBeUndefined();
+  });
+
+  it("goes back to all projects when the row is clicked", async () => {
+    const { driver } = await setupInbox();
+    await filterTo(driver, "Atlas");
+    const row = rowOf(driver, "all-projects")!;
+    await driver.mouse.click(row.screenX + 2, row.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("[All projects");
+    expect(rowOf(driver, "all-projects")).toBeUndefined();
+  });
+
+  it("keeps the way out and the reason on a project with no threads", async () => {
+    const { driver, fixture } = await setupInbox();
+    await filterTo(driver, "Atlas");
+    const atlas = fixture.threads[0]!.projectId;
+    await act(async () =>
+      driver.registry.update(fixture.shell, (state) => ({
+        ...state,
+        snapshot: Option.map(state.snapshot, (snapshot) => ({
+          ...snapshot,
+          threads: snapshot.threads.filter((thread) => thread.projectId !== atlas),
+        })),
+      })),
+    );
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("← All projects");
+    expect(driver.captureFrame()).toContain("No threads in Atlas yet.");
+
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("[All projects");
+    expect(driver.captureFrame()).not.toContain("No threads in Atlas yet.");
   });
 
   it("settles from the keyboard, keeps the cursor in place, and Ctrl+Z undoes it", async () => {

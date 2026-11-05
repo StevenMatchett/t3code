@@ -357,11 +357,22 @@ export function useThreadTriage({
     else if (row.kind === "thread" && modifiers?.shift) markRowRange(row.id);
     else if (row.kind === "thread") openShelfRow(row);
     else if (row.kind === "shelf") dispatch({ type: "toggle-shelf", shelf: row.shelf });
+    else if (row.kind === "all-projects") dispatch({ type: "set-project-scope", projectId: null });
     else dispatch({ type: "show-more-settled" });
   };
   const stepOpenThread = (offset: number) => {
     if (shelfThreadRows.length === 0) return;
     const current = shelfThreadRows.findIndex((row) => row.id === state.threadId);
+    if (shelfRow?.kind === "all-projects") {
+      openShelfRow(shelfThreadRows[offset > 0 ? 0 : shelfThreadRows.length - 1]!);
+      return;
+    }
+    // Plain arrows scroll a conversation, so this is the arrow key that reaches the way out.
+    if (offset < 0 && current === 0 && shelfRows[0]?.kind === "all-projects") {
+      if (state.route === "conversation") dispatch({ type: "back" });
+      dispatch({ type: "select-shelf-row", rowId: shelfRows[0].id });
+      return;
+    }
     const next = (current + offset + shelfThreadRows.length) % shelfThreadRows.length;
     openShelfRow(shelfThreadRows[next]!);
   };

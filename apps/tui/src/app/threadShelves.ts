@@ -60,7 +60,9 @@ export type ShelfRow =
       readonly count: number;
       readonly expanded: boolean;
     }
-  | { readonly kind: "more"; readonly id: string; readonly count: number };
+  | { readonly kind: "more"; readonly id: string; readonly count: number }
+  /** Leads a list narrowed to one project, as the way back out to all of them. */
+  | { readonly kind: "all-projects"; readonly id: "all-projects" };
 
 export const shelfRowHeight = (row: ShelfRow) =>
   row.kind !== "thread" ? 1 : row.variant === "card" ? 4 : row.variant === "search" ? 2 : 1;
@@ -372,6 +374,7 @@ export function buildShelfRows(input: BuildShelfRowsInput): readonly ShelfRow[] 
     .sort((left, right) => right.at - left.at || left.thread.id.localeCompare(right.thread.id))
     .map(({ thread }) => thread);
   return [
+    ...(input.projectScope === null ? [] : [{ kind: "all-projects", id: "all-projects" } as const]),
     ...sortPinnedThreadsByOrderKey(shelves.pinned).map((thread) =>
       threadRow(thread, "pinned", "card"),
     ),
@@ -417,8 +420,10 @@ export function resolveShelfCursor(
   const atCursor = rows.findIndex((row) => row.id === state.shelfCursor);
   if (atCursor >= 0) return atCursor;
   // A row that just left (settled, snoozed) hands the cursor to whatever took its place, so triage
-  // keeps its position instead of jumping back to the top.
-  return rows.length > 0 ? Math.min(previousIndex, rows.length - 1) : -1;
+  // keeps its position instead of jumping back to the top. Leaving the project has to be chosen,
+  // so an Enter meant for a thread cannot land on the row that does it.
+  const index = rows.length > 0 ? Math.min(previousIndex, rows.length - 1) : -1;
+  return rows[index]?.kind === "all-projects" && rows.length > 1 ? index + 1 : index;
 }
 
 export const threadRowsOf = (rows: readonly ShelfRow[]) =>
