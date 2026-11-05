@@ -162,17 +162,23 @@ export function openTuiSessionState(options: {
   const write = db.prepare(
     "INSERT INTO ui_state_v2 (session, scope, field, value) VALUES (?, ?, ?, ?) ON CONFLICT (session, scope, field) DO UPDATE SET value = excluded.value",
   );
+  const erase = db.prepare("DELETE FROM ui_state_v2 WHERE session = ? AND scope = ? AND field = ?");
   // Reference equality avoids reserializing large attachments on every draft keystroke.
   const previous = new Map<string, Record<string, unknown>>();
   const save = (scope: string, fields: Record<string, unknown>) => {
     if (closed) return;
     const prior = previous.get(scope);
     const changed = Object.entries(fields).filter(([key, value]) => !prior || prior[key] !== value);
-    if (!changed.length) return;
+    // Leaving a field out clears it, so its row has to go or the old value returns next launch.
+    const removed = Object.keys(saved.get(scope) ?? {}).filter(
+      (field) => !Object.hasOwn(fields, field),
+    );
+    if (!changed.length && !removed.length) return;
     try {
       db.exec("BEGIN IMMEDIATE");
       for (const [field, value] of changed)
         write.run(session.id, scope, field, JSON.stringify(value));
+      for (const field of removed) erase.run(session.id, scope, field);
       db.exec("COMMIT");
       previous.set(scope, fields);
       saved.set(scope, fields);

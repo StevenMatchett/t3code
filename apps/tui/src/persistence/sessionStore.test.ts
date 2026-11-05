@@ -130,6 +130,44 @@ describe("TUI session persistence", () => {
     });
     expect(open(path).session.shell?.showSubagents).toBeUndefined();
   });
+  it("forgets a cleared project filter and expanded rows on restart", () => {
+    const path = directory();
+    const project = ProjectId.make("project-1");
+    const shell = {
+      route: "threads",
+      sidebarView: "recent",
+      projectId: project,
+      threadId: null,
+      overlays: [],
+    } as const;
+    const filtered = {
+      ...shell,
+      projectScope: project,
+      expandedProjects: [project],
+      expandedShelves: ["settled"],
+    } as const;
+    const first = open(path);
+    first.session.saveShell(filtered);
+    first.session.close();
+
+    // Cleared by a later launch, with nothing else about the shell changing.
+    const second = open(path);
+    expect(second.session.shell).toMatchObject({
+      projectScope: project,
+      expandedProjects: [project],
+      expandedShelves: ["settled"],
+    });
+    second.session.saveShell(shell);
+    second.session.close();
+    const third = open(path);
+    expect(third.session.shell).toEqual(shell);
+
+    // Set and cleared within one sitting.
+    third.session.saveShell(filtered);
+    third.session.saveShell(shell);
+    third.session.close();
+    expect(open(path).session.shell).toEqual(shell);
+  });
   it("restores navigation, folded pastes and attachments in a fresh client", async () => {
     const path = directory();
     const first = open(path);
