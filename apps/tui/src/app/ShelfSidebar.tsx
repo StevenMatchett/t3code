@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   resolveThreadPullRequestBadge,
   visibleThreadPullRequests,
@@ -284,8 +284,11 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
   const selectionColor = useThemeColor("selection");
   const { rows, cursor, scopeTitle, filter, filtering } = props;
   const searching = filtering || filter !== undefined;
-  // The way out stays on a project with no threads, and the reason for the empty list stays too.
-  const onlyAllProjects = rows.length === 1 && rows[0]?.kind === "all-projects";
+  // The dropdown lives in the header, so the list below holds only what follows it.
+  const atScope = rows[cursor]?.kind === "project-scope";
+  const scopeRows = rows[0]?.kind === "project-scope" ? 1 : 0;
+  const listed = useMemo(() => rows.slice(scopeRows), [rows, scopeRows]);
+  const listCursor = cursor - scopeRows;
   const empty: ReactNode = props.error ? (
     <ErrorState title="Connection unavailable. R retries." />
   ) : !props.loaded ? (
@@ -326,7 +329,8 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
             {props.hasProjects ? (
               <Button
                 id="sidebar-scope"
-                label={`[${scopeTitle ? inlineTerminalText(scopeTitle) : "All projects"} ${resolveGlyph("expanded", capabilities.unicode)}]`}
+                label={`${atScope && props.focused ? ">" : ""}[${scopeTitle ? inlineTerminalText(scopeTitle) : "All projects"} ${resolveGlyph("expanded", capabilities.unicode)}]`}
+                focused={atScope && props.focused}
                 flexGrow={1}
                 flexShrink={1}
                 minWidth={0}
@@ -348,9 +352,9 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
         )}
       </Stack>
       <ListView<ShelfRow>
-        items={rows}
-        selected={cursor}
-        height={onlyAllProjects ? 1 : Math.max(1, props.height - 1)}
+        items={listed}
+        selected={listCursor}
+        height={Math.max(1, props.height - 1)}
         rowHeight={shelfRowHeight}
         pushDown={(row) => row.kind === "shelf"}
         itemKey={(row) => row.id}
@@ -363,8 +367,9 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
           if (row.kind === "thread") props.onThreadContextMenu?.(row.thread, position);
         }}
         renderItem={(row, index) => {
-          const selected = index === cursor;
+          const selected = index === listCursor;
           const background = selected && selectionColor ? { backgroundColor: selectionColor } : {};
+          if (row.kind === "project-scope") return null;
           if (row.kind === "shelf") {
             const glyph = resolveGlyph(
               row.expanded ? "expanded" : "collapsed",
@@ -384,20 +389,6 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
               </Stack>
             );
           }
-          if (row.kind === "all-projects")
-            return (
-              <Stack height={1} width="100%" {...background}>
-                <Text
-                  height={1}
-                  wrapMode="none"
-                  truncate
-                  tone={selected && props.focused ? "accent" : "muted"}
-                  strong={selected && props.focused}
-                >
-                  {`${selected ? ">" : " "} ${capabilities.unicode ? "←" : "<"} All projects`}
-                </Text>
-              </Stack>
-            );
           if (row.kind === "more")
             return (
               <Stack height={1} width="100%" {...background}>
@@ -435,7 +426,6 @@ export function ShelfSidebar(props: ShelfSidebarProps) {
           );
         }}
       />
-      {onlyAllProjects ? empty : null}
     </Stack>
   );
 }

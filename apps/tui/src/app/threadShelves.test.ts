@@ -69,6 +69,7 @@ const rowsFor = (
     now: NOW,
     live: true,
     projectScope: null,
+    scopeReachable: false,
     expandedShelves: [],
     settledLimit: 10,
     openThreadId: null,
@@ -159,36 +160,28 @@ describe("inbox shelves", () => {
   });
 });
 
-describe("all projects row", () => {
-  const threads = [
-    thread("first", { projectId: ProjectId.make("alpha") }),
-    thread("second", { projectId: ProjectId.make("alpha") }),
-    thread("elsewhere", { projectId: ProjectId.make("beta") }),
-  ];
-  const scoped = { projectScope: ProjectId.make("alpha") };
+describe("project dropdown row", () => {
+  const threads = [thread("first"), thread("second")];
+  const reachable = { scopeReachable: true };
 
-  it("leads a list narrowed to one project, and only then", () => {
-    expect(ids(rowsFor(threads, scoped)).slice(0, 1)).toEqual(["all-projects"]);
-    expect(ids(rowsFor(threads))).not.toContain("all-projects");
-  });
-
-  it("stays when the project has no threads, so there is still a way out", () => {
-    expect(ids(rowsFor([], scoped))).toEqual(["all-projects"]);
+  it("comes before the first row whenever the dropdown is on screen", () => {
+    expect(ids(rowsFor(threads, reachable)).slice(0, 1)).toEqual(["project-scope"]);
+    expect(ids(rowsFor(threads))).not.toContain("project-scope");
+    expect(ids(rowsFor([], reachable))).toEqual(["project-scope"]);
   });
 
   it("leaves search results alone, so Enter still opens the top match", () => {
-    expect(ids(rowsFor(threads, { ...scoped, filter: "first" }))).not.toContain("all-projects");
+    expect(ids(rowsFor(threads, { ...reachable, filter: "first" }))).not.toContain("project-scope");
   });
 
   it("is only reached by moving to it", () => {
-    const rows = rowsFor(threads, scoped);
+    const rows = rowsFor(threads, reachable);
     const state = { route: "threads", threadId: null };
     expect(rows[resolveShelfCursor(rows, state, 0)]?.kind).toBe("thread");
-    expect(rows[resolveShelfCursor(rows, { ...state, shelfCursor: "all-projects" }, 0)]?.kind).toBe(
-      "all-projects",
-    );
-    const alone = rowsFor([], scoped);
-    expect(resolveShelfCursor(alone, state, 0)).toBe(0);
+    expect(
+      rows[resolveShelfCursor(rows, { ...state, shelfCursor: "project-scope" }, 0)]?.kind,
+    ).toBe("project-scope");
+    expect(resolveShelfCursor(rowsFor([], reachable), state, 0)).toBe(0);
   });
 });
 

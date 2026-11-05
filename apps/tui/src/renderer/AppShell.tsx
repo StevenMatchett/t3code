@@ -187,6 +187,8 @@ function AppShellContent({
     createInboxTracker(() => bumpInbox((version) => version + 1)),
   );
   useEffect(() => () => inboxTracker.dispose(), [inboxTracker]);
+  const [filtering, setFiltering] = useState(false);
+  const scopeReachable = rows.projects.length > 0 && !filtering && state.filter === undefined;
   const shelfRows = useMemo<readonly ShelfRow[]>(() => {
     if (!shelvesActive) return [];
     const threads = sidebarThreads(rows.threads, state);
@@ -200,6 +202,7 @@ function AppShellContent({
       now: shelfNow,
       live,
       projectScope: state.projectScope ?? null,
+      scopeReachable,
       expandedShelves: state.expandedShelves ?? [],
       settledLimit: state.settledLimit ?? SETTLED_FIRST_PAGE,
       openThreadId: state.route === "conversation" ? state.threadId : null,
@@ -215,6 +218,7 @@ function AppShellContent({
     shelfNow,
     live,
     state.projectScope,
+    scopeReachable,
     state.expandedShelves,
     state.settledLimit,
     state.route,
@@ -532,7 +536,6 @@ function AppShellContent({
       },
     },
   });
-  const [filtering, setFiltering] = useState(false);
   const moveSelection = (offset: number, wrap = false) => {
     if (!shelvesActive) {
       dispatch({ type: "move", offset, wrap });
@@ -635,14 +638,14 @@ function AppShellContent({
             label:
               shelfRow?.kind === "thread"
                 ? "Select"
-                : shelfRow?.kind === "all-projects"
-                  ? "All projects"
+                : shelfRow?.kind === "project-scope"
+                  ? "Project"
                   : "Expand",
             title:
               shelfRow?.kind === "thread"
                 ? "Select this thread"
-                : shelfRow?.kind === "all-projects"
-                  ? "Show all projects"
+                : shelfRow?.kind === "project-scope"
+                  ? "Choose a project"
                   : "Open or close this shelf",
             run: () => {
               if (shelfRow?.kind === "thread") toggleRowMark(shelfRow.id);

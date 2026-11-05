@@ -61,8 +61,8 @@ export type ShelfRow =
       readonly expanded: boolean;
     }
   | { readonly kind: "more"; readonly id: string; readonly count: number }
-  /** Leads a list narrowed to one project, as the way back out to all of them. */
-  | { readonly kind: "all-projects"; readonly id: "all-projects" };
+  /** The project dropdown above the list, which arrow keys reach as the row before the first. */
+  | { readonly kind: "project-scope"; readonly id: "project-scope" };
 
 export const shelfRowHeight = (row: ShelfRow) =>
   row.kind !== "thread" ? 1 : row.variant === "card" ? 4 : row.variant === "search" ? 2 : 1;
@@ -274,6 +274,8 @@ export interface BuildShelfRowsInput {
   readonly now: string;
   readonly live: boolean;
   readonly projectScope: TuiThreadShell["projectId"] | null;
+  /** The project dropdown is on screen, so the cursor can stop on it. */
+  readonly scopeReachable: boolean;
   readonly expandedShelves: readonly CollapsibleShelf[];
   readonly settledLimit: number;
   /** The open thread stays on screen even when its shelf is collapsed. */
@@ -374,7 +376,7 @@ export function buildShelfRows(input: BuildShelfRowsInput): readonly ShelfRow[] 
     .sort((left, right) => right.at - left.at || left.thread.id.localeCompare(right.thread.id))
     .map(({ thread }) => thread);
   return [
-    ...(input.projectScope === null ? [] : [{ kind: "all-projects", id: "all-projects" } as const]),
+    ...(input.scopeReachable ? [{ kind: "project-scope", id: "project-scope" } as const] : []),
     ...sortPinnedThreadsByOrderKey(shelves.pinned).map((thread) =>
       threadRow(thread, "pinned", "card"),
     ),
@@ -420,10 +422,10 @@ export function resolveShelfCursor(
   const atCursor = rows.findIndex((row) => row.id === state.shelfCursor);
   if (atCursor >= 0) return atCursor;
   // A row that just left (settled, snoozed) hands the cursor to whatever took its place, so triage
-  // keeps its position instead of jumping back to the top. Leaving the project has to be chosen,
-  // so an Enter meant for a thread cannot land on the row that does it.
+  // keeps its position instead of jumping back to the top. The dropdown has to be moved to, so an
+  // Enter meant for a thread cannot open it.
   const index = rows.length > 0 ? Math.min(previousIndex, rows.length - 1) : -1;
-  return rows[index]?.kind === "all-projects" && rows.length > 1 ? index + 1 : index;
+  return rows[index]?.kind === "project-scope" && rows.length > 1 ? index + 1 : index;
 }
 
 export const threadRowsOf = (rows: readonly ShelfRow[]) =>

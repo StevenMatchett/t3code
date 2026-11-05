@@ -1770,30 +1770,46 @@ describe("inbox sidebar", () => {
     await driver.flush();
   };
 
-  it("offers a row back to all projects while filtered to one", async () => {
+  it("moves up from the first thread onto the project dropdown, and Enter opens it", async () => {
     const { driver } = await setupInbox();
-    expect(rowOf(driver, "all-projects")).toBeUndefined();
-
     await filterTo(driver, "Atlas");
     expect(driver.captureFrame()).toContain("[Atlas");
-    expect(rowOf(driver, "all-projects")).toBeDefined();
-    // Filtering leaves the cursor on a thread, so Enter does not undo what was just chosen.
-    expect(driver.captureFrame()).toContain("  ← All projects");
+    // Filtering leaves the cursor on a thread, and the list gains no extra row.
     expect(driver.captureFrame()).toContain("> Add project search");
+    expect(driver.captureFrame()).not.toContain(">[Atlas");
+    expect(driver.captureFrame()).not.toContain("←");
 
     await driver.input.pressKey("ARROW_UP");
     await driver.flush();
-    expect(driver.captureFrame()).toContain("> ← All projects");
-    expect(driver.captureFrame()).toContain("Enter shows all projects.");
+    expect(driver.captureFrame()).toContain(">[Atlas");
+    expect(driver.captureFrame()).not.toContain("> Add project search");
+    expect(driver.captureFrame()).toContain("Enter chooses a project.");
 
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.flush();
+    expect(driver.captureFrame()).not.toContain(">[Atlas");
+    expect(driver.captureFrame()).toContain("> Add project search");
+
+    await driver.input.pressKey("ARROW_UP");
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("Filter by project");
+
+    // All projects leads the picker, so one more Enter clears the filter.
     await driver.input.pressKey("RETURN");
     await driver.flush();
     expect(driver.captureFrame()).toContain("[All projects");
-    expect(rowOf(driver, "all-projects")).toBeUndefined();
     expect(rowOf(driver, "thread-2")).toBeDefined();
   });
 
-  it("reaches the row with Alt+Up from a conversation, and Alt+Down returns", async () => {
+  it("stops on the dropdown with no filter too", async () => {
+    const { driver } = await setupInbox();
+    await driver.input.pressKey("ARROW_UP");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain(">[All projects");
+  });
+
+  it("reaches the dropdown with Alt+Up from a filtered conversation", async () => {
     const { driver } = await setupInbox();
     await filterTo(driver, "Atlas");
     await driver.input.pressKey("RETURN");
@@ -1801,22 +1817,16 @@ describe("inbox sidebar", () => {
     // Plain arrows belong to the conversation.
     await driver.input.pressKey("ARROW_UP");
     await driver.flush();
-    expect(driver.captureFrame()).not.toContain("> ← All projects");
+    expect(driver.captureFrame()).not.toContain(">[Atlas");
 
     await driver.input.pressKey("ARROW_UP", { meta: true });
     await driver.flush();
-    expect(driver.captureFrame()).toContain("> ← All projects");
-    expect(driver.captureFrame()).toContain("Enter shows all projects.");
+    expect(driver.captureFrame()).toContain(">[Atlas");
 
     await driver.input.pressKey("ARROW_DOWN", { meta: true });
     await driver.flush();
-    expect(driver.captureFrame()).toContain("  ← All projects");
+    expect(driver.captureFrame()).not.toContain(">[Atlas");
     expect(driver.captureFrame()).toContain("> Add project search");
-
-    await driver.input.pressKey("ARROW_UP", { meta: true });
-    await driver.input.pressKey("RETURN");
-    await driver.flush();
-    expect(driver.captureFrame()).toContain("[All projects");
   });
 
   it("still wraps with Alt+Up when no project is filtered", async () => {
@@ -1826,20 +1836,10 @@ describe("inbox sidebar", () => {
     await driver.input.pressKey("ARROW_UP", { meta: true });
     await driver.flush();
     expect(driver.captureFrame()).not.toContain("> Add project search");
-    expect(rowOf(driver, "all-projects")).toBeUndefined();
+    expect(driver.captureFrame()).not.toContain(">[All projects");
   });
 
-  it("goes back to all projects when the row is clicked", async () => {
-    const { driver } = await setupInbox();
-    await filterTo(driver, "Atlas");
-    const row = rowOf(driver, "all-projects")!;
-    await driver.mouse.click(row.screenX + 2, row.screenY, MouseButtons.LEFT, { delayMs: 0 });
-    await driver.flush();
-    expect(driver.captureFrame()).toContain("[All projects");
-    expect(rowOf(driver, "all-projects")).toBeUndefined();
-  });
-
-  it("keeps the way out and the reason on a project with no threads", async () => {
+  it("keeps the dropdown and the reason on a project with no threads", async () => {
     const { driver, fixture } = await setupInbox();
     await filterTo(driver, "Atlas");
     const atlas = fixture.threads[0]!.projectId;
@@ -1853,13 +1853,23 @@ describe("inbox sidebar", () => {
       })),
     );
     await driver.flush();
-    expect(driver.captureFrame()).toContain("← All projects");
+    expect(driver.captureFrame()).toContain(">[Atlas");
     expect(driver.captureFrame()).toContain("No threads in Atlas yet.");
 
     await driver.input.pressKey("RETURN");
     await driver.flush();
-    expect(driver.captureFrame()).toContain("[All projects");
-    expect(driver.captureFrame()).not.toContain("No threads in Atlas yet.");
+    expect(driver.captureFrame()).toContain("Filter by project");
+  });
+
+  it("does not stop on the dropdown while searching", async () => {
+    const { driver } = await setupInbox();
+    await driver.input.typeText("/");
+    await driver.flush();
+    expect(rowOf(driver, "project-scope")).toBeUndefined();
+    expect(driver.captureFrame()).not.toContain("[All projects");
+    await driver.input.pressKey("ARROW_UP");
+    await driver.flush();
+    expect(driver.captureFrame()).toContain("> Add project search");
   });
 
   it("settles from the keyboard, keeps the cursor in place, and Ctrl+Z undoes it", async () => {

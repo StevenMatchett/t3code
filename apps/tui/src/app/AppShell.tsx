@@ -652,8 +652,8 @@ export function AppShellView({
               ? "Enter or Space opens this shelf."
               : shelfRow?.kind === "more"
                 ? "Enter shows more."
-                : shelfRow?.kind === "all-projects"
-                  ? "Enter shows all projects."
+                : shelfRow?.kind === "project-scope"
+                  ? "Enter chooses a project."
                   : "No thread selected.",
         ];
   const preview = (
