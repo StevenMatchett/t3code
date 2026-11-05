@@ -49,7 +49,8 @@ export function DiffText({
   };
   const signColor = useThemeColor(rowTone(row.kind));
   const isCode = row.kind === "add" || row.kind === "del" || row.kind === "context";
-  const shown = text ?? row.raw;
+  // Diffs carry third-party text, so every caller's row is cleaned here before it can be drawn.
+  const shown = inlineTerminalText(text ?? row.raw);
   const sign = isCode ? shown.slice(0, 1) : "";
   const tokens = isCode
     ? diffSyntaxTokens(shown.slice(1), path)
@@ -412,7 +413,9 @@ export function ThreadDiff({
       ) : comment !== null ? (
         <Stack height={1} flexShrink={0} flexDirection="row" gap={1}>
           <Text height={1} flexShrink={0} tone="muted" wrapMode="none">
-            {`${file?.path ?? ""}:${targetLine ?? ""}`.slice(-Math.floor(width / 3))}
+            {inlineTerminalText(`${file?.path ?? ""}:${targetLine ?? ""}`).slice(
+              -Math.floor(width / 3),
+            )}
           </Text>
           <FormInput
             id="diff-comment"

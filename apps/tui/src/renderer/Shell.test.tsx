@@ -698,6 +698,37 @@ describe("help rows", () => {
   });
 });
 
+/** Text no terminal should ever receive from a diff: CSI, OSC, and C0 and C1 controls. */
+const UNSAFE_DIFF = [
+  "diff --git a/src/x.ts b/src/x.ts",
+  "index 1\u001b]0;PWNED\u0007..2 100644",
+  "--- a/src/x.ts",
+  "+++ b/src/x.ts",
+  "@@ -1,2 +1,5 @@ top\u001b[2Jhunk",
+  "-gone \u001b]0;PWNED\u001b\\left",
+  "+evil \u001b[31mRED\u001b[0m \u001b]0;PWNED\u0007tail",
+  "+c0 a\u0001b\u0008c\u007fd",
+  "+c1 e\u009b31mf\u009d0;PWNED\u009cg\u0085h",
+  " keep\u001bPdcs\u001b\\ row",
+].join("\n");
+const SAFE_LINES = [
+  "tophunk",
+  "gone left",
+  "evil RED tail",
+  "c0 abcd",
+  "c1 efgh",
+  "keep row",
+] as const;
+
+// oxlint-disable-next-line no-control-regex -- control characters are what these tests look for.
+const TERMINAL_CONTROLS = /[\u0000-\u001f\u007f-\u009f]/u;
+
+function expectSanitizedDiff(frame: string) {
+  expect(frame.replaceAll("\n", "")).not.toMatch(TERMINAL_CONTROLS);
+  expect(frame).not.toContain("PWNED");
+  for (const line of SAFE_LINES) expect(frame).toContain(line);
+}
+
 describe("diff viewer", () => {
   const DIFF = [
     "diff --git a/src/a.ts b/src/a.ts",
@@ -709,13 +740,13 @@ describe("diff viewer", () => {
     "+const fresh = 3;",
     "+const more = 4;",
   ].join("\n");
-  async function openDiff(width: number, height: number) {
+  async function openDiff(width: number, height: number, diff = DIFF) {
     const fixture = makeDesignFixture();
     const client = {
       ...fixture.client,
       diffs: {
         ...fixture.client.diffs,
-        fullThreadDiff: () => Atom.make(AsyncResult.success({ diff: DIFF })),
+        fullThreadDiff: () => Atom.make(AsyncResult.success({ diff })),
       } as never,
     };
     const driver = await createTuiTestDriver(<AppShell client={client} />, {
@@ -742,6 +773,49 @@ describe("diff viewer", () => {
     await driver.input.pressKey("v");
     await driver.flush();
     expect(row()).not.toContain("const fresh");
+  });
+
+  it("draws no terminal control characters from a diff, side by side or unified", async () => {
+    const { driver } = await openDiff(200, 60, UNSAFE_DIFF);
+    expect(
+      driver
+        .captureRawFrame()
+        .split("\n")
+        .find((line) => line.includes("gone left")),
+    ).toContain("evil RED tail");
+    expectSanitizedDiff(driver.captureRawFrame());
+    await driver.input.pressKey("v");
+    await driver.flush();
+    expect(
+      driver
+        .captureRawFrame()
+        .split("\n")
+        .find((line) => line.includes("gone left")),
+    ).not.toContain("evil RED tail");
+    expectSanitizedDiff(driver.captureRawFrame());
+  });
+
+  it("draws no terminal control characters from a file name in the comment prompt", async () => {
+    const { driver } = await openDiff(
+      200,
+      60,
+      [
+        "diff --git a/x.ts b/x.ts",
+        '+++ "b/\\u001b]0;PWNED\\u0007x.ts"',
+        "@@ -1 +1 @@",
+        "+line",
+      ].join("\n"),
+    );
+    await driver.input.pressKey("TAB");
+    for (let index = 0; index < 3; index += 1) await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("c");
+    await driver.flush();
+    const frame = driver.captureRawFrame();
+    // The header row above shows the escape as harmless literal text, so check the prompt itself.
+    const prompt = frame.split("\n").find((line) => line.includes("Comment on this line"));
+    expect(prompt).toContain("x.ts:1");
+    expect(prompt).not.toContain("PWNED");
+    expect(frame.replaceAll("\n", "")).not.toMatch(TERMINAL_CONTROLS);
   });
 
   it("stays unified where two columns would not be readable", async () => {
@@ -1017,9 +1091,20 @@ describe("fork from a run", () => {
 });
 
 describe("pull requests", () => {
-  async function openList() {
+  async function openList(patch?: string) {
     const fixture = makeClientFixture();
-    const driver = await createTuiTestDriver(<AppShell client={fixture.client} />, {
+    const client =
+      patch === undefined
+        ? fixture.client
+        : {
+            ...fixture.client,
+            pullRequests: {
+              ...fixture.client.pullRequests,
+              diff: () =>
+                Atom.make(AsyncResult.success({ patch, truncated: false, nextCursor: null })),
+            } as never,
+          };
+    const driver = await createTuiTestDriver(<AppShell client={client} />, {
       width: 120,
       height: 40,
       kittyKeyboard: true,
@@ -1157,6 +1242,14 @@ describe("pull requests", () => {
         comments: [{ path: "src/a.ts", position: { kind: "added", newLine: 1 }, body: "Why two?" }],
       },
     ]);
+  });
+
+  it("draws no terminal control characters from a pull request's code", async () => {
+    const { driver } = await openList(UNSAFE_DIFF);
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    expectSanitizedDiff(driver.captureRawFrame());
   });
 
   it("moves through a stack with the bracket keys", async () => {
