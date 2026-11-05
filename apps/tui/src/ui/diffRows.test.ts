@@ -98,4 +98,118 @@ describe("diff file tree", () => {
       0, 1, 2, 3, 4,
     ]);
   });
+
+  const drawn = (paths: readonly string[]) =>
+    diffFileTree(paths.map(file)).map((row) => `${"  ".repeat(row.depth)}${row.label}`);
+
+  /** Each file's path as a reader follows the indentation, and every row's id. */
+  const followed = (paths: readonly string[]) => {
+    const rows = diffFileTree(paths.map(file));
+    const headings: string[] = [];
+    return {
+      ids: rows.map((row) => row.id),
+      paths: rows.flatMap((row) => {
+        headings.length = row.depth;
+        if (row.kind === "directory") {
+          headings[row.depth] = row.label;
+          return [];
+        }
+        return [`${headings.join("")}${row.label.replace(" +1 -0", "")}`];
+      }),
+    };
+  };
+
+  it("puts a sibling file after a deeper directory back in its own directory", () => {
+    expect(drawn(["src/a/b/c.ts", "src/a/d.ts"])).toEqual([
+      "src/a/",
+      "  b/",
+      "    c.ts +1 -0",
+      "  d.ts +1 -0",
+    ]);
+  });
+
+  it("keeps sibling directories level instead of nesting each inside the last", () => {
+    expect(drawn(["src/a/b/c.ts", "src/a/d.ts", "src/e/f.ts", "src/g/h.ts", "src/i/j.ts"])).toEqual(
+      [
+        "src/",
+        "  a/",
+        "    b/",
+        "      c.ts +1 -0",
+        "    d.ts +1 -0",
+        "  e/",
+        "    f.ts +1 -0",
+        "  g/",
+        "    h.ts +1 -0",
+        "  i/",
+        "    j.ts +1 -0",
+      ],
+    );
+  });
+
+  it("starts each top-level directory at the left edge", () => {
+    expect(drawn(["a/x.ts", "b/y.ts", "c/d/z.ts"])).toEqual([
+      "a/",
+      "  x.ts +1 -0",
+      "b/",
+      "  y.ts +1 -0",
+      "c/d/",
+      "  z.ts +1 -0",
+    ]);
+  });
+
+  it("keeps root files at the root wherever they fall between directories", () => {
+    expect(drawn(["README.md", "a/x.ts", "b.md", "c/y.ts", "z.md"])).toEqual([
+      "README.md +1 -0",
+      "a/",
+      "  x.ts +1 -0",
+      "b.md +1 -0",
+      "c/",
+      "  y.ts +1 -0",
+      "z.md +1 -0",
+    ]);
+  });
+
+  it("keeps the given file order when a directory comes back", () => {
+    const paths = ["a/x.ts", "b/y.ts", "a/z.ts"];
+    expect(drawn(paths)).toEqual([
+      "a/",
+      "  x.ts +1 -0",
+      "b/",
+      "  y.ts +1 -0",
+      "a/",
+      "  z.ts +1 -0",
+    ]);
+    const { ids } = followed(paths);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("files this branch's own diff where each file really is", () => {
+    const paths = [
+      "README.md",
+      "apps/tui/src/app/state.ts",
+      "apps/tui/src/features/git/gitMenu.ts",
+      "apps/tui/src/features/git/pullRequestView.ts",
+      "apps/tui/src/renderer/HelpPanel.tsx",
+      "apps/tui/src/ui/conversationLines.test.ts",
+      "apps/tui/src/ui/conversationLines.ts",
+      "apps/tui/src/ui/diffFiles.ts",
+      "apps/tui/src/ui/diffRows.test.ts",
+      "apps/tui/src/ui/diffRows.ts",
+      "apps/tui/src/ui/diffSyntax.ts",
+      "apps/tui/src/ui/textLayout.ts",
+    ];
+    expect(followed(paths).paths).toEqual(paths);
+    expect(drawn(paths).slice(0, 10)).toEqual([
+      "README.md +1 -0",
+      "apps/tui/src/",
+      "  app/",
+      "    state.ts +1 -0",
+      "  features/git/",
+      "    gitMenu.ts +1 -0",
+      "    pullRequestView.ts +1 -0",
+      "  renderer/",
+      "    HelpPanel.tsx +1 -0",
+      "  ui/",
+    ]);
+  });
 });

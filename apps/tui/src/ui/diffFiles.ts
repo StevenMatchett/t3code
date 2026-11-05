@@ -71,32 +71,47 @@ export type DiffTreeRow =
  */
 export function diffFileTree(files: readonly DiffFile[]): readonly DiffTreeRow[] {
   const rows: DiffTreeRow[] = [];
-  let open: readonly string[] = [];
-  let headingDepth = 0;
-  files.forEach((file, fileIndex) => {
-    const parts = file.path.split("/");
-    const name = parts.pop()!;
-    let shared = 0;
-    while (shared < open.length && open[shared] === parts[shared]) shared += 1;
-    open = open.slice(0, shared);
-    // One heading for the directories this file newly enters, so deep paths do not stair-step.
-    if (parts.length > shared) {
-      headingDepth = shared === 0 ? 0 : headingDepth + 1;
+  const entries = files.map((file, fileIndex) => ({
+    file,
+    fileIndex,
+    directories: file.path.split("/").slice(0, -1),
+  }));
+  const walk = (run: typeof entries, level: number, depth: number) => {
+    let index = 0;
+    while (index < run.length) {
+      const { file, fileIndex, directories } = run[index]!;
+      if (directories.length === level) {
+        rows.push({
+          kind: "file",
+          id: file.id,
+          label: `${file.path.split("/").at(-1)} +${file.additions} -${file.deletions}`,
+          depth,
+          fileIndex,
+        });
+        index += 1;
+        continue;
+      }
+      let end = index + 1;
+      while (run[end]?.directories[level] === directories[level]) end += 1;
+      const group = run.slice(index, end);
+      // Directories holding only one directory share its heading, so deep paths do not stair-step.
+      let shared = level + 1;
+      while (
+        shared < directories.length &&
+        group.every((entry) => entry.directories[shared] === directories[shared])
+      )
+        shared += 1;
       rows.push({
         kind: "directory",
-        id: `directory:${parts.join("/")}`,
-        label: `${parts.slice(shared).join("/")}/`,
-        depth: headingDepth,
+        // A directory can come back in an unsorted list, so its first file tells the headings apart.
+        id: `directory:${fileIndex}:${directories.slice(0, shared).join("/")}`,
+        label: `${directories.slice(level, shared).join("/")}/`,
+        depth,
       });
-      open = parts;
+      walk(group, shared, depth + 1);
+      index = end;
     }
-    rows.push({
-      kind: "file",
-      id: file.id,
-      label: `${name} +${file.additions} -${file.deletions}`,
-      depth: parts.length === 0 ? 0 : headingDepth + 1,
-      fileIndex,
-    });
-  });
+  };
+  walk(entries, 0, 0);
   return rows;
 }
