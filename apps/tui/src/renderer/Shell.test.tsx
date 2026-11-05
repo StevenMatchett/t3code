@@ -1252,6 +1252,100 @@ describe("pull requests", () => {
     expectSanitizedDiff(driver.captureRawFrame());
   });
 
+  const addNote = async (driver: TuiTestDriver, body: string) => {
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    await tick(driver, () => driver.input.pressKey("TAB"));
+    for (let index = 0; index < 5; index += 1)
+      await tick(driver, () => driver.input.pressKey("ARROW_DOWN"));
+    await tick(driver, () => driver.input.pressKey("n"));
+    await driver.input.typeText(body);
+    await driver.flush();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+  };
+
+  it("keeps each pull request's notes while moving through a stack", async () => {
+    const { driver, fixture } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await addNote(driver, "First layer.");
+    expect(driver.captureFrame()).toContain("1 note for your review");
+
+    await tick(driver, () => driver.input.pressKey("]"));
+    expect(driver.captureFrame()).toContain("Stack 2 of 2");
+    expect(driver.captureFrame()).not.toContain("for your review");
+    await addNote(driver, "Second layer.");
+    expect(driver.captureFrame()).toContain("1 note for your review");
+
+    await tick(driver, () => driver.input.pressKey("["));
+    expect(driver.captureFrame()).toContain("Stack 1 of 2");
+    expect(driver.captureFrame()).toContain("1 note for your review");
+
+    await tick(driver, () => driver.input.pressKey("r"));
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(fixture.pullRequestReviews).toMatchObject([
+      { number: 42, comments: [{ body: "First layer." }] },
+    ]);
+    expect(driver.captureFrame()).not.toContain("for your review");
+
+    // Submitting one layer's review leaves the other layer's notes alone.
+    await tick(driver, () => driver.input.pressKey("]"));
+    await tick(driver, () => driver.input.pressKey("r"));
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(fixture.pullRequestReviews[1]).toMatchObject({
+      number: 43,
+      comments: [{ body: "Second layer." }],
+    });
+  });
+
+  it("asks before Esc discards notes, and keeps them unless told otherwise", async () => {
+    const { driver, fixture } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await addNote(driver, "Keep me.");
+
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    expect(driver.captureFrame()).toContain("Discard 1 note on #42? Enter discards, Esc keeps.");
+    expect(driver.captureFrame()).toContain("feature-42 into main");
+
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    expect(driver.captureFrame()).toContain("1 note for your review");
+    expect(driver.captureFrame()).toContain("feature-42 into main");
+
+    await tick(driver, () => driver.input.pressKey("r"));
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(driver.captureFrame()).toContain("#43 Tidy the header");
+    expect(driver.captureFrame()).not.toContain("feature-42 into main");
+
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(driver.captureFrame()).not.toContain("for your review");
+    await tick(driver, () => driver.input.pressKey("r"));
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(fixture.pullRequestReviews).toMatchObject([{ number: 42, comments: [] }]);
+  });
+
+  it("names every layer with notes when Esc would discard them", async () => {
+    const { driver } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await addNote(driver, "First layer.");
+    await tick(driver, () => driver.input.pressKey("]"));
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    expect(driver.captureFrame()).toContain("Discard 1 note on #42? Enter discards, Esc keeps.");
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    await addNote(driver, "Second layer.");
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    expect(driver.captureFrame()).toContain(
+      "Discard 2 notes on #42, #43? Enter discards, Esc keeps.",
+    );
+  });
+
+  it("goes straight back to the list when there are no notes", async () => {
+    const { driver } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    expect(driver.captureFrame()).toContain("#43 Tidy the header");
+    expect(driver.captureFrame()).not.toContain("Discard");
+  });
+
   it("moves through a stack with the bracket keys", async () => {
     const { driver, fixture } = await openList();
     await tick(driver, () => driver.input.pressKey("RETURN"));

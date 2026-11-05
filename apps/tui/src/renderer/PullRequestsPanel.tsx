@@ -45,6 +45,10 @@ const STATES: readonly PullRequestListState[] = ["open", "closed", "merged", "al
 const failureText = (failure: unknown, fallback: string) =>
   failure instanceof Error && failure.message ? failure.message : fallback;
 
+type ReviewNote = PullRequestReviewCommentDraft;
+/** Unsent line notes by pull request number. */
+type ReviewNotes = ReadonlyMap<number, readonly ReviewNote[]>;
+
 /** Pull requests across the environment's projects, with the actions the host allows. */
 export function PullRequestsPanel({
   client,
@@ -101,6 +105,9 @@ function PullRequests({
   const [cursor, setCursor] = useState(0);
   const [filter, setFilter] = useState<string | null>(null);
   const [open, setOpen] = useState<PullRequestListEntry | null>(null);
+  // Outlives the detail view, which remounts per pull request. Leaving that view for the list
+  // settles every note, so these only ever belong to the stack being read.
+  const [notes, setNotes] = useState<ReviewNotes>(new Map());
   const load = useCallback(() => {
     let cancelled = false;
     setError(null);
@@ -161,6 +168,11 @@ function PullRequests({
         key={`${open.repository}#${open.number}`}
         pulls={pulls}
         entry={open}
+        notes={notes}
+        onNotesChange={(number, update) =>
+          setNotes((current) => new Map(current).set(number, update(current.get(number) ?? [])))
+        }
+        onDiscardNotes={() => setNotes(new Map())}
         source={source}
         active={active}
         width={width}
@@ -258,6 +270,9 @@ function reviewPosition(row: DiffRow): PullRequestReviewCommentDraft["position"]
 function PullRequestDetailView({
   pulls,
   entry,
+  notes,
+  onNotesChange,
+  onDiscardNotes,
   source,
   active,
   width,
@@ -269,6 +284,12 @@ function PullRequestDetailView({
   readonly onOpenLayer: (layer: PullRequestStack["layers"][number]) => void;
   readonly pulls: TuiPullRequests;
   readonly entry: PullRequestListEntry;
+  readonly notes: ReviewNotes;
+  readonly onNotesChange: (
+    number: number,
+    update: (current: readonly ReviewNote[]) => readonly ReviewNote[],
+  ) => void;
+  readonly onDiscardNotes: () => void;
   readonly source: Parameters<TuiPullRequests["startThread"]>[2];
   readonly active: boolean;
   readonly width: number;
@@ -290,7 +311,10 @@ function PullRequestDetailView({
   const [stack, setStack] = useState<PullRequestStack | null>(null);
   const [codeCursor, setCodeCursor] = useState(0);
   const [lineComment, setLineComment] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<readonly PullRequestReviewCommentDraft[]>([]);
+  const [discarding, setDiscarding] = useState(false);
+  const drafts = notes.get(entry.number) ?? [];
+  const pendingNotes = [...notes].filter(([, items]) => items.length > 0);
+  const pendingCount = pendingNotes.reduce((total, [, items]) => total + items.length, 0);
   const [review, setReview] = useState<{
     readonly verdict: PullRequestReviewVerdict;
     readonly body: string;
@@ -407,7 +431,7 @@ function PullRequestDetailView({
         body: submitted.body,
         comments: drafts,
       });
-      setDrafts([]);
+      onNotesChange(entry.number, () => []);
       setStatus({ text: "Review submitted.", failed: false });
       load();
     } catch (failure) {
@@ -442,7 +466,8 @@ function PullRequestDetailView({
         const body = lineComment?.trim();
         if (!body || !commentable) return;
         const path = diffPath(codeRows, Math.min(codeCursor, codeRows.length - 1));
-        setDrafts((current) => [...current, { path, position: reviewPosition(commentable), body }]);
+        const note = { path, position: reviewPosition(commentable), body };
+        onNotesChange(entry.number, (current) => [...current, note]);
         setLineComment(null);
       },
       "pullRequestLineComment.cancel": () => setLineComment(null),
@@ -465,7 +490,7 @@ function PullRequestDetailView({
     },
   });
   useKeyLayer("pullRequestDetail", {
-    active: active && confirming === null && review === null && lineComment === null,
+    active: active && confirming === null && !discarding && review === null && lineComment === null,
     modal: true,
     bindings: {
       "pullRequestDetail.lineComment": {
@@ -492,7 +517,13 @@ function PullRequestDetailView({
         enabled: !busy && verdicts.length > 0 && detail?.state === "open",
         run: () => setReview({ verdict: verdicts[0]!, body: "" }),
       },
-      "pullRequestDetail.back": { enabled: !busy, run: onBack },
+      "pullRequestDetail.back": {
+        enabled: !busy,
+        run: () => {
+          if (pendingCount > 0) setDiscarding(true);
+          else onBack();
+        },
+      },
       "pullRequestDetail.up": () => {
         if (view === "code") moveCode(codeCursor - 1);
         else scroll(start - 1);
@@ -528,13 +559,19 @@ function PullRequestDetailView({
     },
   });
   useKeyLayer("pullRequestConfirm", {
-    active: active && confirming !== null,
+    active: active && (confirming !== null || discarding),
     modal: true,
     bindings: {
       "pullRequestConfirm.yes": () => {
-        if (confirming) void run(confirming);
+        if (discarding) {
+          onDiscardNotes();
+          onBack();
+        } else if (confirming) void run(confirming);
       },
-      "pullRequestConfirm.no": () => setConfirming(null),
+      "pullRequestConfirm.no": () => {
+        setConfirming(null);
+        setDiscarding(false);
+      },
     },
   });
   return (
@@ -625,24 +662,28 @@ function PullRequestDetailView({
           flexShrink={0}
           wrapMode="none"
           truncate
-          tone={confirming ? "warning" : status?.failed ? "danger" : "muted"}
+          tone={confirming || discarding ? "warning" : status?.failed ? "danger" : "muted"}
         >
-          {confirming
-            ? `${confirming.confirm} Enter confirms, Esc cancels.`
-            : inlineTerminalText(
-                status?.text ??
-                  `${VIEWS.map((item) => (item === view ? `[${item}]` : item)).join(" ")}${
-                    view === "code" && patch?.nextCursor ? " · Showing the first part" : ""
-                  }${
-                    drafts.length > 0
-                      ? ` · ${drafts.length} ${drafts.length === 1 ? "note" : "notes"} for your review`
-                      : ""
-                  }${
-                    layers.length > 1 && layerIndex >= 0
-                      ? ` · Stack ${layerIndex + 1} of ${layers.length}`
-                      : ""
-                  }`,
-              )}
+          {discarding
+            ? `Discard ${pendingCount} ${pendingCount === 1 ? "note" : "notes"} on ${pendingNotes
+                .map(([number]) => `#${number}`)
+                .join(", ")}? Enter discards, Esc keeps.`
+            : confirming
+              ? `${confirming.confirm} Enter confirms, Esc cancels.`
+              : inlineTerminalText(
+                  status?.text ??
+                    `${VIEWS.map((item) => (item === view ? `[${item}]` : item)).join(" ")}${
+                      view === "code" && patch?.nextCursor ? " · Showing the first part" : ""
+                    }${
+                      drafts.length > 0
+                        ? ` · ${drafts.length} ${drafts.length === 1 ? "note" : "notes"} for your review`
+                        : ""
+                    }${
+                      layers.length > 1 && layerIndex >= 0
+                        ? ` · Stack ${layerIndex + 1} of ${layers.length}`
+                        : ""
+                    }`,
+                )}
         </Text>
       )}
     </Stack>
