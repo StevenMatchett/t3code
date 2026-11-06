@@ -18,7 +18,7 @@
     "screenshots:mobile": "node scripts/mobile-showcase.ts",
     "icons:export": "node scripts/export-brand-icons.ts",
     "icons:check": "node scripts/export-brand-icons.ts --check",
-    "install:tui": "pnpm --filter @t3tools/tui... install --frozen-lockfile --ignore-scripts",
+    "install:tui": "pnpm --filter @t3tools/tui... install --frozen-lockfile --ignore-scripts && node apps/tui/scripts/install-command.mjs",
     "licenses:sync": "node scripts/sync-third-party-license-notices.ts",
     "icons:export:android": "node scripts/export-android-icons.ts",
     "build": "vp run --filter './apps/*' build",

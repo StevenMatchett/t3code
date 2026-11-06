@@ -103,20 +103,24 @@ with [Vite+](#install-vp):
 git clone https://github.com/StevenMatchett/t3code.git
 cd t3code
 vp i
+pnpm run install:tui
 ```
 
-After pulling updates, run `pnpm run install:tui` from the checkout root to install any new TUI
-dependencies. The launcher checks for missing dependencies before compiling.
+`pnpm run install:tui` installs the TUI's dependencies and adds a `t3tui` command to
+`~/.local/bin`, so you can start the TUI from any directory. If that directory is not on your
+`PATH`, the install prints the line to add to your shell profile. The command runs this checkout's
+`start-tui.sh`, so run the install again if you move the checkout. After pulling updates, run
+`pnpm run install:tui` again to pick up new TUI dependencies.
 
-The `start-tui.sh` launcher compiles
+The `t3tui` launcher compiles
 the TUI and uses `npx` to run Node 26.4.0, including the required FFI support. Its first run may
 download that Node version.
 
-If your saved TUI connection needs to be repaired, run this from the checkout root while your
-existing T3 Code server is running:
+If your saved TUI connection needs to be repaired, run this while your existing T3 Code server is
+running:
 
 ```bash
-./start-tui.sh --link-and-pair
+t3tui --link-and-pair
 ```
 
 The launcher runs `t3 connect link`, creates a fresh pairing link from the running server, saves
@@ -148,7 +152,7 @@ version does not recognize the `pair` command, use that screen or update T3 Code
 
 ### 4. Pair once, then start T3 TUI
 
-Return to this checkout's root. Set `T3_ORIGIN` to the HTTP(S) origin in your pairing URL,
+Set `T3_ORIGIN` to the HTTP(S) origin in your pairing URL,
 including its port, but without `/pair` or the token. For example, if the link starts with
 `http://127.0.0.1:3773/pair`, use:
 
@@ -165,23 +169,23 @@ In Bash, paste the complete pairing URL at the hidden prompt and press Enter:
 ```bash
 read -r -s -p 'Paste the pairing URL, then press Enter: ' T3_PAIRING_URL
 printf '\n'
-printf '%s\n' "$T3_PAIRING_URL" | ./start-tui.sh --connect "$T3_ORIGIN" --pair-stdin
+printf '%s\n' "$T3_PAIRING_URL" | t3tui --connect "$T3_ORIGIN" --pair-stdin
 unset T3_PAIRING_URL
 ```
 
 Or, on macOS, copy the URL and read it directly from the clipboard:
 
 ```bash
-pbpaste | ./start-tui.sh --connect "$T3_ORIGIN" --pair-stdin
+pbpaste | t3tui --connect "$T3_ORIGIN" --pair-stdin
 ```
 
 Pairing saves the connection and exits. Now launch the TUI:
 
 ```bash
-./start-tui.sh
+t3tui
 ```
 
-On subsequent launches, run `./start-tui.sh` again with T3 Code running. You only need a new
+On subsequent launches, run `t3tui` again with T3 Code running. You only need a new
 pairing link if the saved connection is no longer authorized. Closing the TUI leaves T3 Code
 and its agents running.
 
@@ -344,7 +348,7 @@ remain pending until the server reports the result, including responses made in 
 The TUI honors the server's output-streaming preference; some servers buffer text until a turn
 finishes or pauses.
 
-For an isolated prototype environment, use `./start-tui.sh --new-environment`. This uses a separate
+For an isolated prototype environment, use `t3tui --new-environment`. This uses a separate
 `standalone` directory under the TUI state directory and does not share existing T3 threads.
 
 ## Build an internal artifact
