@@ -49,6 +49,14 @@ type ReviewNote = PullRequestReviewCommentDraft;
 /** Unsent line notes by pull request number. */
 type ReviewNotes = ReadonlyMap<number, readonly ReviewNote[]>;
 
+/** Unsent notes the panel holds, and how to ask before something else takes the panel away. */
+export interface UnsentNotesGuard {
+  /** Like "2 notes on #42, #43". */
+  readonly summary: string;
+  /** Asks to discard the notes, and runs `leave` once the user agrees. */
+  readonly confirm: (leave: () => void) => void;
+}
+
 /** Pull requests across the environment's projects, with the actions the host allows. */
 export function PullRequestsPanel({
   client,
@@ -61,6 +69,7 @@ export function PullRequestsPanel({
   readonly height: number;
   readonly onClose: () => void;
   readonly onOpenThread: (projectId: PullRequestListEntry["projectId"], threadId: ThreadId) => void;
+  readonly onUnsentNotes?: (guard: UnsentNotesGuard | null) => void;
 }) {
   if (!client.pullRequests) return <NoPullRequests active={props.active} onClose={props.onClose} />;
   return <PullRequests pulls={client.pullRequests} {...props} />;
@@ -89,6 +98,7 @@ function PullRequests({
   height,
   onClose,
   onOpenThread,
+  onUnsentNotes,
 }: {
   readonly pulls: TuiPullRequests;
   readonly source: Parameters<TuiPullRequests["startThread"]>[2];
@@ -97,6 +107,7 @@ function PullRequests({
   readonly height: number;
   readonly onClose: () => void;
   readonly onOpenThread: (projectId: PullRequestListEntry["projectId"], threadId: ThreadId) => void;
+  readonly onUnsentNotes?: ((guard: UnsentNotesGuard | null) => void) | undefined;
 }) {
   const registry = useContext(RegistryContext);
   const [state, setState] = useState<PullRequestListState>("open");
@@ -182,6 +193,7 @@ function PullRequests({
           load();
         }}
         onOpenThread={onOpenThread}
+        onUnsentNotes={onUnsentNotes}
         onOpenLayer={(layer) =>
           setOpen(
             entries?.find(
@@ -279,6 +291,7 @@ function PullRequestDetailView({
   height,
   onBack,
   onOpenThread,
+  onUnsentNotes,
   onOpenLayer,
 }: {
   readonly onOpenLayer: (layer: PullRequestStack["layers"][number]) => void;
@@ -296,6 +309,7 @@ function PullRequestDetailView({
   readonly height: number;
   readonly onBack: () => void;
   readonly onOpenThread: (projectId: PullRequestListEntry["projectId"], threadId: ThreadId) => void;
+  readonly onUnsentNotes: ((guard: UnsentNotesGuard | null) => void) | undefined;
 }) {
   const registry = useContext(RegistryContext);
   const renderer = useRenderer();
@@ -311,10 +325,27 @@ function PullRequestDetailView({
   const [stack, setStack] = useState<PullRequestStack | null>(null);
   const [codeCursor, setCodeCursor] = useState(0);
   const [lineComment, setLineComment] = useState<string | null>(null);
-  const [discarding, setDiscarding] = useState(false);
+  // What to do once the user agrees to discard the unsent notes.
+  const [discarding, setDiscarding] = useState<(() => void) | null>(null);
   const drafts = notes.get(entry.number) ?? [];
   const pendingNotes = [...notes].filter(([, items]) => items.length > 0);
   const pendingCount = pendingNotes.reduce((total, [, items]) => total + items.length, 0);
+  const pendingSummary =
+    pendingCount > 0
+      ? `${pendingCount} ${pendingCount === 1 ? "note" : "notes"} on ${pendingNotes
+          .map(([number]) => `#${number}`)
+          .join(", ")}`
+      : null;
+  /** Runs `then` now, or after the user agrees to lose the unsent notes. */
+  const unlessNotes = (then: () => void) => {
+    if (pendingSummary) setDiscarding(() => then);
+    else then();
+  };
+  useEffect(() => {
+    if (!pendingSummary || !onUnsentNotes) return;
+    onUnsentNotes({ summary: pendingSummary, confirm: (leave) => setDiscarding(() => leave) });
+    return () => onUnsentNotes(null);
+  }, [pendingSummary, onUnsentNotes]);
   const [review, setReview] = useState<{
     readonly verdict: PullRequestReviewVerdict;
     readonly body: string;
@@ -490,7 +521,12 @@ function PullRequestDetailView({
     },
   });
   useKeyLayer("pullRequestDetail", {
-    active: active && confirming === null && !discarding && review === null && lineComment === null,
+    active:
+      active &&
+      confirming === null &&
+      discarding === null &&
+      review === null &&
+      lineComment === null,
     modal: true,
     bindings: {
       "pullRequestDetail.lineComment": {
@@ -519,10 +555,11 @@ function PullRequestDetailView({
       },
       "pullRequestDetail.back": {
         enabled: !busy,
-        run: () => {
-          if (pendingCount > 0) setDiscarding(true);
-          else onBack();
-        },
+        run: () =>
+          unlessNotes(() => {
+            onDiscardNotes();
+            onBack();
+          }),
       },
       "pullRequestDetail.up": () => {
         if (view === "code") moveCode(codeCursor - 1);
@@ -547,7 +584,11 @@ function PullRequestDetailView({
         enabled: can("update-branch"),
         run: () => take("update-branch"),
       },
-      "pullRequestDetail.thread": { enabled: !busy, run: startThread },
+      // The new thread replaces this panel, so the notes go with it.
+      "pullRequestDetail.thread": {
+        enabled: !busy,
+        run: () => unlessNotes(() => void startThread()),
+      },
       "pullRequestDetail.copy": () => {
         const copied = renderer.copyToClipboardOSC52(entry.url);
         setStatus(
@@ -559,18 +600,18 @@ function PullRequestDetailView({
     },
   });
   useKeyLayer("pullRequestConfirm", {
-    active: active && (confirming !== null || discarding),
+    active: active && (confirming !== null || discarding !== null),
     modal: true,
     bindings: {
       "pullRequestConfirm.yes": () => {
         if (discarding) {
-          onDiscardNotes();
-          onBack();
+          setDiscarding(null);
+          discarding();
         } else if (confirming) void run(confirming);
       },
       "pullRequestConfirm.no": () => {
         setConfirming(null);
-        setDiscarding(false);
+        setDiscarding(null);
       },
     },
   });
@@ -665,9 +706,7 @@ function PullRequestDetailView({
           tone={confirming || discarding ? "warning" : status?.failed ? "danger" : "muted"}
         >
           {discarding
-            ? `Discard ${pendingCount} ${pendingCount === 1 ? "note" : "notes"} on ${pendingNotes
-                .map(([number]) => `#${number}`)
-                .join(", ")}? Enter discards, Esc keeps.`
+            ? `Discard ${pendingSummary}? Enter discards, Esc keeps.`
             : confirming
               ? `${confirming.confirm} Enter confirms, Esc cancels.`
               : inlineTerminalText(

@@ -17,6 +17,7 @@ import {
   shelvesBrowsing,
   sidebarThreads,
   topOverlay,
+  type ShellCommand,
   type ShellOverlay,
   type ShellRoute,
   type ShellState,
@@ -36,6 +37,7 @@ import { ThemeRoot } from "./ThemeRoot.tsx";
 import type { FavoriteModel } from "../features/chat/providerChoices.ts";
 import { QueuedMessages } from "./QueuedMessages.tsx";
 
+import type { UnsentNotesGuard } from "./PullRequestsPanel.tsx";
 import { renderShellOverlay } from "./shellOverlays.tsx";
 import { usePaletteEntries } from "./usePaletteEntries.ts";
 import { useThreadTriage } from "./useThreadTriage.ts";
@@ -59,6 +61,8 @@ export interface AppShellProps {
   readonly active?: boolean;
   readonly onTerminalFocusChange?: (focused: boolean) => void;
   readonly searchDebounceMs?: number;
+  /** Unsent pull request review notes that closing the TUI would lose, like "1 note on #42". */
+  readonly onUnsentNotesChange?: (summary: string | null) => void;
 }
 
 export function AppShell(props: AppShellProps) {
@@ -76,6 +80,7 @@ function AppShellContent({
   active = true,
   onTerminalFocusChange,
   searchDebounceMs = 200,
+  onUnsentNotesChange,
 }: AppShellProps) {
   const renderer = useRenderer();
   const { capabilities } = useUi();
@@ -261,6 +266,16 @@ function AppShellContent({
   const overlays = state.overlays;
   const pushOverlay = (overlay: ShellOverlay) => dispatch({ type: "push-overlay", overlay });
   const popOverlay = useCallback(() => dispatch({ type: "pop-overlay" }), [dispatch]);
+  const [unsentNotes, setUnsentNotes] = useState<UnsentNotesGuard | null>(null);
+  useEffect(
+    () => onUnsentNotesChange?.(unsentNotes?.summary ?? null),
+    [onUnsentNotesChange, unsentNotes?.summary],
+  );
+  /** Opening a project or thread clears the overlays, so ask first when that would lose notes. */
+  const navigate = (command: ShellCommand) => {
+    if (unsentNotes) unsentNotes.confirm(() => dispatch(command));
+    else dispatch(command);
+  };
   const triage = useThreadTriage({
     client,
     registry,
@@ -681,7 +696,7 @@ function AppShellContent({
     unicode: capabilities.unicode,
     searchQuery: paletteSearchQuery,
     searchMatches: threadSearch.matches,
-    dispatch,
+    dispatch: navigate,
     closePalette,
   });
   const status =
@@ -726,6 +741,7 @@ function AppShellContent({
       updateFavorites,
       pushOverlay,
       popOverlay,
+      setUnsentNotes,
       focusComposer: () => setComposerFocusRequest((value) => value + 1),
     });
     return view ? [{ ...view, key: `${index}:${overlay.type}`, visible: isTop }] : [];
@@ -789,11 +805,11 @@ function AppShellContent({
               onManageThread: () => pushOverlay({ type: "manage", threadId: selectedThread.id }),
             }
           : {})}
-        onOpenProject={(projectId) => dispatch({ type: "open-project", projectId })}
+        onOpenProject={(projectId) => navigate({ type: "open-project", projectId })}
         onOpenThread={(projectId, threadId) => {
           const thread = rows.threads.find((item) => item.id === threadId);
           if (thread?.archivedAt) pushOverlay({ type: "manage", threadId });
-          else dispatch({ type: "open-thread", projectId, threadId });
+          else navigate({ type: "open-thread", projectId, threadId });
         }}
         onNewProject={() => dispatch({ type: "new-project" })}
         onNewThread={() => dispatch({ type: "new-thread" })}

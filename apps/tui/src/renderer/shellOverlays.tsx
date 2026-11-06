@@ -13,7 +13,7 @@ import { NewProjectForm } from "./NewProjectForm.tsx";
 import { NewThreadForm } from "./NewThreadForm.tsx";
 import { GitBranchPicker } from "./GitBranchPicker.tsx";
 import { GitPanel } from "./GitPanel.tsx";
-import { PullRequestsPanel } from "./PullRequestsPanel.tsx";
+import { PullRequestsPanel, type UnsentNotesGuard } from "./PullRequestsPanel.tsx";
 import { ProposedPlanPanel } from "./ProposedPlanPanel.tsx";
 import { PullRequestPanel } from "./PullRequestPanel.tsx";
 import { RenameThreadDialog } from "./RenameThreadDialog.tsx";
@@ -58,6 +58,7 @@ export interface ShellOverlayContext {
   ) => void;
   readonly pushOverlay: (overlay: ShellOverlay) => void;
   readonly popOverlay: () => void;
+  readonly setUnsentNotes: (guard: UnsentNotesGuard | null) => void;
   readonly focusComposer: () => void;
 }
 
@@ -82,6 +83,7 @@ export function renderShellOverlay(
     updateFavorites,
     pushOverlay,
     popOverlay,
+    setUnsentNotes,
     focusComposer,
   }: ShellOverlayContext,
 ): ShellOverlayView | null {
@@ -277,6 +279,7 @@ export function renderShellOverlay(
               popOverlay();
               dispatch({ type: "open-thread", projectId, threadId });
             }}
+            onUnsentNotes={setUnsentNotes}
           />
         ) : null,
       };

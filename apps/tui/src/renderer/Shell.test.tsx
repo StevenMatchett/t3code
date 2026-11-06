@@ -1092,7 +1092,7 @@ describe("fork from a run", () => {
 });
 
 describe("pull requests", () => {
-  async function openList(patch?: string) {
+  async function openList(patch?: string, { app = false } = {}) {
     const fixture = makeClientFixture();
     const client =
       patch === undefined
@@ -1105,11 +1105,10 @@ describe("pull requests", () => {
                 Atom.make(AsyncResult.success({ patch, truncated: false, nextCursor: null })),
             } as never,
           };
-    const driver = await createTuiTestDriver(<AppShell client={client} />, {
-      width: 120,
-      height: 40,
-      kittyKeyboard: true,
-    });
+    const driver = await createTuiTestDriver(
+      app ? <App client={client} onInterrupt={() => undefined} /> : <AppShell client={client} />,
+      { width: 120, height: 40, kittyKeyboard: true },
+    );
     drivers.push(driver);
     await driver.input.pressKey("RETURN");
     await driver.input.pressKey("RETURN");
@@ -1337,6 +1336,60 @@ describe("pull requests", () => {
     expect(driver.captureFrame()).toContain(
       "Discard 2 notes on #42, #43? Enter discards, Esc keeps.",
     );
+  });
+
+  it("asks before starting a thread would discard notes", async () => {
+    const { driver, fixture } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await addNote(driver, "Keep me.");
+
+    await tick(driver, () => driver.input.pressKey("t"));
+    expect(driver.captureFrame()).toContain("Discard 1 note on #42? Enter discards, Esc keeps.");
+    expect(fixture.pullRequestThreads).toEqual([]);
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    expect(driver.captureFrame()).toContain("1 note for your review");
+    expect(fixture.pullRequestThreads).toEqual([]);
+
+    await tick(driver, () => driver.input.pressKey("t"));
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(fixture.pullRequestThreads).toEqual([42]);
+    expect(driver.captureFrame()).not.toContain("feature-42 into main");
+  });
+
+  it("asks before opening a thread from the palette would discard notes", async () => {
+    const { driver } = await openList();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await addNote(driver, "Keep me.");
+    const openFromPalette = async () => {
+      await tick(driver, () => driver.input.pressKey("k", { ctrl: true }));
+      await driver.input.typeText("Second conversation");
+      await tick(driver, () => driver.input.pressKey("RETURN"));
+    };
+
+    await openFromPalette();
+    expect(driver.captureFrame()).toContain("Discard 1 note on #42? Enter discards, Esc keeps.");
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    expect(driver.captureFrame()).toContain("1 note for your review");
+
+    await openFromPalette();
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    expect(driver.captureFrame()).not.toContain("feature-42 into main");
+    expect(driver.captureFrame()).toContain("Second conversation");
+  });
+
+  it("names unsent notes in the quit dialog", async () => {
+    const { driver } = await openList(undefined, { app: true });
+    await tick(driver, () => driver.input.pressKey("RETURN"));
+    await tick(driver, () => driver.input.pressKey("c", { ctrl: true }));
+    expect(driver.captureFrame()).toContain("Close T3 TUI?");
+    expect(driver.captureFrame()).not.toContain("Unsent review notes");
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+
+    await addNote(driver, "Keep me.");
+    await tick(driver, () => driver.input.pressKey("c", { ctrl: true }));
+    expect(driver.captureFrame()).toContain("Unsent review notes will be lost: 1 note on #42.");
+    await tick(driver, () => driver.input.pressKey("ESCAPE"));
+    expect(driver.captureFrame()).toContain("1 note for your review");
   });
 
   it("goes straight back to the list when there are no notes", async () => {

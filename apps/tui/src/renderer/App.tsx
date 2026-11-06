@@ -15,6 +15,7 @@ export interface AppProps {
 export function App({ onInterrupt, client }: AppProps) {
   const [confirming, setConfirming] = useState(false);
   const [selection, setSelection] = useState<"cancel" | "quit">("cancel");
+  const [unsentNotes, setUnsentNotes] = useState<string | null>(null);
   const closeConfirmation = () => {
     setConfirming(false);
     setSelection("cancel");
@@ -46,12 +47,28 @@ export function App({ onInterrupt, client }: AppProps) {
 
   return (
     <Stack width="100%" height="100%">
-      <AppShell client={client} initialRoute="projects" active={!confirming} />
+      <AppShell
+        client={client}
+        initialRoute="projects"
+        active={!confirming}
+        onUnsentNotesChange={setUnsentNotes}
+      />
       {confirming ? (
-        <Dialog id="exit-confirmation" title="Close T3 TUI?" width={60} height={7} gap={1}>
+        <Dialog
+          id="exit-confirmation"
+          title="Close T3 TUI?"
+          width={60}
+          height={unsentNotes ? 8 : 7}
+          gap={1}
+        >
           <Text height={1} wrapMode="none" truncate>
             Your agents will keep running on the shared environment.
           </Text>
+          {unsentNotes ? (
+            <Text height={1} tone="warning" wrapMode="none" truncate>
+              {`Unsent review notes will be lost: ${unsentNotes}.`}
+            </Text>
+          ) : null}
           <Text height={1} tone="muted" wrapMode="none" truncate>
             Are you sure you want to close this TUI?
           </Text>
