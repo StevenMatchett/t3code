@@ -1,4 +1,5 @@
 export type GlyphName =
+  | "back"
   | "collapsed"
   | "connected"
   | "expanded"
@@ -14,6 +15,7 @@ export type GlyphName =
   | "warning";
 
 const unicodeGlyphs: Readonly<Record<GlyphName, string>> = Object.freeze({
+  back: "←",
   collapsed: "▸",
   connected: "●",
   expanded: "▾",
@@ -30,6 +32,7 @@ const unicodeGlyphs: Readonly<Record<GlyphName, string>> = Object.freeze({
 });
 
 const asciiGlyphs: Readonly<Record<GlyphName, string>> = Object.freeze({
+  back: "<",
   collapsed: "+",
   connected: "*",
   expanded: "-",

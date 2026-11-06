@@ -37,6 +37,7 @@ import {
   dispatchShellCommand,
   sidebarProjects,
   sidebarThreads,
+  subagentFamily,
   type ShellCommand,
   type ShellRoute,
   type ShellRows,
@@ -164,6 +165,8 @@ type SidebarRow =
       readonly phase: ThreadActivityPhase;
       readonly indent: boolean;
       readonly subline?: string;
+      /** The subagent list's first row, which goes back to the thread that ran them. */
+      readonly parent?: boolean;
     }
   | { readonly kind: "placeholder"; readonly id: string };
 
@@ -407,13 +410,16 @@ export function AppShellView({
   const projectThreads = visibleThreads.filter((item) => item.projectId === state.projectId);
   const conversation = state.route === "conversation";
   const listedProjects = sidebarProjects(projects, threads, state);
-  const title = shelves
-    ? `Inbox (${shelves.rows.filter((row) => row.kind === "thread" && (row.shelf === "active" || row.shelf === "pinned")).length})${shelves.marked.size > 0 ? ` - ${shelves.marked.size} selected` : ""}`
-    : recent
-      ? `${archived ? "Archived" : "Recent"} threads (${visibleThreads.length})`
-      : browsingProjects
-        ? `Projects (${listedProjects.length})`
-        : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
+  const family = state.subagentsOf ? subagentFamily(threads, state.subagentsOf) : null;
+  const title = family
+    ? `Subagents (${family.length - 1})`
+    : shelves
+      ? `Inbox (${shelves.rows.filter((row) => row.kind === "thread" && (row.shelf === "active" || row.shelf === "pinned")).length})${shelves.marked.size > 0 ? ` - ${shelves.marked.size} selected` : ""}`
+      : recent
+        ? `${archived ? "Archived" : "Recent"} threads (${visibleThreads.length})`
+        : browsingProjects
+          ? `Projects (${listedProjects.length})`
+          : `Threads (${projectThreads.length}) - ${inlineTerminalText(project?.title ?? "")}`;
   const projectActivity = new Map<ProjectId, ThreadActivityPhase>();
   const phases = new Map(
     threads.map((thread) => {
@@ -432,41 +438,45 @@ export function AppShellView({
     indent,
     ...(subline === undefined ? {} : { subline }),
   });
-  const rows: readonly SidebarRow[] = recent
-    ? visibleThreads.map((thread) =>
-        threadRow(
-          thread,
-          false,
-          projects.find((item) => item.id === thread.projectId)?.title ?? "Unknown project",
-        ),
+  const rows: readonly SidebarRow[] = family
+    ? family.map((thread, index) =>
+        index === 0 ? { ...threadRow(thread, false), parent: true } : threadRow(thread, true),
       )
-    : listedProjects.flatMap((item): readonly SidebarRow[] => {
-        const children = visibleThreads.filter((thread) => thread.projectId === item.id);
-        // Entering a project shows its threads. A filter also opens everything it matched.
-        const isExpanded =
-          expanded.has(item.id) ||
-          Boolean(state.filter) ||
-          (item.id === state.projectId && state.route !== "projects");
-        return [
-          {
-            kind: "project",
-            id: item.id,
-            project: item,
-            // A finished turn is not news at the project level.
-            phase:
-              projectActivity.get(item.id) === "completed"
-                ? "idle"
-                : (projectActivity.get(item.id) ?? "idle"),
-            count: children.length,
-            expanded: isExpanded,
-          },
-          ...(isExpanded
-            ? children.length > 0
-              ? children.map((thread) => threadRow(thread, true))
-              : [{ kind: "placeholder" as const, id: `empty-${item.id}` }]
-            : []),
-        ];
-      });
+    : recent
+      ? visibleThreads.map((thread) =>
+          threadRow(
+            thread,
+            false,
+            projects.find((item) => item.id === thread.projectId)?.title ?? "Unknown project",
+          ),
+        )
+      : listedProjects.flatMap((item): readonly SidebarRow[] => {
+          const children = visibleThreads.filter((thread) => thread.projectId === item.id);
+          // Entering a project shows its threads. A filter also opens everything it matched.
+          const isExpanded =
+            expanded.has(item.id) ||
+            Boolean(state.filter) ||
+            (item.id === state.projectId && state.route !== "projects");
+          return [
+            {
+              kind: "project",
+              id: item.id,
+              project: item,
+              // A finished turn is not news at the project level.
+              phase:
+                projectActivity.get(item.id) === "completed"
+                  ? "idle"
+                  : (projectActivity.get(item.id) ?? "idle"),
+              count: children.length,
+              expanded: isExpanded,
+            },
+            ...(isExpanded
+              ? children.length > 0
+                ? children.map((thread) => threadRow(thread, true))
+                : [{ kind: "placeholder" as const, id: `empty-${item.id}` }]
+              : []),
+          ];
+        });
   const selectedRowId = browsingProjects ? state.projectId : state.threadId;
   const selectedIndex = Math.max(
     0,
@@ -496,7 +506,7 @@ export function AppShellView({
   ) : (
     <EmptyState title="No active threads in this project." description="Press N to start one." />
   );
-  const showFilter = filtering || Boolean(state.filter);
+  const showFilter = !family && (filtering || Boolean(state.filter));
   const navigation = shelves ? (
     <ShelfSidebar
       rows={shelves.rows}
@@ -523,7 +533,11 @@ export function AppShellView({
     />
   ) : (
     <Stack flexDirection="column" height="100%">
-      {state.sidebarLayout === "shelves" ? (
+      {family ? (
+        <Text height={1} flexShrink={0} tone="muted" wrapMode="none" truncate>
+          {"Esc goes back to the parent"}
+        </Text>
+      ) : state.sidebarLayout === "shelves" ? (
         <Button
           id="sidebar-back-to-threads"
           label="[< Back to threads]"
@@ -558,7 +572,7 @@ export function AppShellView({
         items={rows}
         selected={selectedIndex}
         height={Math.max(1, layout.contentHeight - 2)}
-        rowHeight={recent ? 2 : 1}
+        rowHeight={recent && !family ? 2 : 1}
         itemKey={(row) => `${row.kind}:${row.id}`}
         itemId={(row) => `navigation-${row.id}`}
         empty={emptyList}
@@ -591,15 +605,11 @@ export function AppShellView({
             />
           ) : (
             <ChangeHighlight value={row.phase}>
-              <Stack
-                flexDirection="column"
-                width="100%"
-                {...(row.indent ? { paddingLeft: 2 } : {})}
-              >
+              <Stack flexDirection="column" width="100%" paddingLeft={row.indent ? 2 : 0}>
                 <SelectionRow
                   selected={row.id === state.threadId && !browsingProjects}
                   active={!conversation}
-                  label={`${row.thread.title}${row.thread.worktreePath ? " [WT]" : ""}`}
+                  label={`${row.parent ? `${resolveGlyph("back", capabilities.unicode)} ` : ""}${row.thread.title}${row.thread.worktreePath ? " [WT]" : ""}`}
                   trailing={
                     <ThreadRowTrailing
                       phase={row.phase}
