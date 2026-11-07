@@ -621,12 +621,14 @@ function AppShellContent({
       },
       "list.back": {
         enabled:
+          Boolean(state.subagentsOf) ||
           Boolean(state.filter) ||
           markedThreads.length > 0 ||
           (shelvesLayout && state.sidebarView === "archived") ||
           (!browsingProjects && state.sidebarView !== "recent" && state.sidebarView !== "archived"),
-        label:
-          markedThreads.length > 0
+        label: state.subagentsOf
+          ? "Parent"
+          : markedThreads.length > 0
             ? "Clear selection"
             : state.filter
               ? "Clear filter"
@@ -635,12 +637,13 @@ function AppShellContent({
                 : "Projects",
         run: () => {
           // Archived is a detour in this layout, so Esc comes back from it instead of being stuck.
-          if (shelvesLayout && !state.filter && markedThreads.length === 0)
+          if (shelvesLayout && !state.subagentsOf && !state.filter && markedThreads.length === 0)
             dispatch({ type: "toggle-sidebar-view" });
           else dispatch({ type: "back" });
         },
       },
       "list.filter": {
+        enabled: !state.subagentsOf,
         ...(shelvesActive ? { label: "Search", title: "Search threads and messages" } : {}),
         run: () => {
           setFiltering(true);

@@ -66,6 +66,8 @@ export type ShellOverlay =
 export interface ShellState {
   readonly sidebarView?: SidebarView;
   readonly showSubagents?: boolean;
+  /** While one of its subagents is open, the sidebar lists this parent and its subagents instead. */
+  readonly subagentsOf?: ThreadId;
   readonly route: ShellRoute;
   readonly projectId: ProjectId | null;
   readonly threadId: ThreadId | null;
@@ -93,8 +95,31 @@ export interface ShellRows {
     readonly projectId: ProjectId;
     readonly title?: string;
     readonly archivedAt?: string | null;
-    readonly lineage?: { readonly relationshipToParent: "fork" | "subagent" | null } | undefined;
+    readonly lineage?:
+      | {
+          readonly relationshipToParent: "fork" | "subagent" | null;
+          readonly parentThreadId?: ThreadId | null;
+        }
+      | undefined;
   }>;
+}
+
+const subagentParentOf = (thread: ShellRows["threads"][number] | undefined) =>
+  thread?.lineage?.relationshipToParent === "subagent"
+    ? (thread.lineage.parentThreadId ?? null)
+    : null;
+
+/** The parent first, then its live subagents. Empty once the parent is gone. */
+export function subagentFamily<Thread extends ShellRows["threads"][number]>(
+  threads: readonly Thread[],
+  parentId: ThreadId,
+): readonly Thread[] {
+  const parent = threads.find((thread) => thread.id === parentId);
+  if (!parent) return [];
+  return [
+    parent,
+    ...threads.filter((thread) => !thread.archivedAt && subagentParentOf(thread) === parentId),
+  ];
 }
 
 export function isSidebarThreadVisible(thread: ShellRows["threads"][number], state: ShellState) {
@@ -103,7 +128,7 @@ export function isSidebarThreadVisible(thread: ShellRows["threads"][number], sta
 
 /** The shelves list is on screen. Archived threads keep their flat list in either layout. */
 export const shelvesBrowsing = (state: ShellState) =>
-  state.sidebarLayout === "shelves" && state.sidebarView !== "archived";
+  state.sidebarLayout === "shelves" && state.sidebarView !== "archived" && !state.subagentsOf;
 
 const textMatchesFilter = (title: string | undefined, filter: string | undefined) =>
   !filter || (title ?? "").toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase());
@@ -189,7 +214,40 @@ function pushOverlay(state: ShellState, overlay: ShellOverlay): ShellState {
   };
 }
 
+function withoutSubagents({ subagentsOf: _parent, ...rest }: ShellState): ShellState {
+  return rest;
+}
+
 function reconcile(state: ShellState, rows: ShellRows): ShellState {
+  // A subagent opened any other way, such as a restored session, still lists its family.
+  const parentId =
+    state.subagentsOf ??
+    (state.route === "conversation"
+      ? subagentParentOf(rows.threads.find((thread) => thread.id === state.threadId))
+      : null);
+  if (parentId) {
+    const family = subagentFamily(rows.threads, parentId);
+    const selected = family.find((thread) => thread.id === state.threadId) ?? family[0];
+    if (selected) {
+      const route =
+        state.route === "conversation" && selected.id === state.threadId
+          ? "conversation"
+          : "threads";
+      return parentId === state.subagentsOf &&
+        selected.id === state.threadId &&
+        selected.projectId === state.projectId &&
+        route === state.route
+        ? state
+        : {
+            ...state,
+            subagentsOf: parentId,
+            threadId: selected.id,
+            projectId: selected.projectId,
+            route,
+          };
+    }
+    state = withoutSubagents(state);
+  }
   rows = {
     ...rows,
     threads: sidebarThreads(
@@ -253,7 +311,16 @@ export function dispatchShellCommand(
   command: ShellCommand,
   rows: ShellRows,
 ): ShellState {
-  const state = reconcile(previous, rows);
+  const reconciled = reconcile(previous, rows);
+  // Switching what the sidebar lists leaves the subagent list behind.
+  const state =
+    command.type === "set-sidebar-layout" ||
+    command.type === "set-project-scope" ||
+    command.type === "set-sidebar-view" ||
+    command.type === "toggle-sidebar-view" ||
+    command.type === "open-project"
+      ? withoutSubagents(reconciled)
+      : reconciled;
   if (command.type === "mark-threads") {
     const rest = withoutMarks(state);
     return command.threadIds.length === 0
@@ -409,13 +476,16 @@ export function dispatchShellCommand(
           command.projectId,
         )
       : state;
-  if (command.type === "open-thread")
-    return rows.threads.some(
-      (thread) => thread.id === command.threadId && thread.projectId === command.projectId,
-    )
+  if (command.type === "open-thread") {
+    const thread = rows.threads.find(
+      (item) => item.id === command.threadId && item.projectId === command.projectId,
+    );
+    const parentId = subagentParentOf(thread);
+    return thread
       ? withExpanded(
           {
-            ...withoutMarks(state),
+            ...withoutSubagents(withoutMarks(state)),
+            ...(parentId ? { subagentsOf: parentId } : {}),
             ...(state.sidebarView === "archived" ? { sidebarView: "recent" as const } : {}),
             route: "conversation",
             projectId: command.projectId,
@@ -426,6 +496,7 @@ export function dispatchShellCommand(
           command.projectId,
         )
       : state;
+  }
   if (command.type === "toggle-help")
     return topOverlay(state)?.type === "help"
       ? { ...state, overlays: state.overlays.slice(0, -1) }
@@ -435,6 +506,21 @@ export function dispatchShellCommand(
     return command.type === "back" || command.type === "activate"
       ? { ...state, overlays: state.overlays.slice(0, -1) }
       : state;
+  // The subagent list's way out, and its rows open as any thread does.
+  const openListed = (threadId: ThreadId | null | undefined) => {
+    const thread = rows.threads.find((item) => item.id === threadId);
+    return thread
+      ? dispatchShellCommand(
+          state,
+          { type: "open-thread", projectId: thread.projectId, threadId: thread.id },
+          rows,
+        )
+      : state;
+  };
+  if (state.subagentsOf && state.route !== "conversation") {
+    if (command.type === "back") return openListed(state.subagentsOf);
+    if (command.type === "activate") return openListed(state.threadId);
+  }
   if (command.type === "back") {
     if (state.markedThreads && state.route !== "conversation") return withoutMarks(state);
     if (state.filter && state.route !== "conversation") {
@@ -454,14 +540,19 @@ export function dispatchShellCommand(
   if (command.type === "activate") {
     if (state.route === "projects" && state.projectId !== null)
       return withExpanded({ ...state, route: "threads" }, state.projectId);
-    if (state.route === "threads" && state.threadId !== null)
-      return { ...state, route: "conversation" };
+    if (state.route === "threads" && state.threadId !== null) {
+      const parentId = subagentParentOf(
+        rows.threads.find((thread) => thread.id === state.threadId),
+      );
+      return { ...state, route: "conversation", ...(parentId ? { subagentsOf: parentId } : {}) };
+    }
     return state;
   }
   if (state.route === "conversation") return state;
   const threads = sidebarThreads(rows.threads, state);
-  const items =
-    state.route === "projects"
+  const items = state.subagentsOf
+    ? subagentFamily(rows.threads, state.subagentsOf)
+    : state.route === "projects"
       ? sidebarProjects(rows.projects, rows.threads, state)
       : threads.filter(
           (thread) =>

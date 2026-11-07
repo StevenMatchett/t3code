@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
-import { createInitialShellState, dispatchShellCommand, type ShellRows } from "./state.ts";
+import {
+  createInitialShellState,
+  dispatchShellCommand,
+  type ShellCommand,
+  type ShellRows,
+} from "./state.ts";
 
 const p1 = ProjectId.make("one");
 const p2 = ProjectId.make("two");
@@ -257,5 +262,51 @@ describe("subagent sidebar visibility", () => {
     );
     expect(dispatchShellCommand(opened, { type: "reconcile" }, childRows)).toEqual(opened);
     expect(dispatchShellCommand(opened, { type: "back" }, childRows).threadId).toBe(t1);
+  });
+
+  it("lists a subagent's family while it is open and returns to the parent from there", () => {
+    const t4 = ThreadId.make("fourth");
+    const subagent = { relationshipToParent: "subagent" as const, parentThreadId: t1 };
+    const family: ShellRows = {
+      ...rows,
+      threads: [
+        rows.threads[0]!,
+        { ...rows.threads[1]!, lineage: subagent },
+        { id: t4, projectId: p1, lineage: subagent },
+        rows.threads[2]!,
+      ],
+    };
+    const send = (state: ReturnType<typeof initial>, command: ShellCommand) =>
+      dispatchShellCommand(state, command, family);
+    const opened = send(initial(), { type: "open-thread", projectId: p1, threadId: t2 });
+    expect(opened).toMatchObject({ route: "conversation", threadId: t2, subagentsOf: t1 });
+
+    // Esc keeps the open subagent selected in its family, which is what the sidebar lists.
+    const listed = send(opened, { type: "back" });
+    expect(listed).toMatchObject({ route: "threads", threadId: t2, subagentsOf: t1 });
+    expect(send(listed, { type: "reconcile" })).toEqual(listed);
+    const sibling = send(listed, { type: "move", offset: 1, wrap: false });
+    expect(sibling.threadId).toBe(t4);
+    expect(send(sibling, { type: "move", offset: 1, wrap: false }).threadId).toBe(t4);
+    expect(send(sibling, { type: "activate" })).toMatchObject({
+      route: "conversation",
+      threadId: t4,
+      subagentsOf: t1,
+    });
+
+    // The parent sits first, and opening it or pressing Esc leaves the family behind.
+    const parentRow = send(listed, { type: "move", offset: -1, wrap: false });
+    expect(parentRow.threadId).toBe(t1);
+    for (const parent of [send(parentRow, { type: "activate" }), send(listed, { type: "back" })]) {
+      expect(parent).toMatchObject({ route: "conversation", threadId: t1 });
+      expect(parent.subagentsOf).toBeUndefined();
+    }
+
+    // A restored session lands on the subagent without knowing its family yet.
+    const restored = send(
+      { ...createInitialShellState("conversation"), projectId: p1, threadId: t4 },
+      { type: "reconcile" },
+    );
+    expect(restored).toMatchObject({ route: "conversation", threadId: t4, subagentsOf: t1 });
   });
 });

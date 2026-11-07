@@ -1041,7 +1041,50 @@ describeWithNativeFfi("connected AppShell", () => {
     expect(driver.captureFrame()).toContain("[U Parent]");
     expect(driver.captureFrame()).not.toContain("Runs on its own");
     expect(driver.renderer.root.findDescendantById("conversation-composer")).toBeDefined();
+
     release();
+  });
+
+  it("lists an open subagent's family in the sidebar and returns to the parent", async () => {
+    const { driver, fixture } = await renderShell({ width: 120, height: 28 });
+    const current = driver.registry.get(fixture.shell);
+    const snapshot = Option.getOrThrow(current.snapshot);
+    const parent = snapshot.threads[0]!;
+    await act(async () =>
+      driver.registry.set(fixture.shell, {
+        ...current,
+        snapshot: Option.some({
+          ...snapshot,
+          threads: snapshot.threads.map((thread, index) =>
+            index === 1
+              ? {
+                  ...thread,
+                  lineage: {
+                    parentThreadId: parent.id,
+                    rootThreadId: parent.id,
+                    relationshipToParent: "subagent" as const,
+                  },
+                }
+              : thread,
+          ),
+        }),
+      }),
+    );
+    await driver.input.pressKey("s", { ctrl: true });
+    await driver.input.pressKey("RETURN");
+    await driver.input.pressKey("ARROW_DOWN");
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Subagents (1)");
+
+    // Esc keeps the subagent selected in a list of its family, with the parent on top.
+    await driver.input.pressKey("ESCAPE");
+    const family = driver.captureFrame();
+    expect(family).toContain(`← ${parent.title}`);
+    expect(family).toContain("Esc goes back to the parent");
+    expect(driver.renderer.root.findDescendantById("navigation-thread-2")).toBeFalsy();
+    await driver.input.pressKey("ESCAPE");
+    expect(driver.captureFrame()).not.toContain("Subagents (1)");
+    expect(driver.captureFrame()).toContain(`Threads (2)`);
   });
 
   it("cancels a running prompt from the composer controls", async () => {
