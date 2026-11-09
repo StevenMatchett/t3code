@@ -17,6 +17,7 @@ export function CheckpointRestore({
   threadId,
   active,
   height,
+  initialMessageId,
   onClose,
   onForked,
 }: {
@@ -24,6 +25,8 @@ export function CheckpointRestore({
   readonly threadId: ThreadId;
   readonly active: boolean;
   readonly height: number;
+  /** Opens on the rewind confirmation for this prompt; Esc still leads back to the full list. */
+  readonly initialMessageId?: MessageId;
   readonly onClose: (restored?: boolean) => void;
   readonly onForked: (threadId: ThreadId) => void;
 }) {
@@ -38,7 +41,7 @@ export function CheckpointRestore({
     (entry) => !needle || entry.message.text.toLocaleLowerCase().includes(needle),
   );
   const [cursor, setCursor] = useState(0);
-  const [messageId, setMessageId] = useState<MessageId | null>(null);
+  const [messageId, setMessageId] = useState<MessageId | null>(initialMessageId ?? null);
   const [choice, setChoice] = useState(0);
   const [forkFailed, setForkFailed] = useState(false);
   const selected = Math.min(cursor, Math.max(0, targets.length - 1));

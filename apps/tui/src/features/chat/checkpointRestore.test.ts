@@ -4,7 +4,7 @@ import { CommandId, CheckpointRef, MessageId, TurnId } from "@t3tools/contracts"
 import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import { makeClientFixture } from "../../testing/clientFixture.ts";
-import { checkpointRestoreTargets } from "./checkpointRestore.ts";
+import { checkpointRestoreTargets, promptCheckpoint } from "./checkpointRestore.ts";
 import { makeThreadInteractions, type TuiThreadCommand } from "./interactions.ts";
 
 const registries: AtomRegistry.AtomRegistry[] = [];
@@ -148,6 +148,17 @@ describe("checkpoint restore", () => {
       }),
     ).toMatchObject([{ message: { id: "steering" }, turnCount: 8 }]);
     expect(checkpointRestoreTargets({ ...partial, checkpoints: [] })).toEqual([]);
+  });
+
+  it("points a prompt's menu at the checkpoint its turn saved", () => {
+    const f = setup();
+    const thread = Option.getOrThrow(f.registry.get(f.states[0]!).data);
+    const later = {
+      ...thread,
+      checkpoints: thread.checkpoints.map((c) => ({ ...c, checkpointTurnCount: 4 })),
+    };
+    expect(promptCheckpoint(later, f.prompt.id)).toEqual({ turn: 4, runId: f.prompt.turnId });
+    expect(promptCheckpoint({ ...later, checkpoints: [] }, f.prompt.id)).toBeNull();
   });
 
   it("blocks unsupported providers, active turns, disconnected and stale targets", async () => {

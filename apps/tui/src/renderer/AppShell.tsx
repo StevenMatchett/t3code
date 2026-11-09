@@ -317,6 +317,16 @@ function AppShellContent({
         ? shelfRow.thread
         : null
       : (rows.threads.find((thread) => thread.id === state.threadId) ?? null);
+  /** Forks a thread at the end of one run and opens the fork. */
+  const forkThread = async (thread: TuiThreadShell, runId: string) => {
+    const forked = await client.forkThreadFromRun?.(registry, {
+      sourceThreadId: thread.id,
+      runId,
+      title: `${thread.title} fork`,
+    });
+    if (forked) dispatch({ type: "open-thread", projectId: thread.projectId, threadId: forked });
+    else setNotice({ text: "The fork was not created.", failed: true });
+  };
   const toggleSidebarLayout = () => {
     const layout = shelvesLayout ? "tree" : "shelves";
     client.session?.saveSidebarLayout(layout);
@@ -486,19 +496,7 @@ function AppShellContent({
           selectedThread.latestTurn.state !== "running",
         run: async () => {
           const runId = selectedThread?.latestTurn?.turnId;
-          if (!runId || !selectedThread) return;
-          const forked = await client.forkThreadFromRun?.(registry, {
-            sourceThreadId: selectedThread.id,
-            runId,
-            title: `${selectedThread.title} fork`,
-          });
-          if (forked)
-            dispatch({
-              type: "open-thread",
-              projectId: selectedThread.projectId,
-              threadId: forked,
-            });
-          else setNotice({ text: "The fork was not created.", failed: true });
+          if (runId && selectedThread) await forkThread(selectedThread, runId);
         },
       },
       "git.open": {
@@ -833,7 +831,18 @@ function AppShellContent({
               return true;
             }}
             composerFocusRequest={composerFocusRequest}
-            onDiff={() => pushOverlay({ type: "diff" })}
+            onDiff={(turn) =>
+              pushOverlay(turn === undefined ? { type: "diff" } : { type: "diff", turn })
+            }
+            onRewind={(messageId) => pushOverlay({ type: "restore", messageId })}
+            {...(client.forkThreadFromRun
+              ? {
+                  onFork: (runId: string) => {
+                    const thread = rows.threads.find((item) => item.id === state.threadId);
+                    if (thread) void forkThread(thread, runId);
+                  },
+                }
+              : {})}
             onPlan={() => pushOverlay({ type: "plan", threadId: state.threadId! })}
             {...(onTerminalFocusChange ? { onTerminalFocusChange } : {})}
           />

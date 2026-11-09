@@ -1,4 +1,4 @@
-import type { ProjectId, ThreadId } from "@t3tools/contracts";
+import type { MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { SETTLED_FIRST_PAGE, SETTLED_NEXT_PAGE, type CollapsibleShelf } from "./threadShelves.ts";
 
 export const SHELL_ROUTES = ["projects", "threads", "conversation"] as const;
@@ -22,8 +22,10 @@ export type ShellOverlay =
   | { readonly type: "palette" }
   | { readonly type: "favorite-models" }
   | { readonly type: "theme" }
-  | { readonly type: "diff" }
-  | { readonly type: "restore" }
+  /** `turn` opens on that checkpoint's changes instead of everything saved. */
+  | { readonly type: "diff"; readonly turn?: number }
+  /** `messageId` opens straight to rewinding to before that prompt. */
+  | { readonly type: "restore"; readonly messageId?: MessageId }
   | { readonly type: "pull-request"; readonly cwd: string; readonly branch: string | null }
   | { readonly type: "rename"; readonly threadId: ThreadId }
   | { readonly type: "plan"; readonly threadId: ThreadId }

@@ -76,6 +76,7 @@ export function ThreadDiff({
   active,
   width,
   height,
+  initialTurn,
   onClose,
 }: {
   readonly client: TuiClient;
@@ -83,6 +84,8 @@ export function ThreadDiff({
   readonly active: boolean;
   readonly width: number;
   readonly height: number;
+  /** Opens on one checkpoint's changes; falls back to everything saved when it is gone. */
+  readonly initialTurn?: number;
   /** `commented` means the message gained line comments, so the composer should take focus. */
   readonly onClose: (commented?: boolean) => void;
 }) {
@@ -104,7 +107,7 @@ export function ThreadDiff({
     [thread?.checkpoints],
   );
   const latest = turns.at(-1) ?? 0;
-  const [scope, setScope] = useState<Scope>("saved");
+  const [scope, setScope] = useState<Scope>(initialTurn ?? "saved");
   const selectedScope = typeof scope === "number" && !turns.includes(scope) ? "saved" : scope;
   const scopes: Scope[] = ["saved", "working", ...turns];
   const [cursor, setCursor] = useState(0);

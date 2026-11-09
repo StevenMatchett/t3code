@@ -158,6 +158,7 @@ export function renderShellOverlay(
                 active={overlayActive}
                 width={Math.max(1, width - 6)}
                 height={layout.contentHeight}
+                {...(overlay.turn !== undefined ? { initialTurn: overlay.turn } : {})}
                 onClose={(commented) => {
                   popOverlay();
                   if (commented) focusComposer();
@@ -178,6 +179,7 @@ export function renderShellOverlay(
                 threadId={state.threadId}
                 active={overlayActive}
                 height={contentRows(28)}
+                {...(overlay.messageId ? { initialMessageId: overlay.messageId } : {})}
                 onForked={(threadId) => {
                   popOverlay();
                   if (state.projectId)

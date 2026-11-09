@@ -488,6 +488,21 @@ export const ACTIONS = {
   "history.pageUp": { scope: "history", title: "Page up", keys: ["pageup"], ...step },
   "history.pageDown": { scope: "history", title: "Page down", keys: ["pagedown"], ...step },
   "history.top": { scope: "history", title: "Jump to the first message", keys: ["home"] },
+  "history.previousPrompt": {
+    scope: "history",
+    title: "Jump to the previous prompt",
+    keys: ["["],
+    keyLabel: "[/]",
+    label: "Prompts",
+    hint: 66,
+    keywords: "user message turn minimap",
+  },
+  "history.nextPrompt": {
+    scope: "history",
+    title: "Jump to the next prompt",
+    keys: ["]"],
+    keywords: "user message turn minimap",
+  },
   "history.live": {
     scope: "history",
     title: "Jump to live output",

@@ -22,6 +22,7 @@ export function ConversationText({
   selection,
   onToggleToolGroup,
   onOpenLinkMenu,
+  onContextMenu,
 }: {
   readonly line: ConversationLine;
   readonly search?: string;
@@ -32,6 +33,8 @@ export function ConversationText({
   readonly onOpenLinkMenu?:
     | ((href: string, position: { x: number; y: number }) => void)
     | undefined;
+  /** Right-click anywhere on the line except a link, which opens the link menu instead. */
+  readonly onContextMenu?: ((position: { x: number; y: number }) => void) | undefined;
 }) {
   const { capabilities, theme } = useUi();
   const matches = selection ? [selection] : textMatches(line.text, search);
@@ -78,6 +81,10 @@ export function ConversationText({
       onMouseDown={(event) => {
         if (event.button === 0 && line.toolGroupId && onToggleToolGroup) {
           onToggleToolGroup(line.toolGroupId);
+        } else if (event.button === 2 && onContextMenu) {
+          event.preventDefault();
+          event.stopPropagation();
+          onContextMenu({ x: event.x, y: event.y });
         }
       }}
       {...(backgroundColor ? { backgroundColor } : {})}

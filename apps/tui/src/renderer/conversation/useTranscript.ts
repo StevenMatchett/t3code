@@ -1,4 +1,4 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { MessageId, ThreadId } from "@t3tools/contracts";
 import { useCallback, useContext, useEffect, useMemo } from "react";
 import { RegistryContext } from "@effect/atom-react";
 import type { TuiClient } from "../../connection/clientRuntime.ts";
@@ -44,6 +44,15 @@ export function resolveAnchorIndex(
   return exact >= 0 ? exact : lines.findIndex((entry) => entry.id === anchor.id);
 }
 
+/** Line indexes where each user prompt starts. Only user messages render highlighted lines. */
+export function promptStarts(lines: readonly ConversationLine[]) {
+  const starts: number[] = [];
+  for (const [index, line] of lines.entries()) {
+    if (line.highlight && line.line === 0) starts.push(index);
+  }
+  return starts;
+}
+
 export function useTranscript({
   client,
   threadId,
@@ -78,6 +87,16 @@ export function useTranscript({
     () => (thread === null ? [] : projectRecordedThreadTimeline(thread)),
     [thread],
   );
+  /** The message behind each prompt's rendered lines, keyed by line id. */
+  const promptMessageIds = useMemo(
+    () =>
+      new Map<string, MessageId>(
+        timeline.flatMap((row) =>
+          row.source === "message" && row.kind === "user" ? [[row.id, row.sourceId]] : [],
+        ),
+      ),
+    [timeline],
+  );
   const lines = useMemo(
     () => conversationLines(timeline, width, expanded, expandedToolGroups, renderMarkdown, unicode),
     [timeline, width, expanded, expandedToolGroups, renderMarkdown, unicode],
@@ -94,6 +113,7 @@ export function useTranscript({
     [lines, searchQuery],
   );
   const matchIndex = matches.length ? (search?.index ?? 0) % matches.length : 0;
+  const prompts = useMemo(() => promptStarts(lines), [lines]);
   const anchorIndex = useMemo(
     () => (anchor === null ? -1 : resolveAnchorIndex(lines, anchor, width)),
     [lines, anchor, width],
@@ -137,6 +157,8 @@ export function useTranscript({
     lines,
     matches,
     matchIndex,
+    prompts,
+    promptMessageIds,
     start,
     maxStart,
     /** Lines waiting below the viewport while the reader is scrolled up. */

@@ -25,6 +25,12 @@ export function checkpointRestoreTargets(thread: TuiThread) {
   return targets;
 }
 
+/** A prompt's checkpoint: the diff turn it produced, and the run a fork from it starts at. */
+export function promptCheckpoint(thread: TuiThread, messageId: MessageId) {
+  const target = checkpointRestoreTargets(thread).find((entry) => entry.message.id === messageId);
+  return target ? { turn: target.turnCount + 1, runId: target.message.turnId } : null;
+}
+
 /** Dispatch acknowledgement precedes the asynchronous rewind; observe its projected result. */
 export function waitForCheckpointRestore(
   registry: AtomRegistry.AtomRegistry,

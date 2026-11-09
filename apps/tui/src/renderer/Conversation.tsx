@@ -1,7 +1,7 @@
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
 import { decodePasteBytes, type BoxRenderable } from "@opentui/core";
 import { usePaste, useTerminalDimensions } from "@opentui/react";
-import type { ThreadId } from "@t3tools/contracts";
+import type { MessageId, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useMemo, useState, useContext, useEffect, useRef } from "react";
 
@@ -10,10 +10,12 @@ import { Composer } from "./composer/Composer.tsx";
 import { NoticeRow } from "./conversation/NoticeRow.tsx";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { RequestDock } from "./conversation/RequestDock.tsx";
+import { PROMPT_RAIL_WIDTH, PromptRail } from "./conversation/PromptRail.tsx";
 import { StatusRow } from "./conversation/StatusRow.tsx";
 import { useTranscript, type TranscriptAnchor } from "./conversation/useTranscript.ts";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import type { TuiAgent } from "../connection/models.ts";
+import { promptCheckpoint } from "../features/chat/checkpointRestore.ts";
 import { approvalOptions } from "../features/chat/interactions.ts";
 import { threadActivityPhase } from "../features/chat/threadActivity.ts";
 import { pastedImagePaths } from "../features/chat/imageAttachments.ts";
@@ -26,6 +28,7 @@ import { Panel } from "../ui/Panel.tsx";
 import { inlineTerminalText, wrapTerminalLines, wrapTerminalWords } from "../ui/textLayout.ts";
 import { useOutputVim } from "./useOutputVim.ts";
 import { useOutputLinkMenu } from "../ui/OutputLinkMenu.tsx";
+import { NavigationContextMenu } from "./ThreadContextMenu.tsx";
 import { ThreadTerminal } from "./ThreadTerminal.tsx";
 import { useKeyLayer } from "../ui/keymap.ts";
 import { useUi } from "../ui/context.tsx";
@@ -39,6 +42,8 @@ export function Conversation({
   onBack,
   onOpenThread,
   onDiff,
+  onRewind,
+  onFork,
   onPlan,
   composerFocusRequest = 0,
   onTerminalFocusChange,
@@ -52,7 +57,12 @@ export function Conversation({
   /** Opens another thread in this environment; false when it is not known yet. */
   readonly onOpenThread?: (threadId: ThreadId) => boolean;
   readonly composerFocusRequest?: number;
-  readonly onDiff?: () => void;
+  /** `turn` opens the diff on that checkpoint. */
+  readonly onDiff?: (turn?: number) => void;
+  /** Opens the rewind confirmation for this prompt. */
+  readonly onRewind?: (messageId: MessageId) => void;
+  /** Forks the thread at the end of this run; absent when the environment cannot fork. */
+  readonly onFork?: (runId: string) => void;
   readonly onPlan?: () => void;
   readonly onTerminalFocusChange?: (focused: boolean) => void;
 }) {
@@ -99,6 +109,12 @@ export function Conversation({
   const [agentOutputStart, setAgentOutputStart] = useState(0);
   const [search, setSearch] = useState<{ query: string; index: number } | null>(null);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
+  const [promptMenu, setPromptMenu] = useState<{
+    readonly line: number;
+    readonly messageId: MessageId;
+    readonly x: number;
+    readonly y: number;
+  } | null>(null);
   useEffect(() => {
     client.session?.saveConversation(threadId, {
       // A restored thread focuses a waiting request itself, so this mode never needs saving.
@@ -277,12 +293,17 @@ export function Conversation({
   const count = rowLayout.transcript;
   const noticeHeight = rowLayout.notice;
   const page = state.history;
+  // Like the web minimap, the rail appears once there is a second prompt to jump to.
+  const showPromptRail = useMemo(
+    () => (thread?.messages.filter((message) => message.role === "user").length ?? 0) >= 2,
+    [thread?.messages],
+  );
   const transcript = useTranscript({
     client,
     threadId,
     thread,
     page,
-    width,
+    width: showPromptRail ? width - PROMPT_RAIL_WIDTH : width,
     count,
     expanded: showDetails,
     expandedToolGroups,
@@ -292,7 +313,59 @@ export function Conversation({
     anchor,
     setAnchor,
   });
-  const { lines, matches, matchIndex, start, linesBelow, scrollTo, pinTo } = transcript;
+  const {
+    lines,
+    matches,
+    matchIndex,
+    prompts,
+    promptMessageIds,
+    start,
+    linesBelow,
+    scrollTo,
+    pinTo,
+  } = transcript;
+  // The prompt whose turn holds the top line, counting from 1; 0 before the first prompt.
+  const promptPosition = prompts.filter((index) => index <= start).length;
+  const openPromptMenu = (line: number, position: { x: number; y: number }) => {
+    const messageId = promptMessageIds.get(lines[line]?.id ?? "");
+    if (!active || !messageId) return;
+    setPromptMenu({
+      line,
+      messageId,
+      x: position.x - (container.current?.screenX ?? 0),
+      y: position.y - (container.current?.screenY ?? 0),
+    });
+  };
+  const promptMenuCheckpoint =
+    promptMenu && thread ? promptCheckpoint(thread, promptMenu.messageId) : null;
+  // Checkpoint actions appear once the prompt's turn has finished and saved one.
+  const promptMenuActions: { action: "jump" | "diff" | "rewind" | "fork"; label: string }[] = [
+    { action: "jump", label: "Jump to prompt" },
+    ...(promptMenuCheckpoint
+      ? [
+          { action: "diff" as const, label: "View this turn's changes" },
+          ...(readOnly || !onRewind
+            ? []
+            : [{ action: "rewind" as const, label: "Edit from here" }]),
+          ...(onFork && promptMenuCheckpoint.runId
+            ? [{ action: "fork" as const, label: "Fork from here" }]
+            : []),
+        ]
+      : []),
+  ];
+  const choosePromptAction = (action: (typeof promptMenuActions)[number]["action"]) => {
+    if (!promptMenu) return;
+    setPromptMenu(null);
+    vim.reset();
+    if (action === "jump") {
+      setSearch(null);
+      pinTo(promptMenu.line);
+    } else if (action === "rewind") onRewind?.(promptMenu.messageId);
+    else if (promptMenuCheckpoint) {
+      if (action === "diff") onDiff?.(promptMenuCheckpoint.turn);
+      else if (promptMenuCheckpoint.runId) onFork?.(promptMenuCheckpoint.runId);
+    }
+  };
   const vim = useOutputVim({
     lines,
     start,
@@ -490,6 +563,17 @@ export function Conversation({
         scrollTo(0);
         if (page?.hasMoreHistory && !page.loading) client.loadOlder(registry, threadId);
       },
+      "history.previousPrompt": () => {
+        const previous = prompts.findLast((index) => index < start);
+        vim.reset();
+        if (previous !== undefined) pinTo(previous);
+        else if (page?.hasMoreHistory && !page.loading) client.loadOlder(registry, threadId);
+      },
+      "history.nextPrompt": () => {
+        const next = prompts.find((index) => index > start);
+        vim.reset();
+        if (next !== undefined) pinTo(next);
+      },
       "history.live": { enabled: anchor !== null, run: () => setAnchor(null) },
       "thread.toggleDetails": () => {
         setShowDetails((value) => !value);
@@ -573,7 +657,7 @@ export function Conversation({
       <Stack
         id="conversation-history"
         flexGrow={1}
-        flexDirection="column"
+        flexDirection="row"
         overflow="hidden"
         onMouseScroll={(event) => {
           const direction = event.scroll?.direction;
@@ -588,46 +672,73 @@ export function Conversation({
           if (event.button === 0) setMode("history");
         }}
       >
-        {!capabilities.color &&
-        (composerMenuOpen || linkMenu.isOpen || selectedAgent) ? null : lines.length === 0 ? (
-          state.status === "deleted" ? (
-            <EmptyState
-              title="This thread was deleted."
-              description="Esc returns to your threads."
-            />
-          ) : Option.isSome(state.error) ? (
-            <ErrorState title="Conversation unavailable. R retries the connection." />
-          ) : thread === null ? (
-            <LoadingState title="Loading conversation..." />
+        {showPromptRail &&
+        lines.length > 0 &&
+        (capabilities.color || !(composerMenuOpen || linkMenu.isOpen || selectedAgent)) ? (
+          <PromptRail
+            prompts={prompts}
+            height={count}
+            start={start}
+            count={count}
+            current={promptPosition - 1}
+            onJump={(line) => {
+              vim.reset();
+              setSearch(null);
+              pinTo(line);
+            }}
+            onMenu={openPromptMenu}
+          />
+        ) : null}
+        <Stack flexGrow={1} minWidth={0} flexDirection="column" overflow="hidden">
+          {!capabilities.color &&
+          (composerMenuOpen || linkMenu.isOpen || selectedAgent) ? null : lines.length === 0 ? (
+            state.status === "deleted" ? (
+              <EmptyState
+                title="This thread was deleted."
+                description="Esc returns to your threads."
+              />
+            ) : Option.isSome(state.error) ? (
+              <ErrorState title="Conversation unavailable. R retries the connection." />
+            ) : thread === null ? (
+              <LoadingState title="Loading conversation..." />
+            ) : (
+              <EmptyState
+                title="No messages in this thread."
+                {...(readOnly ? {} : { description: "Press Enter to write the first one." })}
+              />
+            )
           ) : (
-            <EmptyState
-              title="No messages in this thread."
-              {...(readOnly ? {} : { description: "Press Enter to write the first one." })}
-            />
-          )
-        ) : (
-          lines.slice(start, start + count).map((line, offset) => (
-            <ConversationText
-              key={`${line.id}:${line.line}`}
-              line={line}
-              onOpenLinkMenu={linkMenu.open}
-              selection={
-                active && mode === "history" && !search && !selectedAgent
-                  ? vim.range(start + offset)
-                  : undefined
-              }
-              search={search?.query ?? ""}
-              onToggleToolGroup={(id) => {
-                setAnchor({ id, line: 0 });
-                setExpandedToolGroups((groups) => {
-                  const next = new Map(groups);
-                  next.set(id, !(groups.get(id) ?? showDetails));
-                  return next;
-                });
-              }}
-            />
-          ))
-        )}
+            lines.slice(start, start + count).map((line, offset) => (
+              <ConversationText
+                key={`${line.id}:${line.line}`}
+                line={line}
+                onOpenLinkMenu={linkMenu.open}
+                onContextMenu={
+                  line.highlight
+                    ? (position) => {
+                        const prompt = prompts.findLast((index) => index <= start + offset);
+                        if (prompt !== undefined) openPromptMenu(prompt, position);
+                      }
+                    : undefined
+                }
+                selection={
+                  active && mode === "history" && !search && !selectedAgent
+                    ? vim.range(start + offset)
+                    : undefined
+                }
+                search={search?.query ?? ""}
+                onToggleToolGroup={(id) => {
+                  setAnchor({ id, line: 0 });
+                  setExpandedToolGroups((groups) => {
+                    const next = new Map(groups);
+                    next.set(id, !(groups.get(id) ?? showDetails));
+                    return next;
+                  });
+                }}
+              />
+            ))
+          )}
+        </Stack>
       </Stack>
       {agents.length > 0 ? (
         <AgentSwarmPanel
@@ -714,6 +825,9 @@ export function Conversation({
               : "",
             linkMenu.notice,
             mode === "history" ? vim.status : "",
+            anchor !== null && prompts.length > 0
+              ? `Prompt ${promptPosition}/${prompts.length}`
+              : "",
             anchor !== null
               ? `${linesBelow > 0 ? `${linesBelow} below · ` : ""}History / End: live`
               : "",
@@ -797,6 +911,18 @@ export function Conversation({
         />
       ) : null}
       {linkMenu.element}
+      {active && promptMenu ? (
+        <NavigationContextMenu
+          id="prompt-context"
+          x={promptMenu.x}
+          y={promptMenu.y}
+          width={width}
+          height={height}
+          actions={promptMenuActions}
+          onChoose={choosePromptAction}
+          onClose={() => setPromptMenu(null)}
+        />
+      ) : null}
     </Stack>
   );
 }
