@@ -53,7 +53,7 @@ describe("new thread form", () => {
         expect(frame.lastIndexOf(first)).toBeLessThan(frame.lastIndexOf(second));
 
       const initial = await newThread();
-      expect(initial.form).toContain("Fixture Codex / Current model v");
+      expect(initial.form).toContain("Fixture Codex / Current model ▼");
       expectBefore(initial.menu, "/ Current model", "/ Alternate model");
 
       await openFavorites();
@@ -84,7 +84,7 @@ describe("new thread form", () => {
       await driver.input.pressKey("ESCAPE");
 
       const ranked = await newThread();
-      expect(ranked.form).toContain("Fixture Codex / Alternate model v");
+      expect(ranked.form).toContain("Fixture Codex / Alternate model ▼");
       expect(ranked.menu).toContain("★ Fixture Codex / Alternate model");
       expectBefore(ranked.menu, "/ Alternate model", "/ Current model");
 
@@ -99,7 +99,7 @@ describe("new thread form", () => {
       await driver.input.pressKey("ESCAPE");
 
       const cleared = await newThread();
-      expect(cleared.form).toContain("Fixture Codex / Current model v");
+      expect(cleared.form).toContain("Fixture Codex / Current model ▼");
       expect(cleared.menu).not.toContain("★");
     },
   );
@@ -141,7 +141,7 @@ describe("new thread form", () => {
       await driver.input.pressKey("RETURN");
       await driver.input.pressKey("ARROW_DOWN");
       await driver.input.pressKey("ARROW_UP");
-      expect(driver.captureFrame()).toContain("Supervised v");
+      expect(driver.captureFrame()).toContain("Supervised ▼");
       await driver.input.pressKey("ARROW_DOWN");
       await driver.input.pressKey("RETURN");
       expect(fixture.creationCommands[0]).toMatchObject({
@@ -176,11 +176,11 @@ describe("new thread form", () => {
       await driver.input.pressKey("RETURN");
       for (let index = 0; index < 3; index += 1) await driver.input.pressKey("ARROW_UP");
       await driver.input.pressKey("RETURN");
-      expect(driver.captureFrame()).toContain("Supervised v");
+      expect(driver.captureFrame()).toContain("Supervised ▼");
       await driver.input.pressKey("RETURN");
       await driver.input.pressKey("ARROW_DOWN");
       await driver.input.pressKey("ESCAPE");
-      expect(driver.captureFrame()).toContain("Supervised v");
+      expect(driver.captureFrame()).toContain("Supervised ▼");
       await driver.input.pressKey("TAB");
       await driver.input.pressKey("RETURN");
       expect(fixture.creationCommands[0]).toMatchObject({ runtimeMode: "approval-required" });

@@ -344,7 +344,7 @@ function Fields({
         <FormRow label="Project" focused={focus === "project"}>
           {button(
             "project",
-            `${inlineTerminalText(project.title)} · ${inlineTerminalText(project.workspaceRoot)} v`,
+            `${inlineTerminalText(project.title)} · ${inlineTerminalText(project.workspaceRoot)} ▼`,
           )}
         </FormRow>
       ) : (
@@ -388,13 +388,13 @@ function Fields({
       <FormRow label="Model" focused={focus === "model"}>
         {button(
           "model",
-          `${selectedChoice?.provider.displayName ?? selection?.instanceId ?? "No provider"} / ${selectedChoice?.model.name ?? selection?.model ?? "No available model"} v`,
+          `${selectedChoice?.provider.displayName ?? selection?.instanceId ?? "No provider"} / ${selectedChoice?.model.name ?? selection?.model ?? "No available model"} ▼`,
         )}
       </FormRow>
       <FormRow label="Access" focused={focus === "permissions"}>
         {button(
           "permissions",
-          `${permissionChoices.find((choice) => choice.id === (creation.attempt?.input.runtimeMode ?? runtimeMode))?.label ?? "Permissions"} v`,
+          `${permissionChoices.find((choice) => choice.id === (creation.attempt?.input.runtimeMode ?? runtimeMode))?.label ?? "Permissions"} ▼`,
         )}
       </FormRow>
       <Text height={2} tone="muted">
