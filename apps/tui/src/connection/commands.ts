@@ -29,6 +29,8 @@ export const PromptCommand = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   sourceProposedPlan: Schema.optionalKey(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
+  /** Lets the server name a fresh thread, such as a side chat, after its first message. */
+  titleSeed: Schema.optionalKey(Schema.String),
 });
 type Intent<K extends string, V> = V & { readonly type: K };
 export type TuiCommand =

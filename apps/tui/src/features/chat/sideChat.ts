@@ -14,3 +14,16 @@ export function sideChatProblem(
     return "Update this environment's T3 Code server to use side chats.";
   return null;
 }
+
+/** A side chat's row in its parent's list: its title, when it started, and whether it runs. */
+export function sideChatLabel(thread: {
+  readonly title: string;
+  readonly createdAt: string;
+  readonly latestTurn?: { readonly state: string } | null | undefined;
+}) {
+  const started = new Date(thread.createdAt).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${thread.title} · ${started}${thread.latestTurn?.state === "running" ? " · running" : ""}`;
+}

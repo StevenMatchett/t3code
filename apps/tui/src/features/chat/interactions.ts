@@ -27,6 +27,7 @@ import {
   type ThreadPendingUserInput as PendingUserInput,
 } from "@t3tools/client-runtime/state/thread-requests";
 
+import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import { parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { planModeProblem } from "./composerModes.ts";
 import { recallableComposerPrompt } from "./restoredPrompt.ts";
@@ -1156,6 +1157,7 @@ export function makeThreadInteractions(options: {
             modelSelection: source.modelSelection,
             runtimeMode: current.runtimeMode ?? source.runtimeMode,
             interactionMode: "default",
+            titleSeed: deriveThreadTitleSeed({ text: command.prompt, attachments: [] }),
           },
           "send",
         );
