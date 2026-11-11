@@ -44,8 +44,9 @@ export function NewThreadForm(props: Props) {
   const settings = useAtomValue(props.client.settings);
   const creation = useAtomValue(props.client.newThreads.state);
   const snapshot = Option.getOrNull(shell.snapshot);
-  const [initialProjectId] = useState(props.projectId);
-  const projectId = creation.attempt?.input.projectId ?? initialProjectId;
+  // Starts on the current project; the Project field can move the new thread to any other.
+  const [chosen, setChosen] = useState({ projectId: props.projectId, title: "" });
+  const projectId = creation.attempt?.input.projectId ?? chosen.projectId;
   const project = snapshot?.projects.find((item) => item.id === projectId);
   const created =
     creation.phase === "created"
@@ -71,13 +72,25 @@ export function NewThreadForm(props: Props) {
       </Text>
     );
   return (
-    <Fields key={project.id} {...props} project={project} catalog={catalog} settings={settings} />
+    <Fields
+      key={project.id}
+      {...props}
+      project={project}
+      projects={snapshot?.projects ?? []}
+      initialTitle={chosen.title}
+      onProjectChange={(nextProjectId, title) => setChosen({ projectId: nextProjectId, title })}
+      catalog={catalog}
+      settings={settings}
+    />
   );
 }
 
 function Fields({
   client,
   project,
+  projects,
+  initialTitle,
+  onProjectChange,
   catalog,
   settings,
   favoriteModels,
@@ -85,6 +98,10 @@ function Fields({
   onClose,
 }: Props & {
   readonly project: OrchestrationProjectShell;
+  readonly projects: readonly OrchestrationProjectShell[];
+  /** The title typed before switching projects, which remounts these fields. */
+  readonly initialTitle: string;
+  readonly onProjectChange: (projectId: ProjectId, title: string) => void;
   readonly catalog: ProviderCatalog;
   readonly settings: ServerSettings;
 }) {
@@ -104,7 +121,7 @@ function Fields({
     ) ??
     choices.find((choice) => choice.model.isDefault) ??
     choices[0];
-  const [title, setTitle] = useState(creation.attempt?.input.title ?? "");
+  const [title, setTitle] = useState(creation.attempt?.input.title ?? initialTitle);
   const [mode, setMode] = useState<"local" | "worktree">(
     creation.attempt?.input.mode ?? defaults.defaultThreadEnvMode ?? "local",
   );
@@ -124,6 +141,7 @@ function Fields({
   );
   const [permissionsMenu, setPermissionsMenu] = useState(false);
   const [modelMenu, setModelMenu] = useState(false);
+  const [projectMenu, setProjectMenu] = useState(false);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const [confirmRestart, setConfirmRestart] = useState(false);
@@ -133,6 +151,7 @@ function Fields({
   const targets = locked
     ? ["create", ...(creation.phase === "error" ? ["restart"] : []), "cancel"]
     : [
+        ...(projects.length > 1 ? ["project"] : []),
         "title",
         "local",
         "worktree",
@@ -146,6 +165,9 @@ function Fields({
     `${choice.provider.displayName ?? choice.provider.instanceId} ${choice.model.name} ${choice.model.slug}`
       .toLocaleLowerCase()
       .includes(query.toLocaleLowerCase()),
+  );
+  const filteredProjects = projects.filter((item) =>
+    `${item.title} ${item.workspaceRoot}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
   );
   const advance = (offset: number) =>
     setFocus(targets[(targets.indexOf(focus) + offset + targets.length) % targets.length]!);
@@ -209,7 +231,21 @@ function Fields({
       setModelMenu(true);
       setQuery("");
       setCursor(0);
+    } else if (target === "project") {
+      setProjectMenu(true);
+      setQuery("");
+      setCursor(
+        Math.max(
+          0,
+          projects.findIndex((item) => item.id === project.id),
+        ),
+      );
     } else advance(1);
+  };
+  const chooseProject = (index: number) => {
+    const choice = filteredProjects[index];
+    setProjectMenu(false);
+    if (choice && choice.id !== project.id) onProjectChange(choice.id, title);
   };
   const chooseModel = (index: number) => {
     const choice = filtered[index];
@@ -222,18 +258,21 @@ function Fields({
     setModelMenu(false);
     setFocus("model");
   };
-  const menuOpen = permissionsMenu || modelMenu;
+  const menuOpen = permissionsMenu || modelMenu || projectMenu;
   const moveCursor = (offset: number) => {
-    const last = permissionsMenu ? permissionChoices.length - 1 : Math.max(0, filtered.length - 1);
+    const last = permissionsMenu
+      ? permissionChoices.length - 1
+      : Math.max(0, (projectMenu ? filteredProjects : filtered).length - 1);
     setCursor((value) => Math.max(0, Math.min(last, value + offset)));
   };
   useKeyLayer("newThread", {
     modal: true,
-    typing: modelMenu || focus === "title" || focus === "base",
+    typing: modelMenu || projectMenu || focus === "title" || focus === "base",
     bindings: {
       "newThread.close": () => {
         if (permissionsMenu) setPermissionsMenu(false);
         else if (modelMenu) setModelMenu(false);
+        else if (projectMenu) setProjectMenu(false);
         else activate("cancel");
       },
       "newThread.next": (key) => {
@@ -267,6 +306,9 @@ function Fields({
           } else if (modelMenu) {
             if (key?.name === "space") return false;
             chooseModel(Math.min(cursor, filtered.length - 1));
+          } else if (projectMenu) {
+            if (key?.name === "space") return false;
+            chooseProject(Math.min(cursor, filteredProjects.length - 1));
           } else {
             if (key?.name === "space" && (focus === "title" || focus === "base")) return false;
             activate(focus);
@@ -292,23 +334,30 @@ function Fields({
       choice.provider.instanceId === selection?.instanceId && choice.model.slug === selection.model,
   );
   const count = Math.max(1, Math.min(8, height - 5));
-  const selectedIndex = Math.min(cursor, filtered.length - 1);
-  const start = Math.max(
-    0,
-    Math.min(selectedIndex - Math.floor(count / 2), filtered.length - count),
-  );
+  const menuItems = projectMenu ? filteredProjects.length : filtered.length;
+  const selectedIndex = Math.min(cursor, menuItems - 1);
+  const start = Math.max(0, Math.min(selectedIndex - Math.floor(count / 2), menuItems - count));
   return (
     <Stack width="100%" height="100%" flexDirection="column" overflow="hidden">
       <Text height={1} strong>{`New thread in ${inlineTerminalText(project.title)}`}</Text>
-      <Text height={1} tone="muted" wrapMode="none" truncate>
-        {inlineTerminalText(project.workspaceRoot)}
-      </Text>
+      {projects.length > 1 ? (
+        <FormRow label="Project" focused={focus === "project"}>
+          {button(
+            "project",
+            `${inlineTerminalText(project.title)} · ${inlineTerminalText(project.workspaceRoot)} v`,
+          )}
+        </FormRow>
+      ) : (
+        <Text height={1} tone="muted" wrapMode="none" truncate>
+          {inlineTerminalText(project.workspaceRoot)}
+        </Text>
+      )}
       <FormRow label="Title" focused={focus === "title"}>
         <FormInput
           id="new-thread-title"
           value={title}
           placeholder="New thread"
-          focused={!locked && focus === "title" && !modelMenu && !permissionsMenu}
+          focused={!locked && focus === "title" && !menuOpen}
           onInput={setTitle}
           onFocusRequest={() => {
             if (!locked) setFocus("title");
@@ -328,7 +377,7 @@ function Fields({
           <FormInput
             id="new-thread-base"
             value={baseRef}
-            focused={!locked && focus === "base" && !modelMenu && !permissionsMenu}
+            focused={!locked && focus === "base" && !menuOpen}
             onInput={setBaseRef}
             onFocusRequest={() => {
               if (!locked) setFocus("base");
@@ -470,6 +519,62 @@ function Fields({
               <SelectionRow
                 selected={start + index === selectedIndex}
                 label={`${isFavoriteChoice(favoriteModels, choice) ? "★ " : ""}${choice.provider.displayName ?? choice.provider.instanceId} / ${choice.model.name}`}
+              />
+            </Stack>
+          ))}
+        </Panel>
+      ) : null}
+      {projectMenu ? (
+        <Panel
+          position="absolute"
+          top={2}
+          left={0}
+          width="100%"
+          height={count + 3}
+          title="Choose project"
+          borderTone="borderFocused"
+          flexDirection="column"
+        >
+          <FormInput
+            id="new-thread-project-search"
+            width="100%"
+            focused
+            value={query}
+            placeholder="Search projects..."
+            onInput={(value) => {
+              setQuery(value);
+              setCursor(0);
+            }}
+          />
+          {filteredProjects.length === 0 ? <Text tone="muted">No projects match.</Text> : null}
+          {filteredProjects.slice(start, start + count).map((item, index) => (
+            <Stack
+              key={item.id}
+              id={`new-thread-project-${item.id}`}
+              height={1}
+              flexShrink={0}
+              onMouseDown={(event) => {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.stopPropagation();
+                chooseProject(start + index);
+              }}
+            >
+              <SelectionRow
+                selected={start + index === selectedIndex}
+                label={`${item.id === project.id ? "* " : ""}${item.title}`}
+                trailing={
+                  <Text
+                    height={1}
+                    flexShrink={1}
+                    minWidth={0}
+                    tone="muted"
+                    wrapMode="none"
+                    truncate
+                  >
+                    {` ${inlineTerminalText(item.workspaceRoot)}`}
+                  </Text>
+                }
               />
             </Stack>
           ))}

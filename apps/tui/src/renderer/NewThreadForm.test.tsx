@@ -292,6 +292,25 @@ describe("new thread form", () => {
     expect(fixture.creationCommands).toHaveLength(0);
   });
 
+  it("starts on the current project and creates the thread in another one chosen from the form", async () => {
+    const { driver, fixture } = await setup();
+    await driver.input.pressKey("n");
+    expect(driver.captureFrame()).toContain("New thread in Alpha");
+    await driver.input.typeText("Moved task");
+    await driver.input.pressKey("TAB", { shift: true });
+    await driver.input.pressKey("RETURN");
+    expect(driver.captureFrame()).toContain("Choose project");
+    await driver.input.typeText("beta");
+    await driver.input.pressKey("RETURN");
+    const frame = driver.captureFrame();
+    expect(frame).toContain("New thread in Beta");
+    expect(frame).toContain("Moved task");
+    await click(driver, "new-thread-create");
+    expect(fixture.creationCommands[0]).toMatchObject({
+      projectId: fixture.projects[1]!.id,
+      title: "Moved task",
+    });
+  });
   it("does not switch creation to another project when the selected project disappears", async () => {
     const { driver, fixture } = await setup();
     await driver.input.pressKey("n");
