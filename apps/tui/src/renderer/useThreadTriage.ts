@@ -3,7 +3,7 @@ import { useMemo, useRef } from "react";
 import type { AtomRegistry } from "effect/reactivity";
 import type { ExecutionEnvironmentCapabilities } from "@t3tools/contracts";
 import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
-import { planPinnedMove } from "@t3tools/client-runtime/state/thread-sort";
+import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
 import type { TuiThreadShell } from "../connection/models.ts";
 import type { TuiClient } from "../connection/clientRuntime.ts";
 import type { ShellCommand, ShellOverlay, ShellState } from "../app/state.ts";
@@ -312,11 +312,16 @@ export function useThreadTriage({
     const { shelf } = shelfRow;
     if (shelf !== "pinned") return;
     const siblings = shelfThreadRows.filter((row) => row.shelf === shelf);
-    const writes = planPinnedMove({
-      orderedIds: siblings.map((row) => row.id),
+    const orderedIds: string[] = siblings.map((row) => row.id);
+    const from = orderedIds.indexOf(shelfRow.id);
+    const to = direction === "up" ? from - 1 : from + 1;
+    if (from === -1 || to < 0 || to >= orderedIds.length) return;
+    orderedIds.splice(from, 1);
+    orderedIds.splice(to, 0, shelfRow.id);
+    const writes = planPinnedReorder({
+      orderedIds,
       keysById: new Map(siblings.map((row) => [row.id as string, row.thread.pinOrderKey])),
       movedId: shelfRow.id,
-      direction,
     });
     for (const write of writes ?? []) {
       void changeThread(write.id as TuiThreadShell["id"], {

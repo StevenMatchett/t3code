@@ -1,5 +1,6 @@
 import {
   buildMenuItems,
+  changeRequestTerminologyFor,
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
   resolveDefaultBranchActionDialogCopy,
@@ -157,6 +158,7 @@ export function defaultBranchWarning(
     action,
     branchName: status.refName,
     includesCommit: commits,
+    terminology: changeRequestTerminologyFor(status),
   });
 }
 

@@ -103,7 +103,9 @@ import {
   makeThreadManagementActions,
   type ThreadManagementActions,
 } from "../features/threads/management.ts";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Signature from "effect/crypto/Signature";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as HttpClient from "effect/http/HttpClient";
@@ -311,18 +313,8 @@ const readOnlyCatalog = (
 
 function platformLayer() {
   return Layer.mergeAll(
-    Layer.succeed(
-      Crypto.Crypto,
-      Crypto.make({
-        randomBytes: (size) => globalThis.crypto.getRandomValues(new Uint8Array(size)),
-        digest: (algorithm, data) =>
-          Effect.promise(
-            async () =>
-              new Uint8Array(
-                await globalThis.crypto.subtle.digest(algorithm, new Uint8Array(data)),
-              ),
-          ),
-      }),
+    Layer.mergeAll(Digest.layerWebCrypto, Signature.layerWebCrypto).pipe(
+      Layer.provideMerge(SecureRandom.layerWebCrypto),
     ),
     Layer.succeed(ConnectionTargetStore, {
       list: Effect.succeed([]),
@@ -448,7 +440,7 @@ export function createTuiClient(
     Effect.gen(function* () {
       const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
       yield* registry.start;
-      yield* registry.registerPlatform(new PrimaryConnectionRegistration({ target }));
+      yield* registry.reconcilePlatform([new PrimaryConnectionRegistration({ target })]);
     }),
   ).pipe(Layer.provideMerge(connections));
   const runtime = Atom.runtime(
@@ -554,11 +546,10 @@ export function createTuiClient(
   });
   const command = createEnvironmentCommand(runtime, {
     label: "tui.thread.command",
-    execute: (input: TuiCommand) =>
-      Effect.gen(function* () {
-        if (protocolVersion === 1) yield* executeV1Command(input);
-        else yield* executeTuiCommand(input);
-      }),
+    execute: Effect.fn("tui.thread.command")(function* (input: TuiCommand) {
+      if (protocolVersion === 1) yield* executeV1Command(input);
+      else yield* executeTuiCommand(input);
+    }),
   });
   const loadHistory = createEnvironmentCommand(runtime, {
     label: "tui.load-history",
@@ -795,7 +786,10 @@ export function createTuiClient(
     dispatch: async (registry, input) =>
       AsyncResult.isSuccess(await command.run(registry, { environmentId, input })),
     createWorktree: async (registry, input) => {
-      const result = await createWorktree.run(registry, { environmentId, input });
+      const result = await createWorktree.run(registry, {
+        environmentId,
+        input: { ...input, path: null },
+      });
       if (!AsyncResult.isSuccess(result)) throw new Error("Worktree creation was not confirmed.");
       return result.value.worktree;
     },

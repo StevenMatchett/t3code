@@ -39,11 +39,14 @@ describe("OpenTUI boundary", () => {
 
   it("keeps OpenTUI host elements out of application components", () => {
     const appRoot = NodePath.join(sourceRoot, "app");
-    const violations = sourceFiles(appRoot).flatMap((path) =>
-      [...NodeFS.readFileSync(path, "utf8").matchAll(hostElement)].map(
-        (match) => `${relativeSourcePath(path)}: <${match[1]}>`,
-      ),
-    );
+    // Only TSX can hold elements; in TS, `ReturnType<typeof x>` would look like one.
+    const violations = sourceFiles(appRoot)
+      .filter((path) => path.endsWith(".tsx"))
+      .flatMap((path) =>
+        [...NodeFS.readFileSync(path, "utf8").matchAll(hostElement)].map(
+          (match) => `${relativeSourcePath(path)}: <${match[1]}>`,
+        ),
+      );
 
     expect(violations).toEqual([]);
   });

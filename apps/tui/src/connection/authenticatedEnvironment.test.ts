@@ -497,6 +497,8 @@ describe("authenticated TUI environment connection", () => {
           "/.well-known/t3/environment",
           "/oauth/token",
           "/api/auth/session",
+          // This server predates ticket audiences, so the scoped request falls back.
+          "/api/auth/websocket-ticket/rpc",
           "/api/auth/websocket-ticket",
         ],
       );

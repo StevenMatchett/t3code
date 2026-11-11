@@ -10,6 +10,7 @@ import * as ConnectionResolver from "./resolver.ts";
 import * as ConnectionDriver from "./driver.ts";
 import * as EnvironmentRegistry from "./registry.ts";
 import * as ConnectionOnboarding from "./onboarding.ts";
+import { ConnectionBlockedError } from "./model.ts";
 import { connectionRoutes, hasRelayRoute } from "./routes.ts";
 import * as PlatformConnectionSource from "../platform/source.ts";
 import * as RelayEnvironmentDiscovery from "../relay/discovery.ts";
@@ -42,8 +43,7 @@ export const watchDiscoveredCompatibility = Effect.fn("connection.watchDiscovere
             // Discovery describes the server behind the relay route. A direct
             // connection (the desktop's own server, a saved URL, SSH) can reach
             // a different server with the same environment id, such as a
-            // preview app that shares the home directory. Its socket handshake
-            // already checks the protocol.
+            // preview app that shares the home directory.
             const saved = registered.get(environmentId);
             if (
               saved === undefined ||
@@ -82,7 +82,6 @@ export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
     layerRegistry,
     RelayEnvironmentDiscovery.layer,
     layerOnboarding,
-    // Exposed for updating hosts too old to connect through the driver.
     ConnectionResolver.layer,
   );
   const layerConnectionStartup = Layer.effectDiscard(
@@ -103,6 +102,26 @@ export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
   );
 }
 
+const directOnly = () =>
+  Effect.fail(
+    new ConnectionBlockedError({
+      reason: "unsupported",
+      detail: "This client connects directly and cannot use relay authorization.",
+    }),
+  );
+
+/** A pre-authorized host connects directly, so it needs no relay or DPoP authorization. */
+const directOnlyAuthorization = Layer.sync(
+  RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization,
+  () => ({
+    authorizeBearer: directOnly,
+    authorizeDpop: directOnly,
+    authorizeDpopHttp: directOnly,
+    rememberCheckedDescriptor: () => Effect.void,
+    renewDpopBeforeExpiry: directOnly,
+  }),
+);
+
 export function layerWithResolver(
   resolver: ConnectionResolver.ConnectionResolver["Service"],
   options: RpcSession.RpcSessionOptions = {},
@@ -112,6 +131,7 @@ export function layerWithResolver(
       Layer.mergeAll(
         Layer.succeed(ConnectionResolver.ConnectionResolver, resolver),
         RpcSession.layer(options),
+        directOnlyAuthorization,
       ),
     ),
   );

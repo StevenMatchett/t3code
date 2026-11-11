@@ -143,6 +143,8 @@ export interface TuiSecretRequest {
   readonly label: string;
   readonly reason: string;
   readonly placeholder?: string | undefined;
+  /** `file` lets the agent's commands read the value; absent means it is stored securely. */
+  readonly delivery?: "file" | undefined;
 }
 export interface TuiThread extends ThreadMetadata {
   readonly messages: readonly TuiMessage[];
@@ -161,9 +163,7 @@ export interface TuiThread extends ThreadMetadata {
   readonly agents: readonly TuiAgent[];
 }
 /** A subagent row; `childThreadId` names its own thread when the server keeps one. */
-export type TuiAgent = import("@t3tools/client-runtime/state/subagentRuntime").RuntimeSubagent & {
-  readonly childThreadId?: ThreadId | null | undefined;
-};
+export type TuiAgent = import("@t3tools/client-runtime/state/subagentRuntime").RuntimeSubagent;
 export interface TuiThreadState {
   readonly data: Option.Option<TuiThread>;
   readonly status: "empty" | "cached" | "synchronizing" | "live" | "deleted";

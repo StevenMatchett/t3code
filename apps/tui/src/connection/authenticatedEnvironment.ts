@@ -11,6 +11,7 @@ import {
   type ExecutionEnvironmentDescriptor,
   type ServerConfig,
   WS_METHODS,
+  WsRpcGroup,
 } from "@t3tools/contracts";
 import {
   bootstrapRemoteBearerSession,
@@ -21,7 +22,7 @@ import {
   deriveWsBaseUrl,
   fetchRemoteEnvironmentDescriptor,
 } from "@t3tools/client-runtime/environment";
-import { makeWsRpcProtocolClient, layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
+import { layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -304,7 +305,7 @@ const readServerConfig = Effect.fn("tui.connection.readServerConfig")(function* 
   ).pipe(Layer.provide(Layer.mergeAll(socketLayer, RpcSerialization.layerJson)));
   const protocolContext = yield* Layer.build(protocolLayer);
   const client = yield* (
-    input.protocolVersion === 1 ? makeV1CommonClient : makeWsRpcProtocolClient
+    input.protocolVersion === 1 ? makeV1CommonClient : RpcClient.make(WsRpcGroup)
   ).pipe(Effect.provide(protocolContext));
   return yield* client[WS_METHODS.serverGetConfig]({});
 });

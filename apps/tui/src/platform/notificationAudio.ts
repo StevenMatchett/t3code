@@ -5,7 +5,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import type { NotificationSound } from "../features/chat/notificationSounds.ts";
 
 /** Small PCM chimes generated locally, so packaged builds need no audio assets. */
@@ -44,8 +44,8 @@ export function notificationWave(kind: NotificationSound): Buffer {
 
 /** SSH carries terminal bells to the client; native chimes stay on local sessions. */
 export function createNotificationAudio(
-  platform = HostProcessPlatform.defaultValue(),
-  environment = HostProcessEnvironment.defaultValue(),
+  platform = HostProcess.Platform.defaultValue(),
+  environment = HostProcess.Environment.defaultValue(),
   ringBell = () => {
     // OpenTUI captures stdout.write; write the control byte directly to the terminal.
     if (NodeProcess.stdout.isTTY) NodeFS.writeSync(NodeProcess.stdout.fd, "\x07");

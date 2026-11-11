@@ -3,9 +3,9 @@ import { decodePasteBytes } from "@opentui/core";
 import { usePaste } from "@opentui/react";
 import {
   SECRET_REQUEST_DEFAULT_PLACEHOLDER,
-  SECRET_REQUEST_PRIVACY_NOTE,
   secretRequestAnswerInput,
   secretRequestFailureMessage,
+  secretRequestPrivacyNote,
 } from "@t3tools/client-runtime/secret-request";
 import { useContext, useState } from "react";
 import type { TuiClient } from "../../connection/clientRuntime.ts";
@@ -115,7 +115,7 @@ export function SecretRequestForm({
         {`> ${mask}${cursor}${value ? "" : (request.placeholder ?? SECRET_REQUEST_DEFAULT_PLACEHOLDER)}`}
       </Text>
       <Text height={1} flexShrink={0} wrapMode="none" truncate tone="muted">
-        {SECRET_REQUEST_PRIVACY_NOTE}
+        {secretRequestPrivacyNote(request.delivery ? { delivery: request.delivery } : {})}
       </Text>
       <Text height={1} flexShrink={0} wrapMode="none" truncate tone={error ? "danger" : "muted"}>
         {error ?? (sending ? "Sending..." : "")}

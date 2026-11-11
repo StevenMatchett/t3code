@@ -11,10 +11,10 @@ import {
   inferProjectTitleFromPath,
 } from "@t3tools/client-runtime/state/projects";
 
-import { parseGitHubRepositoryNameWithOwnerFromRemoteUrl } from "@t3tools/shared/git";
 import {
   CommandId,
   ProjectId,
+  SourceControlProviderKind,
   type FilesystemBrowseResult,
   type ProjectCloneStartInput,
   type SourceControlCloneRepositoryInput,
@@ -24,6 +24,15 @@ import * as DateTime from "effect/DateTime";
 import * as Hex from "effect/encoding/Hex";
 import * as Option from "effect/Option";
 import { Atom, type AtomRegistry } from "effect/reactivity";
+
+/** `owner/repo` from a GitHub remote URL, or null for anything else. */
+function parseGitHubRepositoryNameWithOwnerFromRemoteUrl(url: string | null): string | null {
+  const match =
+    /^(?:git@github\.com:|ssh:\/\/(?:git@)?github\.com\/|https:\/\/github\.com\/|git:\/\/github\.com\/)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i.exec(
+      url?.trim() ?? "",
+    );
+  return match?.[1]?.trim() || null;
+}
 
 type CreateProjectCommand = Extract<TuiCommand, { readonly type: "project.create" }>;
 
@@ -144,7 +153,7 @@ export function makeNewProjectActions(options: {
             projectId,
             title: inferProjectTitleFromPath(destinationPath),
             createdAt: DateTime.formatIso(DateTime.nowUnsafe()),
-            provider: "github",
+            provider: SourceControlProviderKind.make("github"),
             remoteUrl,
             destinationPath,
           });

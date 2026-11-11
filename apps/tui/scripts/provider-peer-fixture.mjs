@@ -13,6 +13,8 @@ export async function preparePeer(root, scenario) {
     await NodeFSP.readFile(NodePath.join(source, "codexMultiAgentWire.json"), "utf8"),
   );
   let peer = await NodeFSP.readFile(NodePath.join(source, "codexCollabMockPeer.mjs"), "utf8");
+  // The server refuses Codex releases it knows are broken, and 0.0.0 counts as one.
+  peer = peer.replace('userAgent: "t3-collab-mock/0.0.0"', 'userAgent: "t3-collab-mock/0.159.0"');
   peer = peer.replace(
     "    write({ id, result: {} });\n    return;\n  }\n  if (id !== undefined)",
     '    write({ id, result: {} });\n    write({ jsonrpc: "2.0", method: "turn/completed", params: { threadId: script.rootThreadId, turn: { ...activeTurn, status: "interrupted" } } });\n    return;\n  }\n  if (id !== undefined)',

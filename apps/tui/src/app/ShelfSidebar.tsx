@@ -3,7 +3,7 @@ import { useMemo, type ReactNode } from "react";
 import {
   resolveThreadPullRequestBadge,
   visibleThreadPullRequests,
-} from "@t3tools/shared/threadPullRequests";
+} from "@t3tools/client-runtime/thread-pull-requests";
 import type { TuiThreadShell } from "../connection/models.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormInput } from "../ui/FormField.tsx";

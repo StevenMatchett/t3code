@@ -1,7 +1,7 @@
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
 import { decodePasteBytes, type BoxRenderable } from "@opentui/core";
 import { usePaste, useTerminalDimensions } from "@opentui/react";
-import type { MessageId, ThreadId } from "@t3tools/contracts";
+import { ThreadId, type MessageId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useMemo, useState, useContext, useEffect, useRef } from "react";
 
@@ -214,7 +214,7 @@ export function Conversation({
   };
   // Agents with their own thread open it in full; the rest show their output in an overlay.
   const openAgent = (agent: TuiAgent) => {
-    if (agent.childThreadId && onOpenThread?.(agent.childThreadId)) return;
+    if (agent.childThreadId && onOpenThread?.(ThreadId.make(agent.childThreadId))) return;
     setSelectedAgentId(agent.id);
     setAgentOutputStart(0);
   };

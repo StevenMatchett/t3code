@@ -1,5 +1,5 @@
 import { RegistryContext } from "@effect/atom-react";
-import { formatProviderSkillDisplayName } from "@t3tools/client-runtime/providerSkills";
+import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import type { ModelSelection, ServerProvider, ThreadId } from "@t3tools/contracts";
 import {
   getProviderOptionCurrentLabel,
@@ -284,9 +284,9 @@ export function useComposerChoices({
         : menu === "models"
           ? "Models"
           : menu === "permissions"
-            ? "Permissions — next message"
+            ? "Permissions (next message)"
             : menu === "mode"
-              ? "Mode — next message"
+              ? "Mode (next message)"
               : (descriptor?.label ?? "Options");
   return { buttons, rows, index, choose, title, filesEmpty: files.status };
 }

@@ -51,12 +51,13 @@ export function presentV1Thread(thread: OrchestrationThread): TuiThread {
         })),
       })),
     },
+    // V1 servers never give a subagent its own thread.
     agents: foldSubagentActivities(thread.activities, {
       sessionLive:
         thread.session?.status === "running" ||
         thread.session?.status === "ready" ||
         thread.session?.status === "starting",
-    }),
+    }).map((agent) => ({ ...agent, childThreadId: null })),
   };
   cache.set(thread, result);
   return result;
