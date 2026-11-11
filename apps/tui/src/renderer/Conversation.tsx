@@ -761,6 +761,8 @@ export function Conversation({
         flexShrink={0}
         width="100%"
         overflow="visible"
+        // The composer's dropdowns open upward over the agents panel, so this stack draws above it.
+        zIndex={1}
       >
         <NoticeRow
           height={noticeHeight}

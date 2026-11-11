@@ -93,6 +93,19 @@ async function setRequests(
 }
 
 describe("layout stability", () => {
+  it("draws composer dropdowns over the agents panel", async () => {
+    const { driver, update } = await setup();
+    await openThread(driver);
+    await update(0, (thread) => ({ ...thread, agents: designAgents() }));
+    await driver.input.pressKey("i");
+    const models = driver.renderer.root.findDescendantById("composer-models")!;
+    await driver.mouse.click(models.screenX + 2, models.screenY, MouseButtons.LEFT, { delayMs: 0 });
+    await driver.flush();
+    const frame = driver.captureFrame();
+    expect(frame).toContain("Alternate model");
+    expect(frame).not.toContain("Agent swarm");
+  });
+
   it("never moves the composer when status, find, queue, errors, or agents appear", async () => {
     const { driver, fixture, update } = await setup();
     await openThread(driver);
