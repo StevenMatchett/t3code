@@ -39,6 +39,7 @@ export type TuiCommand =
   | Intent<"project.delete", Commands.DeleteProjectInput>
   | Intent<"thread.meta.update", Commands.UpdateThreadMetadataInput>
   | Intent<"thread.fork", Commands.ForkThreadFromRunInput>
+  | Intent<"thread.fork.side-chat", Commands.ForkSideChatInput>
   | Intent<"thread.archive", Commands.ArchiveThreadInput>
   | Intent<"thread.unarchive", Commands.UnarchiveThreadInput>
   | Intent<"thread.delete", Commands.DeleteThreadInput>
@@ -79,6 +80,8 @@ export const executeTuiCommand = Effect.fn("tui.executeCommand")(function* (comm
       return yield* Commands.updateThreadMetadata(command);
     case "thread.fork":
       return yield* Commands.forkThreadFromRun(command);
+    case "thread.fork.side-chat":
+      return yield* Commands.forkSideChat(command);
     case "thread.archive":
       return yield* Commands.archiveThread(command);
     case "thread.unarchive":

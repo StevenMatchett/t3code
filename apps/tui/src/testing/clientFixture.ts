@@ -55,13 +55,16 @@ import {
 } from "../features/threads/management.ts";
 import type { ProviderCatalog } from "../features/chat/providerChoices.ts";
 import type { TuiSessionState } from "../persistence/sessionState.ts";
-import { makeThreadInteractions, type TuiThreadCommand } from "../features/chat/interactions.ts";
+import {
+  makeThreadInteractions,
+  type TuiInteractionCommand,
+} from "../features/chat/interactions.ts";
 
 const time = "2026-01-01T00:00:00.000Z";
 const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
 
 export function makeClientFixture(
-  dispatch: (command: TuiThreadCommand) => Promise<boolean> = async () => true,
+  dispatch: (command: TuiInteractionCommand) => Promise<boolean> = async () => true,
   loadImageAttachment?: (path: string) => Promise<UploadChatImageAttachment>,
   session?: TuiSessionState,
 ) {
@@ -145,7 +148,7 @@ export function makeClientFixture(
     phase: "connected",
   });
   const thread = (id: ThreadId) => states[details.findIndex((item) => item.id === id)] ?? empty;
-  const commands: TuiThreadCommand[] = [];
+  const commands: TuiInteractionCommand[] = [];
   const provider: ServerProvider = {
     instanceId: modelSelection.instanceId,
     driver: ProviderDriverKind.make("codex"),

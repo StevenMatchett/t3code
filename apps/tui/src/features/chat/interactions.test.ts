@@ -13,11 +13,11 @@ import { makeClientFixture } from "../../testing/clientFixture.ts";
 import {
   answersAreComplete,
   makeThreadInteractions,
-  type TuiThreadCommand,
+  type TuiInteractionCommand,
 } from "./interactions.ts";
 
 function fixture(
-  dispatch: (command: TuiThreadCommand) => Promise<boolean>,
+  dispatch: (command: TuiInteractionCommand) => Promise<boolean>,
   loadImageAttachment?: (path: string) => Promise<UploadChatImageAttachment>,
 ) {
   const data = makeClientFixture();
@@ -61,7 +61,7 @@ const completedTool = (sequence: number) => ({
 
 describe("queued prompts", () => {
   it("sends one immutable prompt per completed tool, preserving the live draft", async () => {
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const f = fixture(async (command) => {
       commands.push(command);
       return true;
@@ -108,7 +108,7 @@ describe("queued prompts", () => {
 
   it("holds failed sends for an explicit idempotent retry and prevents concurrent sends", async () => {
     const receipt = Promise.withResolvers<boolean>();
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const f = fixture(async (command) => {
       commands.push(command);
       return commands.length === 1 ? receipt.promise : true;
@@ -137,7 +137,7 @@ describe("queued prompts", () => {
   });
 
   it("reconciles a lost receipt from shared state without sending the message again", async () => {
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const f = fixture(async (command) => {
       commands.push(command);
       return false;
@@ -231,7 +231,7 @@ describe("queued prompts", () => {
 describe("thread interactions", () => {
   it("submits the selected thread's exact model and modes and retains edits made while waiting", async () => {
     const receipt = Promise.withResolvers<boolean>();
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const f = fixture(async (command) => {
       commands.push(command);
       return receipt.promise;
@@ -260,7 +260,7 @@ describe("thread interactions", () => {
   });
 
   it("preserves failed input and retries the same immutable command instead of duplicating a turn", async () => {
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const f = fixture(async (command) => {
       commands.push(command);
       return commands.length > 1;
@@ -278,7 +278,7 @@ describe("thread interactions", () => {
   });
 
   it("sends attachment-only prompts and keeps images available for a failed retry", async () => {
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const image = {
       type: "image" as const,
       id: "fixture-image",
@@ -312,7 +312,7 @@ describe("thread interactions", () => {
   });
 
   it("folds pastes over 200 characters in the draft and expands them when sending", async () => {
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const f = fixture(async (command) => {
       commands.push(command);
       return true;
@@ -335,7 +335,7 @@ describe("thread interactions", () => {
   });
 
   it("expands multiple equal-length pastes in place and sends subsequent edits only once", async () => {
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const f = fixture(async (command) => {
       commands.push(command);
       return true;
@@ -402,7 +402,7 @@ describe("thread interactions", () => {
   });
 
   it("keeps drafts when data is stale and targets Stop at the currently running turn", async () => {
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const f = fixture(async (command) => {
       commands.push(command);
       return true;
@@ -442,7 +442,7 @@ describe("thread interactions", () => {
   });
 
   it("honors provider approval options, prevents repeated replies, and rejects resolved requests", async () => {
-    const commands: TuiThreadCommand[] = [];
+    const commands: TuiInteractionCommand[] = [];
     const f = fixture(async (command) => {
       commands.push(command);
       return true;
@@ -531,5 +531,33 @@ describe("thread interactions", () => {
     expect(answersAreComplete(request, { " native id ": [" opaque value "] })).toBe(true);
     expect(answersAreComplete(request, { " native id ": ["Pretty label"] })).toBe(false);
     expect(answersAreComplete(request, { " native id ": "custom" })).toBe(false);
+  });
+});
+
+describe("side chats", () => {
+  it("keeps a /btw draft and shows why when side chats are unavailable", async () => {
+    const commands: TuiInteractionCommand[] = [];
+    const f = fixture(async (command) => {
+      commands.push(command);
+      return true;
+    });
+    f.actions.setDraft(f.registry, f.id, "/btw is this safe?");
+    expect(
+      await f.actions.startSideChat(f.registry, f.id, "Side chats cannot start side chats."),
+    ).toBeNull();
+    const state = f.registry.get(f.actions.state(f.id));
+    expect(state.draft).toBe("/btw is this safe?");
+    expect(state.error).toBe("Side chats cannot start side chats.");
+    expect(commands).toEqual([]);
+  });
+
+  it("leaves a failed side chat's draft in place to retry", async () => {
+    const f = fixture(async () => false);
+    f.actions.setDraft(f.registry, f.id, "/side check the tests");
+    expect(await f.actions.startSideChat(f.registry, f.id, null)).toBeNull();
+    const state = f.registry.get(f.actions.state(f.id));
+    expect(state.draft).toBe("/side check the tests");
+    expect(state.error).toBe("Could not start a side chat.");
+    expect(state.pending).toBeNull();
   });
 });

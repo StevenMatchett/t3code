@@ -11,7 +11,10 @@ export type ComposerCommand = { readonly name: string; readonly detail: string }
 );
 
 /** The `/` commands to offer: the app's own, then the provider's, without repeats. */
-export function composerCommands(provider: ServerProvider | undefined): readonly ComposerCommand[] {
+export function composerCommands(
+  provider: ServerProvider | undefined,
+  options: { readonly sideChats?: boolean } = {},
+): readonly ComposerCommand[] {
   const own: ComposerCommand[] = [
     { name: "model", kind: "model", detail: "Choose the model." },
     ...(planModeProblem(provider)
@@ -25,6 +28,16 @@ export function composerCommands(provider: ServerProvider | undefined): readonly
           } as const,
         ]),
     { name: "default", kind: "mode", mode: "default", detail: "Work on the task normally." },
+    ...(options.sideChats
+      ? ([
+          {
+            name: "side",
+            kind: "text",
+            detail: "Ask a side question in its own chat, without interrupting this one.",
+          },
+          { name: "btw", kind: "text", detail: "Same as /side." },
+        ] as const)
+      : []),
   ];
   const names = new Set(own.map((command) => command.name));
   const fromProvider = (provider?.slashCommands ?? []).flatMap((command): ComposerCommand[] => {

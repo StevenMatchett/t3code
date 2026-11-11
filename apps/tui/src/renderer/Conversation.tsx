@@ -17,6 +17,8 @@ import type { TuiClient } from "../connection/clientRuntime.ts";
 import type { TuiAgent } from "../connection/models.ts";
 import { promptCheckpoint } from "../features/chat/checkpointRestore.ts";
 import { approvalOptions } from "../features/chat/interactions.ts";
+import { sideChatProblem } from "../features/chat/sideChat.ts";
+import { parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { threadActivityPhase } from "../features/chat/threadActivity.ts";
 import { pastedImagePaths } from "../features/chat/imageAttachments.ts";
 import { suggestedReplies as parseSuggestedReplies } from "../features/chat/suggestedReplies.ts";
@@ -76,7 +78,10 @@ export function Conversation({
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
   const parentThreadId =
-    thread?.lineage?.relationshipToParent === "subagent" ? thread.lineage.parentThreadId : null;
+    thread?.lineage?.relationshipToParent === "subagent" || thread?.lineage?.sideChat === true
+      ? thread.lineage.parentThreadId
+      : null;
+  const threadCapabilities = useAtomValue(client.threadCapabilities);
   // The provider runs its own subagents, so their threads take no messages; steer the parent.
   const readOnly =
     thread?.lineage?.relationshipToParent === "subagent" && thread.creationSource === "provider";
@@ -881,6 +886,15 @@ export function Conversation({
             {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
             onSubmit={() => {
               setAnchor(null);
+              // `/side` and `/btw` go to a new side chat instead of this thread.
+              if (parseSideChatCommand(interaction.draft)) {
+                void client.actions
+                  .startSideChat(registry, threadId, sideChatProblem(thread, threadCapabilities))
+                  .then((sideChatId) => {
+                    if (sideChatId) onOpenThread?.(sideChatId);
+                  });
+                return;
+              }
               void client.actions.send(registry, threadId);
             }}
             {...(thread?.latestTurn?.state === "running" || queued

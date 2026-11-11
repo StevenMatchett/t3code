@@ -310,3 +310,29 @@ describe("subagent sidebar visibility", () => {
     expect(restored).toMatchObject({ route: "conversation", threadId: t4, subagentsOf: t1 });
   });
 });
+
+describe("side chat sidebar visibility", () => {
+  const sideChatRows: ShellRows = {
+    ...rows,
+    threads: [
+      rows.threads[0]!,
+      {
+        ...rows.threads[1]!,
+        lineage: { relationshipToParent: "fork", parentThreadId: t1, sideChat: true },
+      },
+      rows.threads[2]!,
+    ],
+  };
+  it("never lists a side chat, even with subagents shown, but keeps one opened directly", () => {
+    const send = (state: ReturnType<typeof initial>, command: ShellCommand) =>
+      dispatchShellCommand(state, command, sideChatRows);
+    const start = send(
+      { ...createInitialShellState("threads"), sidebarView: "recent" },
+      { type: "reconcile" },
+    );
+    const shown = send(start, { type: "toggle-subagents" });
+    expect(send(shown, { type: "move", offset: 1, wrap: false }).threadId).toBe(t3);
+    const opened = send(initial(), { type: "open-thread", projectId: p1, threadId: t2 });
+    expect(send(opened, { type: "reconcile" })).toEqual(opened);
+  });
+});

@@ -1,4 +1,4 @@
-import { RegistryContext } from "@effect/atom-react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import type { ModelSelection, ServerProvider, ThreadId } from "@t3tools/contracts";
 import {
@@ -18,6 +18,7 @@ import {
 } from "../../features/chat/skillCompletion.ts";
 import { useUi } from "../../ui/context.tsx";
 import { composerCommands } from "../../features/chat/composerCommands.ts";
+import { sideChatProblem } from "../../features/chat/sideChat.ts";
 import {
   completePathDraft,
   pathCompletionAt,
@@ -97,9 +98,10 @@ export function useComposerChoices({
     },
   ];
   const needle = (menu === "skills" ? (completion?.query ?? "") : query).toLocaleLowerCase();
-  const commands = composerCommands(provider).filter((command) =>
-    `${command.name} ${command.detail}`.toLocaleLowerCase().includes(needle),
-  );
+  const threadCapabilities = useAtomValue(client.threadCapabilities);
+  const commands = composerCommands(provider, {
+    sideChats: sideChatProblem(thread, threadCapabilities) === null,
+  }).filter((command) => `${command.name} ${command.detail}`.toLocaleLowerCase().includes(needle));
   const files = useProjectPathSearch({
     client,
     cwd,
