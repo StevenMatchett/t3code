@@ -571,7 +571,11 @@ export function Conversation({
     },
     bindings: {
       "composer.focus": { enabled: !readOnly, run: activateComposer },
-      "history.back": onBack,
+      // A side chat belongs to its thread, so leaving it goes back there, not to the sidebar.
+      "history.back":
+        thread?.lineage?.sideChat === true && parentThreadId !== null
+          ? { label: "Parent", run: openParent }
+          : onBack,
       "history.nextRegion": {
         label: agents.length > 0 ? "Agents" : "Sidebar",
         run: () => {

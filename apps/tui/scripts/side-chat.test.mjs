@@ -21,7 +21,7 @@ import {
 } from "./terminal-fixture.mjs";
 import { preparePeer } from "./provider-peer-fixture.mjs";
 
-it.live("opens the side chat /btw starts, goes back with U, and returns from the list", () =>
+it.live("opens the side chat /btw starts, goes back with Esc or U, and returns from the list", () =>
   Effect.gen(function* () {
     const fixture = yield* makeTerminalEnvironmentFixture({
       serverEntryPath: process.env.TUI_TEST_SERVER_ENTRY,
@@ -104,7 +104,8 @@ it.live("opens the side chat /btw starts, goes back with U, and returns from the
       yield* Effect.promise(() => driver.flush());
     NodeAssert.match(driver.captureFrame(), /hello/);
 
-    yield* press("u");
+    // Esc leaves a side chat for its thread, not the sidebar.
+    yield* press("ESCAPE");
     NodeAssert.match(header(), /Main thread/);
     // Side chats never list in the sidebar, so the parent is the way back in.
     NodeAssert.match(driver.captureFrame(), /S Side chats 1/);
@@ -113,5 +114,8 @@ it.live("opens the side chat /btw starts, goes back with U, and returns from the
     yield* press("RETURN");
     NodeAssert.doesNotMatch(header(), /Main thread/);
     NodeAssert.match(driver.captureFrame(), /U Parent/);
+    yield* press("u");
+    NodeAssert.match(header(), /Main thread/);
+    NodeAssert.match(driver.captureFrame(), /S Side chats 1/);
   }).pipe(Effect.scoped),
 );
