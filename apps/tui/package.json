@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/tui",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "bin": {
     "t3-tui": "./dist/cli/bin.js"
@@ -10,6 +10,8 @@
   "scripts": {
     "build": "tsc --noEmit false --outDir dist",
     "build:artifact": "node ./scripts/build-artifact.mjs",
+    "build:npm": "node ./scripts/build-npm-packages.mjs",
+    "smoke:npx": "node ./scripts/npx-smoke.mjs",
     "dev": "tsc --noEmit false --outDir dist --noCheck && node ./scripts/run-with-node-ffi.mjs ./dist/cli/bin.js",
     "runtime:check": "node ./scripts/run-with-node-ffi.mjs ./scripts/runtime-compatibility.mjs",
     "runtime:smoke": "node ./scripts/run-with-node-ffi.mjs ./scripts/open-tui-smoke.mjs",

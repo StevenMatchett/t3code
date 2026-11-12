@@ -8,7 +8,11 @@ if (!compatibility.supported) {
   NodeProcess.stderr.write(`${compatibility.message}\n`);
   process.exitCode = 1;
 } else if (!NodeProcess.getBuiltinModule("node:ffi")) {
-  const args = ["--experimental-ffi", ...NodeProcess.argv.slice(1)];
+  const args = [
+    "--experimental-ffi",
+    "--disable-warning=ExperimentalWarning",
+    ...NodeProcess.argv.slice(1),
+  ];
   if (NodeProcess.platform !== "win32" && NodeProcess.execve) {
     NodeProcess.execve(
       NodeProcess.execPath,

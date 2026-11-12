@@ -26,6 +26,10 @@ credential directory. Only this path sends a bootstrap secret over an inherited 
 exchanges that secret for a scoped attach credential and clears the original buffer. Existing T3
 servers remain externally owned and survive TUI exit.
 
+The packaged `t3tui` adds one more environment: a background server it installs as a user service
+with its own state directory. It is a normal externally owned server to the TUI, which pairs with
+it through that server's `pair` command, never through no-auth mode.
+
 ## Alternatives considered
 
 - Importing server services into the TUI would bypass the tested client boundary and tie server

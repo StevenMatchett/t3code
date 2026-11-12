@@ -4,6 +4,7 @@
 import * as NodePath from "node:path";
 
 import type { StartAndConnectAuthenticatedTuiEnvironmentOptions } from "../connection/authenticatedEnvironment.ts";
+import { TUI_DAEMON_COMMANDS, type TuiDaemonCommand } from "../daemon/daemon.ts";
 
 export const DEFAULT_TUI_PORT = 3_773;
 export const DEFAULT_TUI_STATE_DIRECTORY_NAME = ".t3-tui";
@@ -20,6 +21,11 @@ export interface TuiCliOptions {
 
 export type TuiCliParseResult =
   | { readonly action: "run"; readonly options: TuiCliOptions }
+  | {
+      readonly action: "daemon";
+      readonly command: TuiDaemonCommand;
+      readonly port?: number;
+    }
   | { readonly action: "help" }
   | { readonly action: "version" };
 
@@ -101,10 +107,34 @@ function parseConnectionOrigin(value: string): string {
   return url.origin;
 }
 
+function parseDaemonArgs(argv: ReadonlyArray<string>): TuiCliParseResult {
+  const [command, ...rest] = argv;
+  if (command === "--help" || command === "-h") return { action: "help" };
+  if (!TUI_DAEMON_COMMANDS.includes(command as TuiDaemonCommand)) {
+    throw new TuiCliUsageError(`Usage: t3tui daemon <${TUI_DAEMON_COMMANDS.join("|")}>`);
+  }
+  let port: number | undefined;
+  for (let index = 0; index < rest.length; index += 1) {
+    const [name, inlineValue] = splitFlag(rest[index]!);
+    if (name !== "--port" || command !== "install" || port !== undefined) {
+      throw new TuiCliUsageError("Only `t3tui daemon install` accepts one --port <port>.");
+    }
+    const value = inlineValue ?? rest[(index += 1)];
+    if (value === undefined) throw new TuiCliUsageError("--port requires a value");
+    port = parsePort(value);
+  }
+  return {
+    action: "daemon",
+    command: command as TuiDaemonCommand,
+    ...(port === undefined ? {} : { port }),
+  };
+}
+
 export function parseTuiCliArgs(
   argv: ReadonlyArray<string>,
   context: TuiCliParseContext,
 ): TuiCliParseResult {
+  if (argv[0] === "daemon") return parseDaemonArgs(argv.slice(1));
   let stateDir: string | undefined;
   let cwd: string | undefined;
   let port: number | undefined;
@@ -196,6 +226,7 @@ export function formatTuiCliHelp(context: TuiCliParseContext): string {
     "",
     "Attach the TUI prototype to your saved T3 Code environment.",
     "Existing projects and threads stay on that server. The current UI is still a prototype.",
+    "With no saved environment, the packaged t3tui starts and pairs with its own local server.",
     "",
     "Options:",
     "  --connect <origin>  Attach only to this HTTP(S) origin with its saved credential",
@@ -206,6 +237,12 @@ export function formatTuiCliHelp(context: TuiCliParseContext): string {
     `  --port <port>       Loopback server port (default: ${DEFAULT_TUI_PORT})`,
     "  -h, --help          Show help",
     "  -v, --version       Show version",
+    "",
+    "Background server (packaged t3tui only):",
+    "  t3tui daemon install [--port <port>]  Install and start the local T3 server service",
+    "  t3tui daemon start|stop|restart       Control the service",
+    "  t3tui daemon status                   Show whether it runs, and where its logs are",
+    "  t3tui daemon uninstall                Remove the service and keep your threads",
   ].join("\n");
 }
 

@@ -148,3 +148,24 @@ describe("TUI CLI options", () => {
     expect(result.start.env).not.toHaveProperty("VITE_DEV_SERVER_URL");
   });
 });
+
+describe("TUI daemon commands", () => {
+  it("parses daemon subcommands and an install port", () => {
+    expect(parseTuiCliArgs(["daemon", "status"], context)).toEqual({
+      action: "daemon",
+      command: "status",
+    });
+    expect(parseTuiCliArgs(["daemon", "install", "--port=4100"], context)).toEqual({
+      action: "daemon",
+      command: "install",
+      port: 4100,
+    });
+  });
+
+  it("rejects unknown subcommands and a port outside install", () => {
+    expect(() => parseTuiCliArgs(["daemon", "reboot"], context)).toThrow(TuiCliUsageError);
+    expect(() => parseTuiCliArgs(["daemon", "start", "--port", "4100"], context)).toThrow(
+      TuiCliUsageError,
+    );
+  });
+});

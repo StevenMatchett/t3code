@@ -41,6 +41,13 @@ Later TUI processes use a protected, derived credential bound to the environment
 origin. A missing or rejected credential enters repair state. It does not make a loopback server
 trusted, kill the live process, or start a second server against the same state directory.
 
+The packaged `t3tui` also owns a background server with its own state under `~/.t3-tui/daemon`,
+never T3 Code's `~/.t3` ([`daemon.ts`](../../apps/tui/src/daemon/daemon.ts)). It is the default
+environment only when no credential for another origin is saved. For that server, a missing or
+rejected credential is repaired by running the server's own `pair` command against the daemon's
+state directory and exchanging the one-time token like any other pairing. That is still explicit
+pairing by a process with access to the server's state, not a trusted loopback path.
+
 Phase 0 must prove that the current server session model supports this attachment lifetime. If it
 does not, the fork may add a revocable local reattach grant. It must not persist the original
 bootstrap secret or enable no-auth mode.

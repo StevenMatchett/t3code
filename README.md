@@ -9,6 +9,44 @@
 > Use the upstream repository for official T3 Code releases and support. See the
 > [TUI client boundary](./docs/internals/tui-client.md) for the fork's scope.
 
+## Install
+
+```bash
+npx t3tui
+```
+
+That is the whole setup: no clone, no build, and no separate server install. The package bundles
+the T3 server. The first launch installs it as a background service, starts it, pairs the TUI with
+it, and opens the TUI. Later launches start the server if it has stopped and reuse the saved
+pairing. Install a provider CLI (Codex, Claude Code, and so on) and sign in to it before sending
+prompts. The service finds provider CLIs on the `PATH` you had when it was installed.
+
+The TUI needs Node.js 26.4 or newer. On an older Node, `t3tui` borrows Node 26 from npm
+(the first run downloads it). Builds exist for macOS and Linux (glibc) on arm64 and x64.
+
+### Background server
+
+The server runs as a user service: `systemd --user` on Linux and a launchd agent on macOS. Without
+either, it runs as a background process that the TUI starts when needed. It listens only on
+`127.0.0.1:3780`, keeps its data in `~/.t3-tui/daemon/server`, separate from T3 Code's `~/.t3`,
+and runs from its own copy of the package, so clearing the npm cache does not break it.
+
+```bash
+npx t3tui daemon status        # running or stopped, version, service, and log path
+npx t3tui daemon stop          # stop it now (the service starts again at next login)
+npx t3tui daemon start         # start it again
+npx t3tui daemon restart       # stop and start it
+npx t3tui daemon install --port 3790   # move it to another port, or upgrade it
+npx t3tui daemon uninstall     # remove the service; your threads are kept
+```
+
+Set `T3TUI_DAEMON_PORT` before the first launch to choose a different port up front. After you
+upgrade `t3tui`, a running server keeps its version, so live agent work is not interrupted.
+`t3tui daemon install` switches it to the new version, and a stopped server is upgraded the next
+time the TUI starts it. To use an existing T3 Code environment instead, pair with it as described
+in [Getting started from source](#getting-started-with-t3-tui). A saved pairing for another
+environment takes precedence over the local server.
+
 This branch connects to an existing T3 environment to browse projects and threads, send text
 prompts, follow agent output, stop turns, respond to approvals and questions, choose models/options,
 and invoke provider skills. New threads can use the current checkout or an isolated Git worktree.
@@ -72,6 +110,9 @@ Open the project's terminal with `Ctrl+T`. `Ctrl+\` releases keyboard focus to t
 </details>
 
 ## Getting started with T3 TUI
+
+This section runs the TUI from a checkout against an existing T3 Code environment. For the
+packaged install with its own server, see [Install](#install).
 
 ### 1. Install and launch T3 Code first
 
