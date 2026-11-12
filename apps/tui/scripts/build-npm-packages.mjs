@@ -1,13 +1,6 @@
-// Builds the npm packages behind `npx t3tui` into a new output directory:
-//
-//   t3tui-<platform>-<arch>-<version>.tgz  this host's self-contained TUI + server
-//   t3tui-<version>.tgz                    the launcher, which lists every platform
-//                                          package as an optional dependency
-//
-// Pass `--platforms linux-x64,darwin-arm64` to name only the platform packages
-// you will publish. Each platform package must be built on its own platform (native renderer,
-// node-pty, keyring). Publish the tarballs, not directories: `npm publish <dir>`
-// drops `node_modules/`, while `npm publish <tarball>` uploads the bytes as given.
+// Builds `t3tui-<platform>-<arch>-<version>.tgz` (this host's TUI and server; build each platform
+// on that platform) and `t3tui-<version>.tgz` (the launcher, depending on the `--platforms` it is
+// given). Publish the .tgz files: `npm publish <dir>` drops the bundled node_modules.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";

@@ -1,15 +1,7 @@
-// Proves a clean `npx t3tui` works end to end, from locally packed tarballs or,
-// with --registry, a registry the packages were published to:
-// npm installs the packages into an empty cache, the first launch installs and
-// starts the background server, pairs with it, and renders the TUI; a stopped
-// server is started again by the next launch; uninstall removes the service.
-//
-//   node scripts/npx-smoke.mjs [--tarballs <dir> | --registry <url>]
-//     [--manager auto|systemd|launchd|process] [--keep]
-//
-// HOME, the npm cache, the TUI state, and the server data are temporary. On
-// systemd and launchd the service is real but uses a disposable unit name, and
-// is uninstalled when the smoke finishes, pass or fail.
+// Proves a clean `npx t3tui` installs, starts and pairs the background server, opens the TUI,
+// restarts a stopped server, and uninstalls. HOME and caches are temporary; a real systemd or
+// launchd service uses a disposable name and is removed even on failure.
+// Usage: npx-smoke.mjs [--tarballs <dir> | --registry <url>] [--manager <name>] [--keep]
 import * as NodeAssert from "node:assert/strict";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -109,7 +101,6 @@ function t3tui(...args) {
 }
 
 // Colors and cursor moves split rendered text; matching runs on what is left between them.
-// oxlint-disable-next-line no-control-regex -- strips terminal escape sequences
 const visibleText = (output) => output.replace(/\x1b\[[0-9;?<>=]*[ -/]*[@-~]/g, "");
 
 /**
@@ -193,7 +184,8 @@ const DOWN = "\x1b[B";
 const settingsSteps = [
   { name: "opened settings with live provider status", keys: ",", expect: "need setup" },
   { name: "opened general settings", keys: `${DOWN}\r`, expect: "Default permissions" },
-  { name: "saved a server setting", keys: "\r", expect: "Saved." },
+  // "Saving…" becomes "Saved." by redrawing only "ed.", so wait for the new value instead.
+  { name: "saved a server setting", keys: "\r", expect: "Ask before changes" },
 ];
 
 /** Turning off the first provider writes an explicit provider instance through the RPC. */

@@ -1,16 +1,7 @@
-// Tests `npx t3tui` on a clean machine: a Debian container with systemd as PID 1
-// and only Node and git, installing from a local npm registry that the freshly
-// built packages are published to. Nothing from this checkout is on the machine
-// except the smoke script.
-//
-//   node scripts/docker-test.mjs [smoke|shell] [--node <version>] [--with-claude] [--tarballs <dir>] [--keep]
-//
-// smoke (default)  runs scripts/npx-smoke.mjs inside the machine against the registry
-// shell            opens a login shell as the test user; type `npx t3tui` to try it yourself
-// --node           Node version on the machine (default 26.8.2; try 22.12.0 for the fallback)
-// --with-claude    preinstall Claude Code for the test user (cached in the image after the first build)
-// --tarballs       reuse packages from build-npm-packages.mjs instead of building
-// --keep           leave the containers running afterwards
+// Tests `npx t3tui` on a clean Debian machine (systemd as PID 1, only Node and git) that installs
+// from a local registry holding freshly built packages. `smoke` runs npx-smoke.mjs there; `shell`
+// opens a login shell as the test user. --node picks Node (an older one tests the Node 26
+// fallback), --with-claude preinstalls Claude Code, --tarballs reuses a build, --keep leaves it up.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -31,7 +22,7 @@ const { values: flags, positionals } = NodeUtil.parseArgs({
 const mode = positionals[0] ?? "smoke";
 if (!["smoke", "shell"].includes(mode) || positionals.length > 1) {
   throw new Error(
-    "Usage: docker-test.mjs [smoke|shell] [--node <version>] [--tarballs <dir>] [--keep]",
+    "Usage: docker-test.mjs [smoke|shell] [--node <version>] [--with-claude] [--tarballs <dir>] [--keep]",
   );
 }
 
