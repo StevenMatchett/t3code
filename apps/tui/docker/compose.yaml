@@ -24,7 +24,8 @@ services:
     tmpfs:
       - /run
       - /run/lock
-      - /tmp
+      # exec: the smoke keeps npx's cache, and so the installed t3tui, under /tmp.
+      - /tmp:exec
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
       - ${PACKAGES_DIR:?set PACKAGES_DIR}:/packages:ro
