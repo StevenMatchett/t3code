@@ -76,6 +76,7 @@ describe("TUI CLI options", () => {
     expect(parseTuiCliArgs(["--new-environment"], context)).toMatchObject({
       options: { newEnvironment: true },
     });
+    expect(parseTuiCliArgs(["--local"], context)).toMatchObject({ options: { local: true } });
     expect(
       parseTuiCliArgs(["--connect", "http://127.0.0.1:43110", "--pair-stdin"], context),
     ).toMatchObject({
@@ -88,6 +89,8 @@ describe("TUI CLI options", () => {
       ["--pair-stdin"],
       ["--connect", "http://127.0.0.1:43110", "--new-environment"],
       ["--new-environment", "--pair-stdin"],
+      ["--local", "--connect", "http://127.0.0.1:43110"],
+      ["--local", "--new-environment"],
       ["--connect", "http://user:secret@example.test"],
       ["--connect", "http://example.test/#token=secret"],
       ["--connect", "http://example.test/?token=secret"],

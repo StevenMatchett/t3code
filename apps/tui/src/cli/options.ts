@@ -17,6 +17,7 @@ export interface TuiCliOptions {
   readonly connect?: string;
   readonly pairStdin?: boolean;
   readonly newEnvironment?: boolean;
+  readonly local?: boolean;
 }
 
 export type TuiCliParseResult =
@@ -141,6 +142,7 @@ export function parseTuiCliArgs(
   let connect: string | undefined;
   let pairStdin = false;
   let newEnvironment = false;
+  let local = false;
   const seen = new Set<string>();
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -158,15 +160,17 @@ export function parseTuiCliArgs(
         "--connect",
         "--pair-stdin",
         "--new-environment",
+        "--local",
       ].includes(name)
     ) {
       throw new TuiCliUsageError("Unknown argument. Use --help to see supported options.");
     }
     if (seen.has(name)) throw new TuiCliUsageError(`${name} may only be supplied once`);
     seen.add(name);
-    if (name === "--pair-stdin" || name === "--new-environment") {
+    if (name === "--pair-stdin" || name === "--new-environment" || name === "--local") {
       if (inlineValue !== undefined) throw new TuiCliUsageError(`${name} does not accept a value`);
       if (name === "--pair-stdin") pairStdin = true;
+      else if (name === "--local") local = true;
       else newEnvironment = true;
       continue;
     }
@@ -203,6 +207,9 @@ export function parseTuiCliArgs(
       "--new-environment cannot be combined with existing-environment options",
     );
   }
+  if (local && (connect || pairStdin || newEnvironment)) {
+    throw new TuiCliUsageError("--local cannot be combined with other environment options");
+  }
   const resolvedStateDir =
     stateDir ?? NodePath.resolve(context.homeDir, DEFAULT_TUI_STATE_DIRECTORY_NAME);
   assertSafeStateDirectory(resolvedStateDir, context);
@@ -215,6 +222,7 @@ export function parseTuiCliArgs(
       ...(connect ? { connect } : {}),
       ...(pairStdin ? { pairStdin } : {}),
       ...(newEnvironment ? { newEnvironment } : {}),
+      ...(local ? { local } : {}),
     },
   };
 }
@@ -232,6 +240,7 @@ export function formatTuiCliHelp(context: TuiCliParseContext): string {
     "  --connect <origin>  Attach only to this HTTP(S) origin with its saved credential",
     "  --pair-stdin        Read a T3 pairing link or token from stdin, save the connection, and exit",
     "  --new-environment   Start a separate TUI environment instead of sharing T3 Code",
+    "  --local             Use the packaged t3tui's own background server, even if another is saved",
     `  --state-dir <path>  TUI state directory (default: ${defaultStateDir})`,
     `  --cwd <path>        Provider working directory (default: ${context.cwd})`,
     `  --port <port>       Loopback server port (default: ${DEFAULT_TUI_PORT})`,

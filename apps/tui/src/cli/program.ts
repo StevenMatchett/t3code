@@ -42,18 +42,16 @@ export interface RunTuiPrototypeOptions {
 const isReattachError = Schema.is(TuiEnvironmentReattachError);
 
 /**
- * The local daemon's origin when this launch should use it: no explicit
- * environment was requested and the saved credential, if any, is for it.
+ * The local daemon's origin when this launch should use it: `--local`, or no explicit environment
+ * was requested and the saved credential, if any, is for it.
  */
 async function resolveLocalDaemonOrigin(
   options: RunTuiPrototypeOptions,
-  credentialStore: TuiCredentialStore,
+  savedOrigin: string | undefined,
 ): Promise<string | undefined> {
   const daemon = options.localDaemon;
   if (!daemon || options.cli.connect || options.cli.newEnvironment) return undefined;
-  const origin = await daemon.origin();
-  const saved = await Effect.runPromise(Effect.option(credentialStore.read()));
-  if (saved._tag === "Some" && normalizeTuiHttpOrigin(saved.value.httpOrigin) !== origin) {
+  if (!options.cli.local && savedOrigin !== undefined && savedOrigin !== (await daemon.origin())) {
     return undefined;
   }
   return daemon.ensureRunning();
@@ -125,13 +123,19 @@ export async function runTuiPrototype(options: RunTuiPrototypeOptions): Promise<
   const shutdown = new TuiShutdownController();
   shutdown.attachToProcess(process);
   try {
-    const localDaemonOrigin = await resolveLocalDaemonOrigin(options, credentialStore);
+    const saved = await Effect.runPromise(Effect.option(credentialStore.read()));
+    const savedOrigin =
+      saved._tag === "Some" ? normalizeTuiHttpOrigin(saved.value.httpOrigin) : undefined;
+    const localDaemonOrigin = await resolveLocalDaemonOrigin(options, savedOrigin);
     const supervisor = await Effect.runPromise(
       localDaemonOrigin && options.localDaemon
         ? makeLocalDaemonSupervisor({
             origin: localDaemonOrigin,
             daemon: options.localDaemon,
-            credentialStore,
+            // Its own credential, so pairing with another T3 Code never replaces it.
+            credentialStore: makeTuiCredentialStore({
+              stateDirectory: NodePath.join(stateDirectory, "local"),
+            }),
           })
         : makeTuiLocalEnvironmentSupervisor({
             credentialStore,
@@ -189,7 +193,15 @@ export async function runTuiPrototype(options: RunTuiPrototypeOptions): Promise<
       closeRuntime: (runtime) => runtime.close(),
       clearBearer: (lease) => lease.environment.bearer.clear(),
       terminateChild: () => Effect.runPromise(supervisor.release("terminate-owned")),
-      reportError: (error) => NodeProcess.stderr.write(`${formatTuiCliError(error)}\n`),
+      reportError: (error) => {
+        NodeProcess.stderr.write(`${formatTuiCliError(error)}\n`);
+        if (options.localDaemon && !localDaemonOrigin && savedOrigin && isReattachError(error)) {
+          NodeProcess.stderr.write(
+            `The saved T3 connection is ${savedOrigin}. Start that T3 Code, or run ` +
+              "`t3tui --local` to use t3tui's own background server.\n",
+          );
+        }
+      },
     });
   } finally {
     sessionState?.close();

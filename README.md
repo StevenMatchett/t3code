@@ -36,7 +36,7 @@ and history. The `t3tui` package brings its own server, so a new machine needs n
 2. **First launch.** `t3tui` copies the server to `~/.t3-tui/daemon`, installs it as a background
    service (`systemd --user` on Linux, a launchd agent on macOS), starts it on `127.0.0.1:3780`,
    and pairs with it using a short-lived local token. It saves the resulting credential in
-   `~/.t3-tui` and opens the TUI. There is no pairing code to copy.
+   `~/.t3-tui/local` and opens the TUI. There is no pairing code to copy.
 3. **Every launch after that.** `t3tui` reuses the saved credential. If the server has stopped, it
    starts it first.
 4. **Closing the TUI** leaves the server running, so agents keep working and the next launch opens
@@ -49,7 +49,8 @@ What lives where:
 | `~/.t3-tui/daemon/server`                                                                 | The server's data: projects, threads, settings, and provider sign-ins             |
 | `~/.t3-tui/daemon/server.log`                                                             | The server log                                                                    |
 | `~/.t3-tui/daemon/runtime/<version>`                                                      | The server's own copy of the package, so clearing the npm cache does not break it |
-| `~/.t3-tui/environment-credential.json`                                                   | The saved pairing credential (mode `0600`)                                        |
+| `~/.t3-tui/local/environment-credential.json`                                             | The pairing with t3tui's own server (mode `0600`)                                 |
+| `~/.t3-tui/environment-credential.json`                                                   | A pairing with another T3 Code, if you made one                                   |
 | `~/.config/systemd/user/t3tui.service` or `~/Library/LaunchAgents/com.t3tui.server.plist` | The service definition                                                            |
 
 This data is separate from T3 Code's own `~/.t3`. T3 TUI never touches your desktop app's state.
@@ -100,7 +101,7 @@ To remove T3 TUI:
 ```bash
 t3tui daemon uninstall    # stop and remove the service
 npm uninstall -g t3tui    # remove the command
-rm -rf ~/.t3-tui          # optional: delete threads, settings, and the saved credential
+rm -rf ~/.t3-tui          # optional: delete threads, settings, and saved pairings
 ```
 
 ## Use an existing T3 Code environment
@@ -115,13 +116,16 @@ pbpaste | t3tui --connect http://127.0.0.1:3773 --pair-stdin   # Linux: wl-paste
 t3tui
 ```
 
-A saved pairing for another environment takes precedence over the local server. To go back to the
-bundled server, delete `~/.t3-tui/environment-credential.json`.
+While that pairing is saved, a plain `t3tui` attaches to that T3 Code. Run `t3tui --local` to use
+t3tui's own server instead; both pairings stay saved, so you can switch back and forth. To make the
+bundled server the default again, delete `~/.t3-tui/environment-credential.json`.
 
 ## Troubleshooting
 
 - **The TUI does not connect.** Run `t3tui daemon status` and read the end of the log it names.
   `t3tui daemon restart` restarts the server.
+- **"The saved T3 connection was rejected or is unavailable."** You paired with another T3 Code,
+  such as the desktop app, and it is not running. Start it, or run `t3tui --local`.
 - **Port 3780 is in use.** Run `t3tui daemon install --port <port>`.
 - **`npm install -g` fails with `EACCES`.** Your Node is installed system-wide. Use a Node version
   manager, or set a user-owned npm prefix as described in

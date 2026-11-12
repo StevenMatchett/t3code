@@ -43,7 +43,9 @@ trusted, kill the live process, or start a second server against the same state 
 
 The packaged `t3tui` also owns a background server with its own state under `~/.t3-tui/daemon`,
 never T3 Code's `~/.t3` ([`daemon.ts`](../../apps/tui/src/daemon/daemon.ts)). It is the default
-environment only when no credential for another origin is saved. For that server, a missing or
+environment only when no credential for another origin is saved, or with `--local`. Its credential
+lives in its own store (`~/.t3-tui/local`), so pairing with another T3 Code never replaces it. For
+that server, a missing or
 rejected credential is repaired by running the server's own `pair` command against the daemon's
 state directory and exchanging the one-time token like any other pairing. That is still explicit
 pairing by a process with access to the server's state, not a trusted loopback path.
@@ -94,7 +96,7 @@ outside the repository.
   real server and a synthetic Codex peer, pressing only keys the screen shows, and reports
   key-to-screen latency.
 - `T3_TUI_PERF=1 node scripts/run-with-node-ffi.mjs ./node_modules/vite-plus/bin/vp test run --root .
-scripts/perf-baseline.test.tsx` measures input-to-frame on a 5,000-row thread.
+  scripts/perf-baseline.test.tsx` measures input-to-frame on a 5,000-row thread.
 
 ## Fork rules
 

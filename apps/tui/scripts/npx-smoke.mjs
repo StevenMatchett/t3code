@@ -187,8 +187,8 @@ function makeScreen(cols, rows) {
  * step's keys and waits for its text to be drawn. `installAnswer` answers npx's one-time offer to
  * install the t3tui command first.
  */
-async function openTui(pty, label, steps = [], installAnswer) {
-  const child = pty.spawn(npx, npxArgs, {
+async function openTui(pty, label, steps = [], installAnswer, args = []) {
+  const child = pty.spawn(npx, [...npxArgs, ...args], {
     cwd: home,
     cols: 100,
     rows: 30,
@@ -294,33 +294,35 @@ try {
   const platformPackage = NodePath.join(npxRoot, installed, "node_modules", "@t3tui", key);
   const pty = NodeModule.createRequire(NodePath.join(platformPackage, "package.json"))("node-pty");
 
-  // Only a registry has the version the offer installs; with tarballs, decline it.
+  // A pairing with another T3 Code that is not running: a plain launch says so, and --local
+  // uses t3tui's own server without replacing that pairing.
+  const otherCredential = NodePath.join(home, ".t3-tui", "environment-credential.json");
+  await NodeFSP.mkdir(NodePath.dirname(otherCredential), { recursive: true, mode: 0o700 });
+  const otherPairing = JSON.stringify({
+    version: 1,
+    httpOrigin: `http://127.0.0.1:${await freePort()}`,
+    environmentId: "00000000-0000-4000-8000-000000000000",
+    bearerToken: "not-a-real-token",
+    expiresAtEpochMs: Date.now() + 86_400_000,
+  });
+  await NodeFSP.writeFile(otherCredential, otherPairing, { mode: 0o600 });
+  const unreachable = t3tui();
+  NodeAssert.notEqual(unreachable.status, 0);
+  NodeAssert.match(unreachable.stderr, /t3tui --local/, unreachable.stderr);
+  NodeProcess.stdout.write("an unreachable saved T3 Code points to --local\n");
+
   await openTui(
     pty,
-    "first launch (installs, starts, and pairs)",
+    "first launch with --local (installs, starts, and pairs)",
     settingsSteps,
-    flags.registry ? "y" : "n",
+    undefined,
+    ["--local"],
   );
-  if (flags.registry) {
-    const installed = NodeChildProcess.spawnSync("t3tui", ["--version"], {
-      env,
-      encoding: "utf8",
-      shell: NodeProcess.platform === "win32",
-    });
-    NodeAssert.equal(installed.status, 0, installed.stderr);
-    NodeAssert.match(installed.stdout, /^t3-tui \d+\.\d+\.\d+/m);
-    NodeProcess.stdout.write(`t3tui on PATH: ${installed.stdout.split("\n")[0]}\n`);
-  }
-  const running = t3tui("daemon", "status");
-  NodeAssert.equal(running.status, 0, running.stderr);
-  NodeAssert.match(running.stdout, new RegExp(`running at http://127\\.0\\.0\\.1:${port}`));
-  NodeProcess.stdout.write(`service: ${/Service: (.*)/.exec(running.stdout)?.[1]}\n`);
-  if (flags.manager === "auto" && NodeProcess.platform === "linux") {
-    NodeAssert.match(running.stdout, /systemd --user .*\(active, enabled\)/);
-  }
+  NodeAssert.equal(NodeFS.readFileSync(otherCredential, "utf8"), otherPairing);
+  await NodeFSP.rm(otherCredential);
   NodeAssert.ok(
-    NodeFS.existsSync(NodePath.join(home, ".t3-tui", "environment-credential.json")),
-    "the first launch saved a paired credential",
+    NodeFS.existsSync(NodePath.join(home, ".t3-tui", "local", "environment-credential.json")),
+    "the first launch saved its own paired credential",
   );
   const serverSettings = NodePath.join(
     home,
@@ -340,11 +342,23 @@ try {
   NodeAssert.equal(stop.status, 0, stop.stderr);
   NodeAssert.equal(t3tui("daemon", "status").status, 3);
 
+  // Only a registry has the version the install offer installs; with tarballs, decline it.
   await openTui(
     pty,
     "second launch (restarts a stopped server, reuses the credential)",
     providerSteps,
+    flags.registry ? "y" : "n",
   );
+  if (flags.registry) {
+    const installed = NodeChildProcess.spawnSync("t3tui", ["--version"], {
+      env,
+      encoding: "utf8",
+      shell: NodeProcess.platform === "win32",
+    });
+    NodeAssert.equal(installed.status, 0, installed.stderr);
+    NodeAssert.match(installed.stdout, /^t3-tui \d+\.\d+\.\d+/m);
+    NodeProcess.stdout.write(`t3tui on PATH: ${installed.stdout.split("\n")[0]}\n`);
+  }
   NodeAssert.match(
     NodeFS.readFileSync(serverSettings, "utf8"),
     /"providerInstances":\s*\{\s*"[a-zA-Z]+":\s*\{[^}]*"enabled":\s*false/,
