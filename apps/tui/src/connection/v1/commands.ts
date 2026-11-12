@@ -1,4 +1,4 @@
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -10,7 +10,7 @@ const decodeCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 export const encodeV1Command = Effect.fn(function* (command: TuiCommand) {
   return yield* decodeCommand({
     ...command,
-    commandId: command.commandId ?? (yield* (yield* Crypto.Crypto).randomUUIDv4.pipe(Effect.orDie)),
+    commandId: command.commandId ?? (yield* (yield* SecureRandom.SecureRandom).uuidV4()),
     createdAt: command.createdAt ?? DateTime.formatIso(yield* DateTime.now),
     type: command.type === "project.update" ? "project.meta.update" : command.type,
   });

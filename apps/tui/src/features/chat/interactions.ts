@@ -18,7 +18,7 @@ import {
   type ProviderInstanceId,
   type ServerProviderSkill,
   type ProviderApprovalDecision,
-  type ThreadId,
+  ThreadId,
   type UploadChatImageAttachment,
   type ChatAttachment,
 } from "@t3tools/contracts";
@@ -27,6 +27,8 @@ import {
   type ThreadPendingUserInput as PendingUserInput,
 } from "@t3tools/client-runtime/state/thread-requests";
 
+import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
+import { parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { planModeProblem } from "./composerModes.ts";
 import { recallableComposerPrompt } from "./restoredPrompt.ts";
 import { checkpointRestoreTargets, waitForCheckpointRestore } from "./checkpointRestore.ts";
@@ -64,6 +66,13 @@ export type TuiThreadCommand = Extract<
   }
 >;
 type PromptCommand = Extract<TuiThreadCommand, { readonly type: "thread.turn.start" }>;
+/** Side chats are other threads, so these commands are not tied to the thread being edited. */
+type SideChatCommand = Extract<
+  TuiCommand,
+  { readonly type: "thread.fork.side-chat" | "thread.delete" }
+>;
+/** Everything these interactions dispatch. */
+export type TuiInteractionCommand = TuiThreadCommand | SideChatCommand;
 export interface QueuedPrompt {
   readonly command: PromptCommand;
   readonly attachments: readonly (UploadChatImageAttachment | ChatAttachment)[];
@@ -188,6 +197,30 @@ function failureId(
   );
 }
 
+/** Resolves true once `ready` holds for the atom's value, or false after `timeoutMs`. */
+function waitForAtom<A>(
+  registry: AtomRegistry.AtomRegistry,
+  atom: Atom.Atom<A>,
+  ready: (value: A) => boolean,
+  timeoutMs: number,
+) {
+  return new Promise<boolean>((resolve) => {
+    const release = registry.mount(atom);
+    let unsubscribe = () => {};
+    const finish = (result: boolean) => {
+      clearTimeout(timer);
+      unsubscribe();
+      release();
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    unsubscribe = registry.subscribe(atom, (value) => {
+      if (ready(value)) finish(true);
+    });
+    if (ready(registry.get(atom))) finish(true);
+  });
+}
+
 export function makeThreadInteractions(options: {
   readonly session?: TuiSessionState;
   readonly thread: (threadId: ThreadId) => Atom.Atom<TuiThreadState>;
@@ -196,7 +229,7 @@ export function makeThreadInteractions(options: {
   readonly shell?: Atom.Atom<TuiShellState>;
   readonly dispatch: (
     registry: AtomRegistry.AtomRegistry,
-    command: TuiThreadCommand,
+    command: TuiInteractionCommand,
   ) => Promise<boolean>;
   readonly prepareRestoredAttachments?: (
     registry: AtomRegistry.AtomRegistry,
@@ -1018,7 +1051,7 @@ export function makeThreadInteractions(options: {
           attachments: [],
           skill: null,
           error: null,
-          notice: "Queued — sends after the next tool call or when the turn ends.",
+          notice: "Queued. Sends after the next tool call or when the turn ends.",
         });
         return true;
       }
@@ -1038,6 +1071,105 @@ export function makeThreadInteractions(options: {
         skill: latest.draft === command.message.text ? null : latest.skill,
       });
       return true;
+    },
+    /**
+     * Sends a `/side` or `/btw` draft as a side chat: forks the thread's latest stable point,
+     * sends the prompt there, and resolves the side chat's id. `problem` explains why side
+     * chats are unavailable here; the draft stays put and the reason shows as the error.
+     */
+    startSideChat: async (
+      registry: AtomRegistry.AtomRegistry,
+      threadId: ThreadId,
+      problem: string | null,
+    ): Promise<ThreadId | null> => {
+      const current = registry.get(state(threadId));
+      const command = parseSideChatCommand(expandPastes(current.draft, current.pastes));
+      if (current.pending || !command) return null;
+      if (problem) return (error(registry, threadId, problem), null);
+      const source = currentThread(registry, threadId);
+      if (!source) return null;
+      update(registry, threadId, {
+        pending: "send",
+        error: null,
+        notice: "Starting a side chat...",
+      });
+      const fail = (message: string) => {
+        update(registry, threadId, { pending: null });
+        return (error(registry, threadId, message), null);
+      };
+      const targetThreadId = ThreadId.make(
+        Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16))),
+      );
+      // Drops the empty side chat a failed start leaves behind; one that got its message stays.
+      const discard = () =>
+        void options.dispatch(registry, {
+          type: "thread.delete",
+          ...metadata(),
+          threadId: targetThreadId,
+          onlyIfUnused: true,
+        });
+      if (
+        !(await options.dispatch(registry, {
+          type: "thread.fork.side-chat",
+          ...metadata(),
+          sourceThreadId: threadId,
+          targetThreadId,
+          title: "Side chat",
+        }))
+      )
+        return fail("Could not start a side chat.");
+      const arrived =
+        (await waitForAtom(
+          registry,
+          options.thread(targetThreadId),
+          (value) => value.status === "live" && Option.isSome(value.data),
+          15_000,
+        )) &&
+        (!options.shell ||
+          (await waitForAtom(
+            registry,
+            options.shell,
+            (value) =>
+              Option.exists(value.snapshot, (snapshot) =>
+                snapshot.threads.some((thread) => thread.id === targetThreadId),
+              ),
+            15_000,
+          )));
+      if (!arrived) {
+        discard();
+        return fail("The side chat was created, but it did not reach this client.");
+      }
+      if (command.prompt) {
+        const sent = await run(
+          registry,
+          {
+            type: "thread.turn.start",
+            ...metadata(),
+            threadId: targetThreadId,
+            message: {
+              messageId: MessageId.make(
+                Hex.encode(globalThis.crypto.getRandomValues(new Uint8Array(16))),
+              ),
+              role: "user",
+              text: command.prompt,
+              attachments: [],
+            },
+            modelSelection: source.modelSelection,
+            runtimeMode: current.runtimeMode ?? source.runtimeMode,
+            interactionMode: "default",
+            titleSeed: deriveThreadTitleSeed({ text: command.prompt, attachments: [] }),
+          },
+          "send",
+        );
+        if (!sent) {
+          discard();
+          return fail(
+            registry.get(state(targetThreadId)).error ?? "Could not send the side chat message.",
+          );
+        }
+      }
+      update(registry, threadId, { pending: null, notice: null, draft: "", pastes: [] });
+      return targetThreadId;
     },
     interrupt: async (registry: AtomRegistry.AtomRegistry, threadId: ThreadId) => {
       if (registry.get(state(threadId)).pending) return false;

@@ -551,6 +551,14 @@ export const ACTIONS = {
     hint: 89,
     keywords: "subagent lineage",
   },
+  "thread.sideChats": {
+    scope: "history",
+    title: "Open one of this thread's side chats",
+    keys: ["s"],
+    label: "Side chats",
+    hint: 88,
+    keywords: "side chat btw",
+  },
   "history.vimMove": {
     scope: "history",
     title: "Move the text cursor",

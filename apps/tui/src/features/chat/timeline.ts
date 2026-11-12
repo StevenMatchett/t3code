@@ -1,8 +1,6 @@
 import type { TuiMessage, TuiCheckpoint, TuiActivity } from "../../connection/models.ts";
-import {
-  extractCommandOutputText,
-  type WorkLogToolLifecycleStatus,
-} from "@t3tools/client-runtime/work-log/presentation";
+import type { WorkLogToolLifecycleStatus } from "@t3tools/client-runtime/work-log/presentation";
+import { extractCommandOutputText } from "./commandOutput.ts";
 
 import { normalizeTerminalText, type TerminalTextOptions } from "./terminalText.ts";
 import { toolActivityDetails } from "./activityDetails.ts";

@@ -360,7 +360,13 @@ describe("authenticated TUI environment reattachment", () => {
         assert.deepEqual(connected.config, SERVER_CONFIG);
         assert.deepEqual(
           requests.map((request) => new URL(request.url).pathname),
-          ["/.well-known/t3/environment", "/api/auth/session", "/api/auth/websocket-ticket"],
+          [
+            "/.well-known/t3/environment",
+            "/api/auth/session",
+            // This server predates ticket audiences, so the scoped request falls back.
+            "/api/auth/websocket-ticket/rpc",
+            "/api/auth/websocket-ticket",
+          ],
         );
         assert.isFalse(requests.some((request) => request.url.includes("/oauth/token")));
         assert.equal(requests[0]?.authorization, null);

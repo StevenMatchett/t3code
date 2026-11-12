@@ -12,10 +12,10 @@ import type {
   OrchestrationThreadActivity,
   ThreadPullRequestLink,
 } from "./contracts.ts";
-import { threadPullRequestKeysEqual } from "@t3tools/shared/threadPullRequests";
+import { threadPullRequestKeysEqual } from "@t3tools/client-runtime/thread-pull-requests";
 import type { MessageId, TurnId } from "@t3tools/contracts";
 const isImportedAgentSessionMessageId = (id: string) => id.startsWith("import:");
-import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
+import { compareDateTimeStrings } from "./dateTime.ts";
 
 export type ThreadDetailReducerResult =
   | { readonly kind: "updated"; readonly thread: OrchestrationThread }
@@ -90,13 +90,8 @@ function isResolvableContextWindowActivity(activity: OrchestrationThreadActivity
 }
 
 /**
- * Apply a single orchestration event to an `OrchestrationThread`, returning
- * the updated thread, a deletion signal, or an "unchanged" marker when the
- * event doesn't affect this thread.
- *
- * This is a pure reducer operating on contract types. UI-specific mapping
- * (e.g. resolving attachment preview URLs, normalising model slugs, adding
- * scoped fields like `environmentId`) is the caller's responsibility.
+ * Applies one orchestration event to a thread: the updated thread, a deletion signal, or
+ * "unchanged" when the event is not for it. Pure; UI mapping is the caller's job.
  */
 export function applyThreadDetailEvent(
   thread: OrchestrationThread,
@@ -421,12 +416,9 @@ export function applyThreadDetailEvent(
         };
       });
       if (!found) messages.push(message);
-      // Update latestTurn for assistant messages bound to a turn. A completed
-      // assistant message only settles the turn once the session is no longer
-      // running it — providers may emit several assistant messages per turn
-      // (commentary between tool calls), and the turn must stay unsettled
-      // until the provider reports turn end. Streaming deltas recompute the
-      // same record, so the previous reference is kept when nothing changed.
+      // A completed assistant message settles its turn only once the session stops running it,
+      // since providers send several per turn. Streaming deltas recompute the same record, so
+      // the previous reference is kept when nothing changed.
       const turnStillRunning =
         event.payload.turnId !== null &&
         thread.session?.status === "running" &&
@@ -680,14 +672,9 @@ export function applyThreadDetailEvent(
     // ── Activities ──────────────────────────────────────────────────
     case "thread.activity-appended": {
       const activity = event.payload.activity;
-      // A resolvable context-window update supersedes earlier resolvable ones
-      // for the same turn: consumers only read the latest value (walking the
-      // array backwards), and providers stream these updates continuously, so
-      // retaining the history grows the thread by thousands of rows over a
-      // long session. Mirrors the server-side snapshot rule in
-      // dropStaleContextWindowActivities; retention stays per turn so a
-      // thread.reverted that discards turns can still resolve a value from
-      // the turns that survive.
+      // A resolvable context-window update replaces earlier ones for its turn: readers want the
+      // latest and providers stream thousands. Mirrors dropStaleContextWindowActivities; one per
+      // turn lets a revert still resolve a value from the surviving turns.
       const supersedesContextWindow = isResolvableContextWindowActivity(activity);
       // Live streams append in order: an unseen id sorting at/after the tail
       // of a known-sorted array appends without re-filtering and re-sorting

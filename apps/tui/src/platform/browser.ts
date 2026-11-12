@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 export function browserCommand(
   url: string,
@@ -21,8 +21,8 @@ export function browserCommand(
 export async function openBrowser(url: string): Promise<boolean> {
   const launch = browserCommand(
     url,
-    HostProcessPlatform.defaultValue(),
-    HostProcessEnvironment.defaultValue(),
+    HostProcess.Platform.defaultValue(),
+    HostProcess.Environment.defaultValue(),
   );
   if (!launch) return false;
   await new Promise<void>((resolve, reject) => {

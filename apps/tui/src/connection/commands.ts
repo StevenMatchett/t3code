@@ -29,6 +29,8 @@ export const PromptCommand = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   sourceProposedPlan: Schema.optionalKey(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
+  /** Lets the server name a fresh thread, such as a side chat, after its first message. */
+  titleSeed: Schema.optionalKey(Schema.String),
 });
 type Intent<K extends string, V> = V & { readonly type: K };
 export type TuiCommand =
@@ -39,6 +41,7 @@ export type TuiCommand =
   | Intent<"project.delete", Commands.DeleteProjectInput>
   | Intent<"thread.meta.update", Commands.UpdateThreadMetadataInput>
   | Intent<"thread.fork", Commands.ForkThreadFromRunInput>
+  | Intent<"thread.fork.side-chat", Commands.ForkSideChatInput>
   | Intent<"thread.archive", Commands.ArchiveThreadInput>
   | Intent<"thread.unarchive", Commands.UnarchiveThreadInput>
   | Intent<"thread.delete", Commands.DeleteThreadInput>
@@ -79,6 +82,8 @@ export const executeTuiCommand = Effect.fn("tui.executeCommand")(function* (comm
       return yield* Commands.updateThreadMetadata(command);
     case "thread.fork":
       return yield* Commands.forkThreadFromRun(command);
+    case "thread.fork.side-chat":
+      return yield* Commands.forkSideChat(command);
     case "thread.archive":
       return yield* Commands.archiveThread(command);
     case "thread.unarchive":

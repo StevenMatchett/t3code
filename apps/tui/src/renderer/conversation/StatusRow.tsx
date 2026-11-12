@@ -13,12 +13,14 @@ export function StatusRow({
   timingTurn,
   runningSince,
   showParent,
+  sideChatCount,
   renderMarkdown,
   message,
   messageTone,
   detail,
   onDiff,
   onParent,
+  onSideChats,
   onToggleMarkdown,
 }: {
   readonly worktree: boolean;
@@ -27,12 +29,14 @@ export function StatusRow({
   readonly timingTurn: TuiLatestTurn | null;
   readonly runningSince: string | null;
   readonly showParent: boolean;
+  readonly sideChatCount: number;
   readonly renderMarkdown: boolean;
   readonly message: string;
   readonly messageTone: "muted" | "warning";
   readonly detail: string;
   readonly onDiff: () => void;
   readonly onParent: () => void;
+  readonly onSideChats: () => void;
   readonly onToggleMarkdown: () => void;
 }) {
   return (
@@ -44,6 +48,14 @@ export function StatusRow({
       <Button id="thread-diff-action" label="[D Changes] " tone="accent" onPress={onDiff} />
       {showParent ? (
         <Button id="thread-parent-action" label="[U Parent] " tone="accent" onPress={onParent} />
+      ) : null}
+      {sideChatCount > 0 ? (
+        <Button
+          id="thread-side-chats-action"
+          label={`[S Side chats ${sideChatCount}] `}
+          tone="accent"
+          onPress={onSideChats}
+        />
       ) : null}
       <ThreadActivityIndicator phase={phase} visible={animate} />
       <TurnTiming turn={timingTurn} runningSince={runningSince} />

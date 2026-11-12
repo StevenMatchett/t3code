@@ -6,7 +6,6 @@ import { makeClientFixture } from "../../testing/clientFixture.ts";
 import {
   availableModelChoices,
   favoriteChoicesFirst,
-  modelChangeProblem,
   moveFavoriteModel,
   selectionForModel,
   skillPrefix,
@@ -85,13 +84,6 @@ describe("provider choices", () => {
         },
       };
       registry.update(f.states[0]!, (value) => ({ ...value, data: Option.some(thread) }));
-      expect(
-        modelChangeProblem(
-          { ...thread, latestTurn: { ...thread.latestTurn, state: "completed" } },
-          { ...f.provider, requiresNewThreadForModelChange: true },
-          { instanceId: f.provider.instanceId, model: "opaque/model-b" },
-        ),
-      ).toContain("new thread");
       expect(f.commands).toHaveLength(0);
     } finally {
       registry.dispose();

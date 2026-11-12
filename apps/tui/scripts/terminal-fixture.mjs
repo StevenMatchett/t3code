@@ -10,10 +10,10 @@ import { Effect, Exit, Layer, Option, Schedule, Scope, Stream, SubscriptionRef }
 import * as RpcClient from "effect/rpc/RpcClient";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as Socket from "effect/socket/Socket";
-import { WS_METHODS } from "@t3tools/contracts";
+import { WS_METHODS, WsRpcGroup } from "@t3tools/contracts";
 import { resolveRemoteWebSocketConnectionUrl } from "@t3tools/client-runtime/authorization";
 import { deriveWsBaseUrl } from "@t3tools/client-runtime/environment";
-import { makeWsRpcProtocolClient, layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
+import { layerRemoteHttpClient } from "@t3tools/client-runtime/rpc";
 import {
   applyTerminalAttachStreamEvent,
   nextTerminalAttachSeedState,
@@ -130,7 +130,7 @@ export const openTerminalFixtureConnection = Effect.fn("tui.testing.terminalConn
     const commonClient = yield* (
       tuiProtocolVersion(fixture.readiness.descriptor) === 1
         ? makeV1CommonClient
-        : makeWsRpcProtocolClient
+        : RpcClient.make(WsRpcGroup)
     ).pipe(Effect.provide(context), Scope.provide(scope));
     const legacyClient =
       tuiProtocolVersion(fixture.readiness.descriptor) === 1

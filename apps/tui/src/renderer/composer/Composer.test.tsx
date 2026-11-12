@@ -41,9 +41,7 @@ async function clickLabel(driver: TuiTestDriver, label: string) {
 
 describe("composer commands and file mentions", () => {
   const settle = async (driver: TuiTestDriver) => {
-    await act(async () => {
-      await new Promise((resolve) => setImmediate(resolve));
-    });
+    await driver.flush();
     await driver.flush();
   };
 
@@ -134,10 +132,8 @@ describe("provider commands and the context meter", () => {
   it("runs /compact as its own turn and leaves the rest of the draft alone", async () => {
     const { driver, fixture, id } = await setupWithCommands();
     await driver.input.typeText("keep this /compact");
-    await act(async () => {
-      await driver.input.pressKey("RETURN");
-      await new Promise((resolve) => setImmediate(resolve));
-    });
+    await driver.input.pressKey("RETURN");
+    await driver.flush();
     await driver.flush();
     expect(fixture.commands.at(-1)).toMatchObject({
       type: "thread.turn.start",
@@ -203,13 +199,13 @@ describe("composer dropdowns and slash skills", () => {
     await driver.input.pressKey("TAB");
     await driver.input.pressKey("TAB");
     await driver.input.pressKey("RETURN");
-    expect(driver.captureFrame()).toContain("Mode — next message");
+    expect(driver.captureFrame()).toContain("Mode (next message)");
     await driver.input.pressKey("ARROW_DOWN");
     await driver.input.pressKey("RETURN");
     expect(driver.registry.get(fixture.client.actions.state(id)).interactionMode).toBe("plan");
     for (let i = 0; i < 3; i++) await driver.input.pressKey("TAB");
     await driver.input.pressKey("RETURN");
-    expect(driver.captureFrame()).toContain("Permissions — next message");
+    expect(driver.captureFrame()).toContain("Permissions (next message)");
     await driver.input.pressKey("RETURN");
     expect(driver.registry.get(fixture.client.actions.state(id)).runtimeMode).toBe(
       "approval-required",

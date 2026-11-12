@@ -1,7 +1,7 @@
 import { useAtomValue, RegistryContext } from "@effect/atom-react";
 import { decodePasteBytes, type BoxRenderable } from "@opentui/core";
 import { usePaste, useTerminalDimensions } from "@opentui/react";
-import type { MessageId, ThreadId } from "@t3tools/contracts";
+import { ThreadId, type MessageId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useMemo, useState, useContext, useEffect, useRef } from "react";
 
@@ -17,6 +17,8 @@ import type { TuiClient } from "../connection/clientRuntime.ts";
 import type { TuiAgent } from "../connection/models.ts";
 import { promptCheckpoint } from "../features/chat/checkpointRestore.ts";
 import { approvalOptions } from "../features/chat/interactions.ts";
+import { sideChatLabel, sideChatProblem } from "../features/chat/sideChat.ts";
+import { parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { threadActivityPhase } from "../features/chat/threadActivity.ts";
 import { pastedImagePaths } from "../features/chat/imageAttachments.ts";
 import { suggestedReplies as parseSuggestedReplies } from "../features/chat/suggestedReplies.ts";
@@ -76,7 +78,18 @@ export function Conversation({
   const registry = useContext(RegistryContext);
   const thread = Option.getOrNull(state.data);
   const parentThreadId =
-    thread?.lineage?.relationshipToParent === "subagent" ? thread.lineage.parentThreadId : null;
+    thread?.lineage?.relationshipToParent === "subagent" || thread?.lineage?.sideChat === true
+      ? thread.lineage.parentThreadId
+      : null;
+  const threadCapabilities = useAtomValue(client.threadCapabilities);
+  // A new side chat reaches the shell's thread list a render after it exists, so keep
+  // trying with each render's handler until the shell knows it and opens it.
+  const [sideChatToOpen, setSideChatToOpen] = useState<ThreadId | null>(null);
+  const [sideChatMenuOpen, setSideChatMenuOpen] = useState(false);
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Clears the request once it opened.
+    if (sideChatToOpen && onOpenThread?.(sideChatToOpen)) setSideChatToOpen(null);
+  }, [sideChatToOpen, onOpenThread]);
   // The provider runs its own subagents, so their threads take no messages; steer the parent.
   const readOnly =
     thread?.lineage?.relationshipToParent === "subagent" && thread.creationSource === "provider";
@@ -214,10 +227,23 @@ export function Conversation({
   };
   // Agents with their own thread open it in full; the rest show their output in an overlay.
   const openAgent = (agent: TuiAgent) => {
-    if (agent.childThreadId && onOpenThread?.(agent.childThreadId)) return;
+    if (agent.childThreadId && onOpenThread?.(ThreadId.make(agent.childThreadId))) return;
     setSelectedAgentId(agent.id);
     setAgentOutputStart(0);
   };
+  /** This thread's side chats, newest first. They never list in the sidebar, so this is the way in. */
+  const sideChats = useMemo(
+    () =>
+      (Option.getOrNull(shell.snapshot)?.threads ?? [])
+        .filter(
+          (item) =>
+            item.lineage?.sideChat === true &&
+            item.lineage.parentThreadId === threadId &&
+            !item.archivedAt,
+        )
+        .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    [shell.snapshot, threadId],
+  );
   const openParent = () => {
     if (parentThreadId) onOpenThread?.(parentThreadId);
   };
@@ -545,7 +571,11 @@ export function Conversation({
     },
     bindings: {
       "composer.focus": { enabled: !readOnly, run: activateComposer },
-      "history.back": onBack,
+      // A side chat belongs to its thread, so leaving it goes back there, not to the sidebar.
+      "history.back":
+        thread?.lineage?.sideChat === true && parentThreadId !== null
+          ? { label: "Parent", run: openParent }
+          : onBack,
       "history.nextRegion": {
         label: agents.length > 0 ? "Agents" : "Sidebar",
         run: () => {
@@ -584,6 +614,10 @@ export function Conversation({
         run: () => setMode(requestMode),
       },
       "thread.openParent": { enabled: parentThreadId !== null, run: openParent },
+      "thread.sideChats": {
+        enabled: sideChats.length > 0,
+        run: () => setSideChatMenuOpen(true),
+      },
       "history.vimMove": () => false,
       "history.vimWord": () => false,
       "history.vimLineEdge": () => false,
@@ -802,6 +836,10 @@ export function Conversation({
           }
           runningSince={runningSince}
           showParent={parentThreadId !== null}
+          sideChatCount={sideChats.length}
+          onSideChats={() => {
+            if (active) setSideChatMenuOpen(true);
+          }}
           renderMarkdown={renderMarkdown}
           message={
             answered
@@ -881,6 +919,15 @@ export function Conversation({
             {...(agents.length > 0 ? { onFocusNext: () => activateAgents("composer") } : {})}
             onSubmit={() => {
               setAnchor(null);
+              // `/side` and `/btw` go to a new side chat instead of this thread.
+              if (parseSideChatCommand(interaction.draft)) {
+                void client.actions
+                  .startSideChat(registry, threadId, sideChatProblem(thread, threadCapabilities))
+                  .then((sideChatId) => {
+                    if (sideChatId) setSideChatToOpen(sideChatId);
+                  });
+                return;
+              }
               void client.actions.send(registry, threadId);
             }}
             {...(thread?.latestTurn?.state === "running" || queued
@@ -913,6 +960,24 @@ export function Conversation({
         />
       ) : null}
       {linkMenu.element}
+      {active && sideChatMenuOpen && sideChats.length > 0 ? (
+        <NavigationContextMenu
+          id="side-chats"
+          x={2}
+          y={2}
+          width={width}
+          height={height}
+          actions={sideChats.map((item) => ({
+            action: item.id,
+            label: inlineTerminalText(sideChatLabel(item)),
+          }))}
+          onChoose={(sideChatId) => {
+            setSideChatMenuOpen(false);
+            onOpenThread?.(sideChatId);
+          }}
+          onClose={() => setSideChatMenuOpen(false)}
+        />
+      ) : null}
       {active && promptMenu ? (
         <NavigationContextMenu
           id="prompt-context"

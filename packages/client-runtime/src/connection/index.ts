@@ -1,9 +1,11 @@
 export * from "./catalog.ts";
+export * from "./diagnosis.ts";
 export * as Connectivity from "./connectivity.ts";
 export * as CredentialStore from "./credentialStore.ts";
 export { type ConnectionDriverProgress, type EnvironmentConnectionLease } from "./driver.ts";
 export * from "./errors.ts";
-export * from "./githubRoutingPermissions.ts";
+export * from "./pullRequestRoutingPermissions.ts";
+export * from "./hostFreeze.ts";
 export * as Connection from "./layer.ts";
 export * from "./model.ts";
 export * as ConnectionOnboarding from "./onboarding.ts";
@@ -17,9 +19,6 @@ export { EnvironmentNotRegisteredError, PlatformEnvironmentRemovalError } from "
 export * as EnvironmentSupervisor from "./supervisor.ts";
 export * as Wakeups from "./wakeups.ts";
 
-export {
-  appendOrchestrationProtocol,
-  orchestrationProtocolCompatibilityError,
-} from "./compatibility.ts";
+export { orchestrationProtocolCompatibilityError } from "./compatibility.ts";
 // Flat so consumers' inferred command types can name it.
 export { OutdatedHostUpdateError } from "./outdatedHostUpdate.ts";

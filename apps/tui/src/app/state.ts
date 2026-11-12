@@ -102,6 +102,7 @@ export interface ShellRows {
       | {
           readonly relationshipToParent: "fork" | "subagent" | null;
           readonly parentThreadId?: ThreadId | null;
+          readonly sideChat?: boolean | undefined;
         }
       | undefined;
   }>;
@@ -125,7 +126,9 @@ export function subagentFamily<Thread extends ShellRows["threads"][number]>(
   ];
 }
 
+/** Side chats belong to their parent and never list; subagents list only when shown. */
 export function isSidebarThreadVisible(thread: ShellRows["threads"][number], state: ShellState) {
+  if (thread.lineage?.sideChat === true) return false;
   return state.showSubagents || thread.lineage?.relationshipToParent !== "subagent";
 }
 

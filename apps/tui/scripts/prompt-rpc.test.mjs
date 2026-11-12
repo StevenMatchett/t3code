@@ -245,6 +245,38 @@ it.live.each(["complete", "interrupt", "approval", "question", "choices"])(
           Effect.timeout("15 seconds"),
         );
         yield* waitFor((thread) => thread.checkpoints.length > 0);
+
+        // `/btw` forks a side chat beside the thread and sends the question there.
+        NodeAssert.equal(registry.get(client.threadCapabilities).sideChats, true);
+        client.actions.setDraft(registry, threadId, "/btw what does this repo do?");
+        const sideChatId = yield* Effect.promise(() =>
+          client.actions.startSideChat(registry, threadId, null),
+        );
+        NodeAssert.ok(sideChatId, registry.get(client.actions.state(threadId)).error ?? undefined);
+        NodeAssert.equal(registry.get(client.actions.state(threadId)).draft, "");
+        const unmountSideChat = registry.mount(client.thread(sideChatId));
+        yield* Effect.addFinalizer(() => Effect.sync(unmountSideChat));
+        const sideChat = yield* AtomRegistry.toStream(registry, client.thread(sideChatId)).pipe(
+          Stream.filter(
+            (state) =>
+              state.status === "live" &&
+              Option.exists(state.data, (thread) =>
+                thread.messages.some((message) => message.text === "what does this repo do?"),
+              ),
+          ),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.map((values) => Option.getOrThrow(values[0].data)),
+          Effect.timeout("20 seconds"),
+        );
+        NodeAssert.equal(sideChat.lineage?.sideChat, true);
+        NodeAssert.equal(sideChat.lineage?.parentThreadId, threadId);
+        NodeAssert.equal(
+          Option.getOrThrow(registry.get(client.thread(threadId)).data).messages.length,
+          finished.messages.length,
+          "the parent thread gets no message",
+        );
+
         const prompt = finished.messages.find((message) => message.role === "user");
         NodeAssert.equal(
           yield* Effect.promise(() =>
@@ -301,5 +333,4 @@ it.live.each(["complete", "interrupt", "approval", "question", "choices"])(
         else NodeAssert.deepEqual(response.result.answers.scope.answers, ["Small"]);
       }
     }).pipe(Effect.scoped),
-  45_000,
 );

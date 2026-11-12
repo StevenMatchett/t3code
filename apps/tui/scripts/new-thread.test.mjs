@@ -46,6 +46,11 @@ async function prepare(root) {
     await NodeFSP.readFile(NodePath.join(peerSource, "codexMultiAgentWire.json"), "utf8"),
   );
   let source = await NodeFSP.readFile(NodePath.join(peerSource, "codexCollabMockPeer.mjs"), "utf8");
+  // The server refuses Codex releases it knows are broken, and 0.0.0 counts as one.
+  source = source.replace(
+    'userAgent: "t3-collab-mock/0.0.0"',
+    'userAgent: "t3-collab-mock/0.159.0"',
+  );
   source = source.replace(
     'if (method === "turn/start") {',
     'if (method === "turn/start") {\n    NodeFS.appendFileSync(`${process.env.T3_CODEX_COLLAB_SCRIPT}.turns`, `${JSON.stringify({ cwd: message.params.cwd, input: message.params.input })}\\n`);',
@@ -297,5 +302,4 @@ it.live(
       );
       NodeAssert.equal(git(fixture.root, workspace, "branch", "--show-current"), "main");
     }).pipe(Effect.scoped),
-  60_000,
 );

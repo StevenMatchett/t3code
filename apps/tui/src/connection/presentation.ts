@@ -299,6 +299,7 @@ export function presentThread(projection: OrchestrationV2ThreadProjection): TuiT
               label: item.label,
               reason: item.reason,
               placeholder: item.placeholder,
+              delivery: item.delivery,
             },
           ]
         : [],
@@ -306,10 +307,7 @@ export function presentThread(projection: OrchestrationV2ThreadProjection): TuiT
     checkpoints: deriveThreadCheckpointSummaries(projection)
       .filter((checkpoint) => retainedRunIds.has(checkpoint.runId))
       .map((checkpoint) => ({ ...checkpoint, turnId: TurnId.make(checkpoint.runId) })),
-    agents: projectedSubagentsToRuntime(projection.subagents).map((agent, index) => ({
-      ...agent,
-      childThreadId: projection.subagents[index]!.childThreadId,
-    })),
+    agents: projectedSubagentsToRuntime(projection.subagents),
     requests: derivePendingThreadRequests(projection),
     session: run
       ? {

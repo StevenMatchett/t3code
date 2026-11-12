@@ -5,12 +5,12 @@ import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import { makeClientFixture } from "../../testing/clientFixture.ts";
 import { checkpointRestoreTargets, promptCheckpoint } from "./checkpointRestore.ts";
-import { makeThreadInteractions, type TuiThreadCommand } from "./interactions.ts";
+import { makeThreadInteractions, type TuiInteractionCommand } from "./interactions.ts";
 
 const registries: AtomRegistry.AtomRegistry[] = [];
 afterEach(() => registries.splice(0).forEach((registry) => registry.dispose()));
 const time = "2026-01-01T00:00:00.000Z";
-function setup(dispatch?: (command: TuiThreadCommand) => Promise<boolean>) {
+function setup(dispatch?: (command: TuiInteractionCommand) => Promise<boolean>) {
   const fixture = makeClientFixture();
   const registry = AtomRegistry.make();
   registries.push(registry);
@@ -51,7 +51,7 @@ function setup(dispatch?: (command: TuiThreadCommand) => Promise<boolean>) {
       },
     ],
   });
-  const commands: TuiThreadCommand[] = [];
+  const commands: TuiInteractionCommand[] = [];
   const dispatched = Promise.withResolvers<void>();
   const actions = makeThreadInteractions({
     thread: fixture.client.thread,
