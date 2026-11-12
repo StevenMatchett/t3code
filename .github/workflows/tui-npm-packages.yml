@@ -134,11 +134,11 @@ jobs:
           sparse-checkout: CHANGELOG.md
           sparse-checkout-cone-mode: false
 
-      # Trusted publishing needs npm 11.5.1 or newer.
+      # Trusted publishing needs npm 11.5.1 or newer. No registry-url: setup-node would then write
+      # an .npmrc with a placeholder NODE_AUTH_TOKEN, which npm sends instead of signing in by OIDC.
       - uses: actions/setup-node@v5
         with:
           node-version: 26
-          registry-url: https://registry.npmjs.org
 
       - uses: actions/download-artifact@v4
         with:
