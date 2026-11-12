@@ -9,65 +9,141 @@
 > Use the upstream repository for official T3 Code releases and support. See the
 > [TUI client boundary](./docs/internals/tui-client.md) for the fork's scope.
 
+[![T3 TUI demo: one-command install, Settings, the inbox, Mermaid diagrams, diff review, and the embedded terminal](./docs/media/tui/launch.gif)](./docs/media/tui/launch.mp4)
+
 ## Install
 
 ```bash
-npx t3tui
+npm install -g t3tui
+t3tui
 ```
 
-That is the whole setup: no clone, no build, and no separate server install. The package bundles
-the T3 server. The first launch installs it as a background service, starts it, pairs the TUI with
-it, and opens the TUI. Later launches start the server if it has stopped and reuse the saved
-pairing.
+Or try it without installing: `npx t3tui`. The first interactive `npx` launch offers once to install
+the `t3tui` command for you (`npm install -g` at the same version), so afterwards you just run
+`t3tui`. It does not ask again once you answer, or if a `t3tui` command is already on your `PATH`.
 
-Then press `,` for **Settings → Providers** to set up an agent. Each provider shows what it still
-needs: install it (providers with a managed install, such as Codex, download from there), sign in
-through the server with a browser link or device code, or turn it on. The same screen edits a
-provider's binary path and environment variables, adds a second account of a provider, and changes
-defaults for new threads under **General**. Providers without an in-app install are found on the
-`PATH` you had when the service was installed; run `t3tui daemon install` after installing a new CLI
-elsewhere.
+That is the whole setup: no clone, no build, and no separate server to install. Builds exist for
+macOS and Linux (glibc) on arm64 and x64. The TUI needs Node.js 26.4 or newer. On an older Node,
+`t3tui` borrows Node 26 from npm, which the first run downloads.
 
-The TUI needs Node.js 26.4 or newer. On an older Node, `t3tui` borrows Node 26 from npm
-(the first run downloads it). Builds exist for macOS and Linux (glibc) on arm64 and x64.
+## How it works
 
-### Background server
+T3 TUI is a client. Your agents run in a T3 server, which owns projects, threads, provider sign-ins,
+and history. The `t3tui` package brings its own server, so a new machine needs nothing else.
 
-The server runs as a user service: `systemd --user` on Linux and a launchd agent on macOS. Without
-either, it runs as a background process that the TUI starts when needed. It listens only on
-`127.0.0.1:3780`, keeps its data in `~/.t3-tui/daemon/server`, separate from T3 Code's `~/.t3`,
-and runs from its own copy of the package, so clearing the npm cache does not break it.
+1. **Install.** npm installs the small `t3tui` launcher plus the one package for your platform
+   (`@t3tui/darwin-arm64`, `@t3tui/linux-x64`, and so on), which holds the TUI and the T3 server.
+2. **First launch.** `t3tui` copies the server to `~/.t3-tui/daemon`, installs it as a background
+   service (`systemd --user` on Linux, a launchd agent on macOS), starts it on `127.0.0.1:3780`,
+   and pairs with it using a short-lived local token. It saves the resulting credential in
+   `~/.t3-tui` and opens the TUI. There is no pairing code to copy.
+3. **Every launch after that.** `t3tui` reuses the saved credential. If the server has stopped, it
+   starts it first.
+4. **Closing the TUI** leaves the server running, so agents keep working and the next launch opens
+   straight away. The service also starts at login.
+
+What lives where:
+
+| Path                                                                                      | What it is                                                                        |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `~/.t3-tui/daemon/server`                                                                 | The server's data: projects, threads, settings, and provider sign-ins             |
+| `~/.t3-tui/daemon/server.log`                                                             | The server log                                                                    |
+| `~/.t3-tui/daemon/runtime/<version>`                                                      | The server's own copy of the package, so clearing the npm cache does not break it |
+| `~/.t3-tui/environment-credential.json`                                                   | The saved pairing credential (mode `0600`)                                        |
+| `~/.config/systemd/user/t3tui.service` or `~/Library/LaunchAgents/com.t3tui.server.plist` | The service definition                                                            |
+
+This data is separate from T3 Code's own `~/.t3`. T3 TUI never touches your desktop app's state.
+
+## Set up your agents
+
+Press `,` from the sidebar for **Settings → Providers**. Each provider shows what it still needs:
+
+- **Install it.** Providers with a managed install, such as Codex, download from this screen.
+- **Sign in.** Sign-in runs through the server, using a browser link, a device code, a terminal, or
+  credentials, depending on the provider.
+- **Turn it on or off.** Only enabled providers appear when you start a thread.
+
+The same screen edits a provider's binary path and environment variables, checks for updates, and
+adds a second account of the same provider. **General** sets server defaults for new threads,
+worktrees, and branches. Providers without an in-app install are found on the `PATH` you had when
+the service was installed; after installing a CLI elsewhere, run `t3tui daemon install` so the
+service picks up your current `PATH`.
+
+## Background server
 
 ```bash
-npx t3tui daemon status        # running or stopped, version, service, and log path
-npx t3tui daemon stop          # stop it now (the service starts again at next login)
-npx t3tui daemon start         # start it again
-npx t3tui daemon restart       # stop and start it
-npx t3tui daemon install --port 3790   # move it to another port, or upgrade it
-npx t3tui daemon uninstall     # remove the service; your threads are kept
+t3tui daemon status                # running or stopped, version, service, and log path
+t3tui daemon stop                  # stop it now (the service starts again at next login)
+t3tui daemon start                 # start it again
+t3tui daemon restart               # stop and start it
+t3tui daemon install --port 3790   # move it to another port, or upgrade it
+t3tui daemon uninstall             # remove the service; your threads are kept
 ```
 
-Set `T3TUI_DAEMON_PORT` before the first launch to choose a different port up front. After you
-upgrade `t3tui`, a running server keeps its version, so live agent work is not interrupted.
-`t3tui daemon install` switches it to the new version, and a stopped server is upgraded the next
-time the TUI starts it. To use an existing T3 Code environment instead, pair with it as described
-in [Getting started from source](#getting-started-with-t3-tui). A saved pairing for another
-environment takes precedence over the local server.
+Without systemd or launchd, the server runs as a plain background process that the TUI starts when
+needed. It listens only on `127.0.0.1`. Set `T3TUI_DAEMON_PORT` before the first launch to choose a
+port other than `3780`.
 
-This branch connects to an existing T3 environment to browse projects and threads, send text
-prompts, follow agent output, stop turns, respond to approvals and questions, choose models/options,
-and invoke provider skills. New threads can use the current checkout or an isolated Git worktree.
-It also includes conversation search, Markdown output, saved/per-turn/working-tree diff review,
-and an embedded terminal. Switching provider accounts in existing threads and Git write actions
-remain unfinished. Cross-platform certification remains a release requirement.
+## Update and uninstall
+
+```bash
+npm install -g t3tui@latest   # or: npx t3tui@latest
+t3tui daemon install          # move the running server to the new version now
+```
+
+A running server keeps its version after you update, so live agent work is not interrupted. Run
+`t3tui daemon install` to switch it now; otherwise a stopped server is upgraded the next time the
+TUI starts it.
+
+To remove T3 TUI:
+
+```bash
+t3tui daemon uninstall    # stop and remove the service
+npm uninstall -g t3tui    # remove the command
+rm -rf ~/.t3-tui          # optional: delete threads, settings, and the saved credential
+```
+
+## Use an existing T3 Code environment
+
+T3 TUI can attach to a T3 Code server you already run, such as the desktop app or a server on
+another machine, instead of its own. Pair with it once (see
+[Getting started from source](#getting-started-with-t3-tui) for generating a pairing link), then
+launch normally:
+
+```bash
+pbpaste | t3tui --connect http://127.0.0.1:3773 --pair-stdin   # Linux: wl-paste or xclip -o
+t3tui
+```
+
+A saved pairing for another environment takes precedence over the local server. To go back to the
+bundled server, delete `~/.t3-tui/environment-credential.json`.
+
+## Troubleshooting
+
+- **The TUI does not connect.** Run `t3tui daemon status` and read the end of the log it names.
+  `t3tui daemon restart` restarts the server.
+- **Port 3780 is in use.** Run `t3tui daemon install --port <port>`.
+- **`npm install -g` fails with `EACCES`.** Your Node is installed system-wide. Use a Node version
+  manager, or set a user-owned npm prefix as described in
+  [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally).
+  `npx t3tui` keeps working in the meantime.
+- **A provider says it is not installed but you installed it.** Run `t3tui daemon install` so the
+  service sees your current `PATH`.
+
+## What works today
+
+T3 TUI browses projects and threads, sends text prompts, follows agent output, stops turns, responds
+to approvals and questions, chooses models and options, and invokes provider skills. New threads can
+use the current checkout or an isolated Git worktree. It also has conversation search, Markdown
+output with Mermaid diagrams, saved, per-turn, and working-tree diff review, and an embedded
+terminal. Switching provider accounts in existing threads and Git write actions are unfinished.
 
 ## See it in action
 
-[![T3 TUI demo: inbox, Mermaid diagrams, diff review, and the embedded terminal](./docs/media/tui/launch.gif)](./docs/media/tui/launch.mp4)
-
-Real TUI renders with synthetic demo conversations, tool output, and agent activity—no private
-workspace data or credentials. The walkthroughs are scripted examples, not live agent sessions.
-Select the video to open the full-resolution MP4.
+The video at the top is a real recording: the setup scenes are a first launch on a fresh home
+directory, and the inbox scenes use invented projects and threads. Select it to open the
+full-resolution MP4. The screenshots below are real TUI renders with synthetic conversations, tool
+output, and agent activity, with no private workspace data or credentials.
 
 ![T3 TUI conversation with Markdown, an inbox sidebar, and contextual keyboard shortcuts](./docs/media/tui/conversation.png)
 

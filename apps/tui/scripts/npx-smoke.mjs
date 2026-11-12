@@ -63,11 +63,21 @@ async function packageArgs() {
   ];
 }
 
+// A global prefix of its own, and no other t3tui on PATH, so the install prompt shows and its
+// `npm install -g` lands here.
+const globalPrefix = NodePath.join(root, "npm-global");
+const globalBin =
+  NodeProcess.platform === "win32" ? globalPrefix : NodePath.join(globalPrefix, "bin");
+const hostPath = (NodeProcess.env.PATH ?? "")
+  .split(NodePath.delimiter)
+  .filter((dir) => !NodeFS.existsSync(NodePath.join(dir, "t3tui")));
+
 const serviceName = `t3tui-smoke-${NodeCrypto.randomBytes(3).toString("hex")}`;
 const port = await freePort();
 const env = {
   HOME: home,
-  PATH: NodeProcess.env.PATH,
+  PATH: [globalBin, ...hostPath].join(NodePath.delimiter),
+  npm_config_prefix: globalPrefix,
   TERM: "xterm-256color",
   LANG: "en_US.UTF-8",
   npm_config_cache: NodePath.join(root, "npm-cache"),
@@ -174,9 +184,10 @@ function makeScreen(cols, rows) {
 
 /**
  * Opens the TUI in a pseudo-terminal, waits for its empty-environment screen, then sends each
- * step's keys and waits for its text to be drawn.
+ * step's keys and waits for its text to be drawn. `installAnswer` answers npx's one-time offer to
+ * install the t3tui command first.
  */
-async function openTui(pty, label, steps = []) {
+async function openTui(pty, label, steps = [], installAnswer) {
   const child = pty.spawn(npx, npxArgs, {
     cwd: home,
     cols: 100,
@@ -222,6 +233,11 @@ async function openTui(pty, label, steps = []) {
     });
   const started = Date.now();
   try {
+    if (installAnswer !== undefined) {
+      await waitFor("[Y/n]", 180_000);
+      child.write(`${installAnswer}\r`);
+      NodeProcess.stdout.write(`${label}: answered ${installAnswer} to the install offer\n`);
+    }
     await waitFor("Press P to add one.", 180_000);
     NodeProcess.stdout.write(`${label}: TUI connected in ${Date.now() - started} ms\n`);
     for (const step of steps) {
@@ -278,7 +294,23 @@ try {
   const platformPackage = NodePath.join(npxRoot, installed, "node_modules", "@t3tui", key);
   const pty = NodeModule.createRequire(NodePath.join(platformPackage, "package.json"))("node-pty");
 
-  await openTui(pty, "first launch (installs, starts, and pairs)", settingsSteps);
+  // Only a registry has the version the offer installs; with tarballs, decline it.
+  await openTui(
+    pty,
+    "first launch (installs, starts, and pairs)",
+    settingsSteps,
+    flags.registry ? "y" : "n",
+  );
+  if (flags.registry) {
+    const installed = NodeChildProcess.spawnSync("t3tui", ["--version"], {
+      env,
+      encoding: "utf8",
+      shell: NodeProcess.platform === "win32",
+    });
+    NodeAssert.equal(installed.status, 0, installed.stderr);
+    NodeAssert.match(installed.stdout, /^t3-tui \d+\.\d+\.\d+/m);
+    NodeProcess.stdout.write(`t3tui on PATH: ${installed.stdout.split("\n")[0]}\n`);
+  }
   const running = t3tui("daemon", "status");
   NodeAssert.equal(running.status, 0, running.stderr);
   NodeAssert.match(running.stdout, new RegExp(`running at http://127\\.0\\.0\\.1:${port}`));
