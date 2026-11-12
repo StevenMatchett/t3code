@@ -62,29 +62,25 @@ describe("provider config fields", () => {
 });
 
 describe("provider instances", () => {
-  it("synthesizes an unedited default instance from the legacy settings", () => {
+  it("treats a never-edited provider as a bare instance of its driver", () => {
+    expect(effectiveInstanceConfig(DEFAULT_SERVER_SETTINGS, provider)).toEqual({
+      driver: "codex",
+      enabled: true,
+    });
     const settings = {
       ...DEFAULT_SERVER_SETTINGS,
-      providers: {
-        ...DEFAULT_SERVER_SETTINGS.providers,
-        codex: { ...DEFAULT_SERVER_SETTINGS.providers.codex, binaryPath: "/legacy/codex" },
-      },
+      providerInstances: { codex: { driver: codex, enabled: false, config: { binaryPath: "/x" } } },
     };
     expect(effectiveInstanceConfig(settings, provider)).toMatchObject({
-      driver: "codex",
-      config: { binaryPath: "/legacy/codex" },
+      config: { binaryPath: "/x" },
     });
   });
 
-  it("resets the legacy settings only when saving a default instance", () => {
+  it("saves an instance as an atomic upsert", () => {
     const instance = { driver: codex, enabled: false };
-    expect(
-      providerInstanceUpdate(DEFAULT_SERVER_SETTINGS, provider, instance).patch,
-    ).toHaveProperty("providers");
-    const custom = { ...provider, instanceId: ProviderInstanceId.make("codex-2") };
-    expect(providerInstanceUpdate(DEFAULT_SERVER_SETTINGS, custom, instance)).toEqual({
+    expect(providerInstanceUpdate(provider, instance)).toEqual({
       patch: {},
-      mutation: { operation: "upsert", instanceId: "codex-2", instance },
+      mutation: { operation: "upsert", instanceId: "codex", instance },
     });
   });
 

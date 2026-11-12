@@ -1,15 +1,6 @@
 import {
-  AcpRegistrySettings,
-  AntigravitySettings,
   BranchNamingMode,
-  ClaudeSettings,
-  CodexSettings,
-  CursorSettings,
-  DEFAULT_UNIFIED_SETTINGS,
   defaultInstanceIdForDriver,
-  GrokSettings,
-  OpenCodeSettings,
-  PiSettings,
   ProviderDriverKind,
   ProviderInstanceId,
   ResponseStreamingMode,
@@ -25,6 +16,7 @@ import {
   type ServerSettings,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
+import { providerClients } from "@t3tools/client-runtime/provider-clients";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -49,68 +41,11 @@ export function providerName(provider: Pick<ServerProvider, "displayName" | "ins
   return provider.displayName ?? provider.instanceId;
 }
 
-interface ProviderDriverDefinition {
-  readonly driver: ProviderDriverKind;
-  readonly label: string;
-  readonly settingsSchema: Schema.Struct<Schema.Struct.Fields>;
-  /** Built-in drivers whose default instance mirrors `settings.providers[driver]`. */
-  readonly legacyDefault: boolean;
-}
-
-/** Drivers the TUI can configure. Matches the web settings' provider list. */
-export const PROVIDER_DRIVERS: readonly ProviderDriverDefinition[] = [
-  {
-    driver: ProviderDriverKind.make("codex"),
-    label: "Codex",
-    settingsSchema: CodexSettings,
-    legacyDefault: true,
-  },
-  {
-    driver: ProviderDriverKind.make("claudeAgent"),
-    label: "Claude",
-    settingsSchema: ClaudeSettings,
-    legacyDefault: true,
-  },
-  {
-    driver: ProviderDriverKind.make("cursor"),
-    label: "Cursor",
-    settingsSchema: CursorSettings,
-    legacyDefault: true,
-  },
-  {
-    driver: ProviderDriverKind.make("grok"),
-    label: "Grok",
-    settingsSchema: GrokSettings,
-    legacyDefault: true,
-  },
-  {
-    driver: ProviderDriverKind.make("opencode"),
-    label: "OpenCode",
-    settingsSchema: OpenCodeSettings,
-    legacyDefault: true,
-  },
-  {
-    driver: ProviderDriverKind.make("antigravity"),
-    label: "Antigravity",
-    settingsSchema: AntigravitySettings,
-    legacyDefault: true,
-  },
-  {
-    driver: ProviderDriverKind.make("pi"),
-    label: "Pi",
-    settingsSchema: PiSettings,
-    legacyDefault: true,
-  },
-  {
-    driver: ProviderDriverKind.make("acpRegistry"),
-    label: "ACP Registry",
-    settingsSchema: AcpRegistrySettings,
-    legacyDefault: false,
-  },
-];
+/** Drivers the TUI can configure: the same registry the web settings render from. */
+export const PROVIDER_DRIVERS = providerClients.definitions;
 
 export function providerDriver(driver: ProviderDriverKind) {
-  return PROVIDER_DRIVERS.find((definition) => definition.driver === driver);
+  return providerClients.get(driver);
 }
 
 export interface ProviderConfigField {
@@ -124,7 +59,7 @@ export interface ProviderConfigField {
   readonly options?: readonly ProviderSettingsFormOption[];
 }
 
-type FieldSchema = Schema.Struct.Fields[string];
+type FieldSchema = Schema.Top;
 
 function fieldAnnotations(field: FieldSchema) {
   return Schema.resolveAnnotationsKey(field) ?? Schema.resolveAnnotations(field);
@@ -145,7 +80,8 @@ export function providerConfigFields(driver: ProviderDriverKind): readonly Provi
   const definition = providerDriver(driver);
   if (!definition) return [];
   const schema = definition.settingsSchema;
-  const order = Schema.resolveAnnotations(schema)?.providerSettingsFormSchema?.order ?? [];
+  const order: readonly string[] =
+    Schema.resolveAnnotations(schema)?.providerSettingsFormSchema?.order ?? [];
   const rank = (key: string, index: number) => {
     const position = order.indexOf(key);
     return position === -1 ? order.length + index : position;
@@ -211,53 +147,30 @@ export function withConfigFieldValue(
   return { ...rest, [field.key]: typeof value === "string" ? value.trim() : value };
 }
 
-/**
- * The instance config the server runs. A built-in default instance that was never edited lives
- * only in the legacy `settings.providers[driver]` blob, so it is synthesized from there.
- */
+/** The instance config the server runs. A built-in provider never edited has no entry yet. */
 export function effectiveInstanceConfig(
-  settings: Pick<ServerSettings, "providers" | "providerInstances">,
+  settings: Pick<ServerSettings, "providerInstances">,
   provider: Pick<ServerProvider, "instanceId" | "driver" | "enabled">,
 ): ProviderInstanceConfig {
-  const explicit = settings.providerInstances?.[provider.instanceId];
-  if (explicit) return explicit;
-  const legacy = (settings.providers as Record<string, Record<string, unknown> | undefined>)[
-    provider.driver
-  ];
-  if (provider.instanceId === defaultInstanceIdForDriver(provider.driver) && legacy) {
-    const { enabled, ...config } = legacy;
-    return {
+  return (
+    settings.providerInstances?.[provider.instanceId] ?? {
       driver: provider.driver,
-      enabled: typeof enabled === "boolean" ? enabled : provider.enabled,
-      config,
-    };
-  }
-  return { driver: provider.driver, enabled: provider.enabled };
+      enabled: provider.enabled,
+    }
+  );
 }
 
 export function isDefaultInstance(provider: Pick<ServerProvider, "instanceId" | "driver">) {
   return provider.instanceId === defaultInstanceIdForDriver(provider.driver);
 }
 
-/**
- * The settings update that saves one instance. Saving a default instance also resets its legacy
- * blob, as the web settings do, so the explicit instance is the only copy that can win.
- */
+/** The settings update that saves one instance as an atomic map-entry upsert. */
 export function providerInstanceUpdate(
-  settings: Pick<ServerSettings, "providers">,
-  provider: Pick<ServerProvider, "instanceId" | "driver">,
+  provider: Pick<ServerProvider, "instanceId">,
   instance: ProviderInstanceConfig,
 ): { readonly patch: ServerSettingsPatch; readonly mutation: ProviderInstanceMutation } {
-  const legacyDefault = isDefaultInstance(provider)
-    ? (DEFAULT_UNIFIED_SETTINGS.providers as Record<string, unknown>)[provider.driver]
-    : undefined;
   return {
-    patch:
-      legacyDefault === undefined
-        ? {}
-        : ({
-            providers: { ...settings.providers, [provider.driver]: legacyDefault },
-          } as ServerSettingsPatch),
+    patch: {},
     mutation: { operation: "upsert", instanceId: provider.instanceId, instance },
   };
 }

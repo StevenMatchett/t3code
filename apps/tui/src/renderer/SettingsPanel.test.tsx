@@ -62,8 +62,6 @@ describe("settings", () => {
       instanceId: "codex",
       instance: { driver: "codex", enabled: false },
     });
-    // The legacy blob resets so the explicit instance is the only copy that can win.
-    expect(update.patch).toHaveProperty("providers");
     expect(driver.captureFrame()).toContain("Turned off.");
   });
 

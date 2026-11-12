@@ -7,12 +7,9 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
 /**
- * The T3 server that a packaged TUI (`npx t3tui`) runs in the background.
- *
- * It lives under `~/.t3-tui/daemon`, separate from T3 Code's `~/.t3`, and runs
- * from a copy of the package (`runtime/<version>`) so the service keeps working
- * after npm cleans its npx cache. The service manager is systemd --user on
- * Linux, launchd on macOS, and a detached process with a PID file elsewhere.
+ * The background T3 server of a packaged TUI. It keeps its state in `~/.t3-tui/daemon`, apart
+ * from T3 Code's `~/.t3`, and runs from its own copy of the package so clearing npm's npx cache
+ * cannot break the service. systemd --user on Linux, launchd on macOS, a PID file elsewhere.
  */
 
 export const DEFAULT_TUI_DAEMON_PORT = 3_780;
@@ -49,6 +46,8 @@ export interface TuiDaemonStatus {
   readonly managerState?: string;
 }
 
+// The daemon is plain async process management; its errors never enter an Effect.
+// @effect-diagnostics-next-line extendsNativeError:off
 export class TuiDaemonError extends Error {
   override readonly name = "TuiDaemonError";
 }

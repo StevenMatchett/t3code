@@ -351,7 +351,7 @@ function ProviderView({
   const instance = effectiveInstanceConfig(settings, provider);
   const driverLabel = providerDriver(provider.driver)?.label ?? provider.driver;
   const save = (next: ProviderInstanceConfig, success = "Saved.") => {
-    const { patch, mutation } = providerInstanceUpdate(settings, provider, next);
+    const { patch, mutation } = providerInstanceUpdate(provider, next);
     return run(() => client.providerSetup.updateSettings(registry, patch, mutation), success);
   };
   const refresh = () =>
@@ -530,18 +530,23 @@ function ProviderView({
     }
   }
   for (const variable of instance.environment ?? []) {
+    // A value is plain text or a reference into a secret store, which only the server reads.
+    const plain = typeof variable.value === "string" ? variable.value : null;
+    const hidden = variable.sensitive || variable.valueRedacted || plain === null;
     rows.push({
       id: `env:${variable.name}`,
       label: variable.name,
       value:
-        variable.sensitive || variable.valueRedacted
-          ? variable.value || variable.valueRedacted
-            ? "••••••"
-            : ""
-          : variable.value,
-      description: "Environment variable for this provider. X removes it.",
+        typeof variable.value !== "string"
+          ? `secret from ${variable.value.provider}`
+          : hidden
+            ? plain || variable.valueRedacted
+              ? "••••••"
+              : ""
+            : plain,
+      description: "Environment variable for this provider. Enter replaces it; X removes it.",
       edit: {
-        value: variable.sensitive || variable.valueRedacted ? "" : variable.value,
+        value: hidden ? "" : (plain ?? ""),
         commit: (value) =>
           save(withEnvironmentVariable(instance, { ...variable, value, valueRedacted: false })),
       },
@@ -823,13 +828,18 @@ function SignInView({
 
 function AddProviderView({ registry, ...props }: ListProps & { readonly registry: Registry }) {
   const { client, providers, settings, replace, run, notify } = props.context;
-  const drivers = PROVIDER_DRIVERS.filter((definition) => definition.driver !== "acpRegistry");
+  const drivers = PROVIDER_DRIVERS.filter(
+    // ACP Registry accounts are picked from a registry search the TUI does not have.
+    (definition) => definition.driverKind !== "acpRegistry",
+  );
   const taken = [
     ...providers.map((provider) => provider.instanceId as string),
     ...Object.keys(settings?.providerInstances ?? {}),
   ];
-  const [driver, setDriver] = useState<ProviderDriverKind>(drivers[0]!.driver);
-  const [instanceId, setInstanceId] = useState(() => suggestInstanceId(drivers[0]!.driver, taken));
+  const [driver, setDriver] = useState<ProviderDriverKind>(drivers[0]!.driverKind);
+  const [instanceId, setInstanceId] = useState(() =>
+    suggestInstanceId(drivers[0]!.driverKind, taken),
+  );
   const [label, setLabel] = useState("");
   const definition = providerDriver(driver)!;
   const add = async () => {
@@ -870,8 +880,9 @@ function AddProviderView({ registry, ...props }: ListProps & { readonly registry
           description: "Enter cycles through the providers.",
           activate: () => {
             const next =
-              drivers[(drivers.findIndex((item) => item.driver === driver) + 1) % drivers.length]!
-                .driver;
+              drivers[
+                (drivers.findIndex((item) => item.driverKind === driver) + 1) % drivers.length
+              ]!.driverKind;
             setDriver(next);
             setInstanceId(suggestInstanceId(next, taken));
           },
