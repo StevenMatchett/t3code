@@ -148,8 +148,12 @@ jobs:
       # Platform packages first, so no install resolves a launcher whose platform package is
       # missing. Versions npm already has are skipped, so a rerun finishes a partial publish.
       - name: Publish to npm
+        env:
+          # npm explains a failed trusted-publishing sign-in only at verbose level.
+          npm_config_loglevel: verbose
         run: |
           set -euo pipefail
+          npm --version
           publish() {
             if [ "$(npm view "$1@$VERSION" version 2>/dev/null || true)" = "$VERSION" ]; then
               echo "$1@$VERSION is already published"
