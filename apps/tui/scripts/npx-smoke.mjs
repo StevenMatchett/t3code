@@ -275,7 +275,7 @@ try {
   // npm unpacked node-pty for this platform, so the smoke drives a real terminal with it.
   const npxRoot = NodePath.join(env.npm_config_cache, "_npx");
   const [installed] = await NodeFSP.readdir(npxRoot);
-  const platformPackage = NodePath.join(npxRoot, installed, "node_modules", `t3tui-${key}`);
+  const platformPackage = NodePath.join(npxRoot, installed, "node_modules", "@t3tui", key);
   const pty = NodeModule.createRequire(NodePath.join(platformPackage, "package.json"))("node-pty");
 
   await openTui(pty, "first launch (installs, starts, and pairs)", settingsSteps);

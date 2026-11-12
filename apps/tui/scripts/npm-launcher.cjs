@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // `bin/t3tui.js` of the `t3tui` npm package. Plain CommonJS so it loads on any
-// Node npm runs on. It runs the TUI from the `t3tui-<platform>-<arch>` package
+// Node npm runs on. It runs the TUI from the `@t3tui/<platform>-<arch>` package
 // npm installed as an optional dependency, borrowing Node 26 from npm when the
 // current Node is too old for the TUI renderer.
 "use strict";
@@ -14,7 +14,7 @@ const key = platform + "-" + arch;
 
 let packageDir;
 try {
-  packageDir = dirname(require.resolve("t3tui-" + key + "/package.json"));
+  packageDir = dirname(require.resolve("@t3tui/" + key + "/package.json"));
 } catch {
   process.stderr.write(
     [

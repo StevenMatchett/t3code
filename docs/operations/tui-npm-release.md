@@ -3,7 +3,7 @@
 `npx t3tui` installs two kinds of npm package, both built by
 [`apps/tui/scripts/build-npm-packages.mjs`](../../apps/tui/scripts/build-npm-packages.mjs):
 
-- `t3tui-<platform>-<arch>`: the TUI, the bundled server, and the native modules for one platform.
+- `@t3tui/<platform>-<arch>`: the TUI, the bundled server, and the native modules for one platform.
   It must be built on that platform.
 - `t3tui`: a small launcher whose optional dependencies name the platform packages. npm installs
   only the one matching the user's machine.

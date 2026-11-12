@@ -13,7 +13,7 @@ packages:
   "t3tui":
     access: $all
     publish: $authenticated
-  "t3tui-*":
+  "@t3tui/*":
     access: $all
     publish: $authenticated
   "**":

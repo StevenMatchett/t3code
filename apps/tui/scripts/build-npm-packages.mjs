@@ -1,6 +1,7 @@
-// Builds `t3tui-<platform>-<arch>-<version>.tgz` (this host's TUI and server; build each platform
-// on that platform) and `t3tui-<version>.tgz` (the launcher, depending on the `--platforms` it is
-// given). Publish the .tgz files: `npm publish <dir>` drops the bundled node_modules.
+// Builds `t3tui-<platform>-<arch>-<version>.tgz`, package `@t3tui/<platform>-<arch>` (this host's
+// TUI and server; build each platform on that platform), and `t3tui-<version>.tgz` (the launcher,
+// depending on the `--platforms` it is given). Publish the .tgz files: `npm publish <dir>` drops
+// the bundled node_modules.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -89,7 +90,7 @@ export async function buildTuiNpmPackages({ directory, platforms = NPM_PLATFORMS
   const bundled = await bundledPackages(NodePath.join(packageDirectory, "node_modules"));
   const bundleDependencies = Object.keys(bundled).sort();
   await writeJson(NodePath.join(packageDirectory, "package.json"), {
-    name: `t3tui-${key}`,
+    name: `@t3tui/${key}`,
     version,
     description: `T3 TUI and its bundled T3 server for ${key}. Install t3tui instead.`,
     license: "MIT",
@@ -104,7 +105,7 @@ export async function buildTuiNpmPackages({ directory, platforms = NPM_PLATFORMS
   await NodeFSP.writeFile(
     NodePath.join(packageDirectory, "README.md"),
     readme(
-      `t3tui-${key}`,
+      `@t3tui/${key}`,
       `The T3 TUI and its bundled T3 server for ${key}. Do not install this package directly: ` +
         "it is an optional dependency of `t3tui`, which picks the package for the current platform.",
     ),
@@ -139,7 +140,7 @@ export async function buildTuiNpmPackages({ directory, platforms = NPM_PLATFORMS
     repository,
     bin: { t3tui: "./bin/t3tui.js" },
     optionalDependencies: Object.fromEntries(
-      platforms.map((platform) => [`t3tui-${platform}`, version]),
+      platforms.map((platform) => [`@t3tui/${platform}`, version]),
     ),
   });
   await NodeFSP.writeFile(
