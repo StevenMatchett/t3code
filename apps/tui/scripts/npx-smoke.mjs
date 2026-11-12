@@ -100,8 +100,15 @@ function t3tui(...args) {
   return result;
 }
 
-/** Opens the TUI in a pseudo-terminal and waits for its empty-environment screen. */
-async function openTui(pty, label) {
+// Colors and cursor moves split rendered text; matching runs on what is left between them.
+// oxlint-disable-next-line no-control-regex -- strips terminal escape sequences
+const visibleText = (output) => output.replace(/\x1b\[[0-9;?<>=]*[ -/]*[@-~]/g, "");
+
+/**
+ * Opens the TUI in a pseudo-terminal, waits for its empty-environment screen, then sends each
+ * step's keys and waits for its text to be drawn.
+ */
+async function openTui(pty, label, steps = []) {
   const child = pty.spawn(npx, npxArgs, {
     cwd: home,
     cols: 100,
@@ -111,29 +118,50 @@ async function openTui(pty, label) {
   });
   let output = "";
   let exited = false;
+  let waiter = null;
+  child.onData((data) => {
+    output += data;
+    waiter?.check();
+  });
+  child.onExit(({ exitCode }) => {
+    exited = true;
+    waiter?.fail(new Error(`${label}: TUI exited ${exitCode}`));
+  });
+  const waitFor = (text, from, timeoutMs) =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        waiter = null;
+        reject(
+          new Error(
+            `${label}: timed out waiting for ${JSON.stringify(text)}: ${JSON.stringify(visibleText(output.slice(from)).slice(-2000))}`,
+          ),
+        );
+      }, timeoutMs);
+      waiter = {
+        check: () => {
+          if (!visibleText(output.slice(from)).includes(text)) return;
+          clearTimeout(timer);
+          waiter = null;
+          resolve();
+        },
+        fail: (error) => {
+          clearTimeout(timer);
+          waiter = null;
+          reject(error);
+        },
+      };
+      waiter.check();
+    });
   const started = Date.now();
   try {
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error(`${label}: TUI timed out: ${JSON.stringify(output.slice(-2000))}`)),
-        180_000,
-      );
-      child.onData((data) => {
-        output += data;
-        if (output.includes("Press P to add one.")) {
-          clearTimeout(timer);
-          resolve();
-        }
-      });
-      child.onExit(({ exitCode }) => {
-        exited = true;
-        clearTimeout(timer);
-        reject(
-          new Error(`${label}: TUI exited ${exitCode}: ${JSON.stringify(output.slice(-2000))}`),
-        );
-      });
-    });
+    await waitFor("Press P to add one.", 0, 180_000);
     NodeProcess.stdout.write(`${label}: TUI connected in ${Date.now() - started} ms\n`);
+    for (const step of steps) {
+      const from = output.length;
+      child.write(step.keys);
+      await waitFor(step.expect, from, 30_000);
+      NodeProcess.stdout.write(`${label}: ${step.name}\n`);
+    }
     child.write("\x03");
     await new Promise((resolve) => {
       if (exited) resolve();
@@ -147,6 +175,26 @@ async function openTui(pty, label) {
     if (!exited) child.kill("SIGKILL");
   }
 }
+
+const DOWN = "\x1b[B";
+/**
+ * Settings against the real server: the provider summary proves the server's provider status
+ * loaded, and "Saved." proves a settings change went through the RPC. The terminal repaints only
+ * changed cells, so expectations stick to text a step draws fresh.
+ */
+const settingsSteps = [
+  { name: "opened settings with live provider status", keys: ",", expect: "need setup" },
+  { name: "opened general settings", keys: `${DOWN}\r`, expect: "Default permissions" },
+  { name: "saved a server setting", keys: "\r", expect: "Saved." },
+];
+
+/** Turning off the first provider writes an explicit provider instance through the RPC. */
+const providerSteps = [
+  { name: "opened settings", keys: ",", expect: "need setup" },
+  { name: "listed providers", keys: "\r", expect: "provider account" },
+  { name: "opened the first provider", keys: "\r", expect: "Check again" },
+  { name: "turned it off", keys: "\r", expect: "Turned off." },
+];
 
 let failed = false;
 try {
@@ -164,7 +212,7 @@ try {
   const platformPackage = NodePath.join(npxRoot, installed, "node_modules", `t3tui-${key}`);
   const pty = NodeModule.createRequire(NodePath.join(platformPackage, "package.json"))("node-pty");
 
-  await openTui(pty, "first launch (installs, starts, and pairs)");
+  await openTui(pty, "first launch (installs, starts, and pairs)", settingsSteps);
   const running = t3tui("daemon", "status");
   NodeAssert.equal(running.status, 0, running.stderr);
   NodeAssert.match(running.stdout, new RegExp(`running at http://127\\.0\\.0\\.1:${port}`));
@@ -176,12 +224,34 @@ try {
     NodeFS.existsSync(NodePath.join(home, ".t3-tui", "environment-credential.json")),
     "the first launch saved a paired credential",
   );
+  const serverSettings = NodePath.join(
+    home,
+    ".t3-tui",
+    "daemon",
+    "server",
+    "userdata",
+    "settings.json",
+  );
+  NodeAssert.match(
+    NodeFS.readFileSync(serverSettings, "utf8"),
+    /"defaultRuntimeMode":\s*"approval-required"/,
+    "the settings screen saved to the server",
+  );
 
   const stop = t3tui("daemon", "stop");
   NodeAssert.equal(stop.status, 0, stop.stderr);
   NodeAssert.equal(t3tui("daemon", "status").status, 3);
 
-  await openTui(pty, "second launch (restarts a stopped server, reuses the credential)");
+  await openTui(
+    pty,
+    "second launch (restarts a stopped server, reuses the credential)",
+    providerSteps,
+  );
+  NodeAssert.match(
+    NodeFS.readFileSync(serverSettings, "utf8"),
+    /"providerInstances":\s*\{\s*"[a-zA-Z]+":\s*\{[^}]*"enabled":\s*false/,
+    "turning a provider off saved an explicit instance",
+  );
   NodeAssert.equal(t3tui("daemon", "status").status, 0);
 } catch (error) {
   failed = true;

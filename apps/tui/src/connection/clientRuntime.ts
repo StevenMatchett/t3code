@@ -91,6 +91,17 @@ import {
   type ProjectSearchEntriesResult,
   type ProjectWriteFileInput,
   type SecretRequestAnswerInput,
+  type ProviderAuthCancelInput,
+  type ProviderAuthCompleteInput,
+  type ProviderAuthRespondInput,
+  type ProviderAuthStartInput,
+  type ProviderAuthState,
+  type ProviderInstallCancelInput,
+  type ProviderInstallState,
+  type ProviderInstanceId,
+  type ProviderInstanceMutation,
+  type ServerProviderUpdateInput,
+  type ServerSettingsPatch,
 } from "@t3tools/contracts";
 import { makeNewThreadActions, type NewThreadActions } from "../features/chat/newThread.ts";
 import { makeNewProjectActions, type NewProjectActions } from "../features/projects/newProject.ts";
@@ -214,6 +225,58 @@ export interface TuiPullRequests {
   ) => Promise<ThreadId>;
 }
 
+/** Server settings and provider setup. Every call rejects with the server's failure. */
+export interface TuiProviderSetup {
+  readonly updateSettings: (
+    registry: AtomRegistry.AtomRegistry,
+    patch: ServerSettingsPatch,
+    mutation?: ProviderInstanceMutation,
+  ) => Promise<void>;
+  /** Re-checks one provider now, including its models. */
+  readonly refresh: (
+    registry: AtomRegistry.AtomRegistry,
+    instanceId: ProviderInstanceId,
+  ) => Promise<void>;
+  readonly authState: (
+    instanceId: ProviderInstanceId,
+  ) => Atom.Atom<AsyncResult.AsyncResult<ProviderAuthState, unknown>>;
+  readonly startAuth: (
+    registry: AtomRegistry.AtomRegistry,
+    input: ProviderAuthStartInput,
+  ) => Promise<void>;
+  readonly respondAuth: (
+    registry: AtomRegistry.AtomRegistry,
+    input: ProviderAuthRespondInput,
+  ) => Promise<void>;
+  readonly completeAuth: (
+    registry: AtomRegistry.AtomRegistry,
+    input: ProviderAuthCompleteInput,
+  ) => Promise<void>;
+  readonly cancelAuth: (
+    registry: AtomRegistry.AtomRegistry,
+    input: ProviderAuthCancelInput,
+  ) => Promise<void>;
+  readonly logout: (
+    registry: AtomRegistry.AtomRegistry,
+    instanceId: ProviderInstanceId,
+  ) => Promise<void>;
+  readonly installState: (
+    instanceId: ProviderInstanceId,
+  ) => Atom.Atom<AsyncResult.AsyncResult<ProviderInstallState, unknown>>;
+  readonly startInstall: (
+    registry: AtomRegistry.AtomRegistry,
+    instanceId: ProviderInstanceId,
+  ) => Promise<void>;
+  readonly cancelInstall: (
+    registry: AtomRegistry.AtomRegistry,
+    input: ProviderInstallCancelInput,
+  ) => Promise<void>;
+  readonly update: (
+    registry: AtomRegistry.AtomRegistry,
+    input: ServerProviderUpdateInput,
+  ) => Promise<void>;
+}
+
 export interface TuiClient {
   readonly session?: TuiSessionState;
   /** Absent on servers that speak the older protocol. */
@@ -282,6 +345,7 @@ export interface TuiClient {
   }>;
   readonly settings: Atom.Atom<ServerSettings | null>;
   readonly providers: Atom.Atom<ProviderCatalog>;
+  readonly providerSetup: TuiProviderSetup;
   readonly terminals?: ReturnType<typeof createTerminalEnvironmentAtoms>;
   readonly refreshProvider: (
     registry: AtomRegistry.AtomRegistry,
@@ -1023,6 +1087,7 @@ export function createTuiClient(
     ...(session ? { session } : {}),
     settings: server.settingsValueAtom(environmentId),
     providers,
+    providerSetup: makeProviderSetup(server, environmentId),
     terminals,
     refreshProvider: async (registry, threadId, models) => {
       const value = Option.getOrNull(registry.get(thread(threadId)).data);
@@ -1053,5 +1118,53 @@ export function createTuiClient(
       void loadHistory.run(registry, { environmentId, input: threadId });
       return true;
     },
+  };
+}
+
+function makeProviderSetup(
+  server: ReturnType<typeof createServerEnvironmentAtoms>,
+  environmentId: EnvironmentId,
+): TuiProviderSetup {
+  const settled = (result: AsyncResult.AsyncResult<unknown, unknown>) => {
+    if (AsyncResult.isFailure(result)) throw Cause.squash(result.cause);
+  };
+  return {
+    updateSettings: async (registry, patch, mutation) =>
+      settled(
+        await server.updateSettings.run(registry, {
+          environmentId,
+          input: { patch, ...(mutation ? { providerInstanceMutation: mutation } : {}) },
+        }),
+      ),
+    refresh: async (registry, instanceId) =>
+      settled(
+        await server.refreshProviders.run(registry, {
+          environmentId,
+          input: { instanceId, refreshModels: true },
+        }),
+      ),
+    authState: (instanceId) => server.providerAuthState({ environmentId, input: { instanceId } }),
+    startAuth: async (registry, input) =>
+      settled(await server.startProviderAuth.run(registry, { environmentId, input })),
+    respondAuth: async (registry, input) =>
+      settled(await server.respondProviderAuth.run(registry, { environmentId, input })),
+    completeAuth: async (registry, input) =>
+      settled(await server.completeProviderAuth.run(registry, { environmentId, input })),
+    cancelAuth: async (registry, input) =>
+      settled(await server.cancelProviderAuth.run(registry, { environmentId, input })),
+    logout: async (registry, instanceId) =>
+      settled(
+        await server.logoutProviderAuth.run(registry, { environmentId, input: { instanceId } }),
+      ),
+    installState: (instanceId) =>
+      server.providerInstallState({ environmentId, input: { instanceId } }),
+    startInstall: async (registry, instanceId) =>
+      settled(
+        await server.startProviderInstall.run(registry, { environmentId, input: { instanceId } }),
+      ),
+    cancelInstall: async (registry, input) =>
+      settled(await server.cancelProviderInstall.run(registry, { environmentId, input })),
+    update: async (registry, input) =>
+      settled(await server.updateProvider.run(registry, { environmentId, input })),
   };
 }

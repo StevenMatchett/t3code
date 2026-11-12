@@ -428,7 +428,7 @@ function Fields({
                 : creation.phase === "created"
                   ? "Waiting for the shared thread to appear..."
                   : !selection
-                    ? "No model is available. Configure a provider in T3 settings, then choose its model."
+                    ? "No model is available. Set up a provider in Settings (press , from the sidebar), then choose its model."
                     : "Create opens an empty thread. No prompt is sent."))}
       </Text>
       <Stack flexGrow={1} />
@@ -502,7 +502,9 @@ function Fields({
             }}
           />
           {filtered.length === 0 ? (
-            <Text tone="muted">No available models match. Configure providers in T3 settings.</Text>
+            <Text tone="muted">
+              No available models match. Set up providers in Settings (press , from the sidebar).
+            </Text>
           ) : null}
           {filtered.slice(start, start + count).map((choice, index) => (
             <Stack

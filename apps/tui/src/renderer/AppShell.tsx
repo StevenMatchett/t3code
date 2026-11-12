@@ -394,6 +394,7 @@ function AppShellContent({
         run: () => dispatch({ type: "new-thread" }),
       },
       "project.new": () => dispatch({ type: "new-project" }),
+      "settings.open": () => pushOverlay({ type: "settings" }),
       "thread.manage": {
         enabled: selectedThread !== null,
         title: selectedThread ? `Manage ${selectedThread.title}` : "Manage thread",

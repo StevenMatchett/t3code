@@ -159,7 +159,7 @@ export function FavoriteModelsPanel({
           {models.length === 0 ? (
             <Text tone="muted">
               {catalog.status === "live"
-                ? "No available models match. Configure providers in T3 settings."
+                ? "No available models match. Set up providers in Settings (press , from the sidebar)."
                 : catalog.status === "error"
                   ? "Provider catalog unavailable. Close and reconnect."
                   : "Loading provider choices..."}

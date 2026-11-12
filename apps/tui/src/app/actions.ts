@@ -41,6 +41,7 @@ export const ACTION_SCOPES = {
   pullRequest: { level: 10, title: "Pull request" },
   favorites: { level: 10, title: "Favorite models" },
   theme: { level: 10, title: "Theme" },
+  settings: { level: 10, title: "Settings" },
   manage: { level: 10, title: "Manage thread" },
   rename: { level: 10, title: "Rename thread" },
   contextMenu: { level: 11, title: "Menu" },
@@ -123,6 +124,13 @@ export const ACTIONS = {
     title: "Favorite models",
     keys: [],
     keywords: "star pin provider rank",
+  },
+  "settings.open": {
+    scope: "workspace",
+    title: "Settings",
+    keys: [","],
+    hint: 40,
+    keywords: "preferences options providers sign in login install configure accounts",
   },
 
   // Workspace: available from the sidebar and the transcript.
@@ -1778,6 +1786,51 @@ export const ACTIONS = {
     keys: ["escape"],
     label: "Close",
     hint: 87,
+    ...keyOnly,
+  },
+
+  // Settings.
+  "settings.up": {
+    scope: "settings",
+    title: "Previous setting",
+    keys: ["up", "k"],
+    keyLabel: "↑↓",
+    label: "Select",
+    hint: 90,
+    ...step,
+  },
+  "settings.down": { scope: "settings", title: "Next setting", keys: ["down", "j"], ...step },
+  "settings.confirm": {
+    scope: "settings",
+    title: "Open, change, or save the setting",
+    keys: ["return"],
+    label: "Change",
+    hint: 89,
+    ...keyOnly,
+  },
+  "settings.refresh": {
+    scope: "settings",
+    title: "Check the provider again",
+    keys: ["r"],
+    label: "Check again",
+    hint: 70,
+    ...keyOnly,
+  },
+  "settings.remove": {
+    scope: "settings",
+    title: "Remove the selected item",
+    keys: ["x", "delete"],
+    keyLabel: "X",
+    label: "Remove",
+    hint: 69,
+    ...keyOnly,
+  },
+  "settings.back": {
+    scope: "settings",
+    title: "Back, cancel the edit, or close",
+    keys: ["escape"],
+    label: "Back",
+    hint: 88,
     ...keyOnly,
   },
 

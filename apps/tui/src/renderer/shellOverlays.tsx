@@ -8,6 +8,7 @@ import type { calculateShellLayout } from "../ui/layout.ts";
 import { CheckpointRestore } from "./CheckpointRestore.tsx";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { FavoriteModelsPanel } from "./FavoriteModelsPanel.tsx";
+import { SettingsPanel } from "./SettingsPanel.tsx";
 import { HelpPanel } from "./HelpPanel.tsx";
 import { NewProjectForm } from "./NewProjectForm.tsx";
 import { NewThreadForm } from "./NewThreadForm.tsx";
@@ -138,6 +139,21 @@ export function renderShellOverlay(
             active={overlayActive}
             onChange={updateFavorites}
             onClose={popOverlay}
+          />
+        ),
+      };
+    case "settings":
+      return {
+        title: "Settings",
+        size: { width: 96, height: 32 },
+        content: (
+          <SettingsPanel
+            client={client}
+            height={contentRows(32)}
+            active={overlayActive}
+            onClose={popOverlay}
+            onOpenTheme={() => pushOverlay({ type: "theme" })}
+            onOpenFavorites={() => pushOverlay({ type: "favorite-models" })}
           />
         ),
       };

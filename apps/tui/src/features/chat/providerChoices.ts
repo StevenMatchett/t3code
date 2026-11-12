@@ -113,7 +113,7 @@ export function modelChangeProblem(
     provider.status === "error" ||
     provider.auth.status === "unauthenticated"
   )
-    return "This provider is unavailable. Configure it in T3 settings.";
+    return "This provider is unavailable. Set it up in Settings (press , from the sidebar).";
   if (
     next.instanceId !== thread.modelSelection.instanceId ||
     next.instanceId !== provider.instanceId

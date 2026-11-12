@@ -18,8 +18,15 @@ npx t3tui
 That is the whole setup: no clone, no build, and no separate server install. The package bundles
 the T3 server. The first launch installs it as a background service, starts it, pairs the TUI with
 it, and opens the TUI. Later launches start the server if it has stopped and reuse the saved
-pairing. Install a provider CLI (Codex, Claude Code, and so on) and sign in to it before sending
-prompts. The service finds provider CLIs on the `PATH` you had when it was installed.
+pairing.
+
+Then press `,` for **Settings → Providers** to set up an agent. Each provider shows what it still
+needs: install it (providers with a managed install, such as Codex, download from there), sign in
+through the server with a browser link or device code, or turn it on. The same screen edits a
+provider's binary path and environment variables, adds a second account of a provider, and changes
+defaults for new threads under **General**. Providers without an in-app install are found on the
+`PATH` you had when the service was installed; run `t3tui daemon install` after installing a new CLI
+elsewhere.
 
 The TUI needs Node.js 26.4 or newer. On an older Node, `t3tui` borrows Node 26 from npm
 (the first run downloads it). Builds exist for macOS and Linux (glibc) on arm64 and x64.

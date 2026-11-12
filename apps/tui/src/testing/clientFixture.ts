@@ -29,6 +29,10 @@ import {
   type ProjectSearchEntriesInput,
   type ProjectWriteFileInput,
   type SecretRequestAnswerInput,
+  type ProviderAuthState,
+  type ProviderInstallState,
+  type ProviderInstanceMutation,
+  type ServerSettingsPatch,
 } from "@t3tools/contracts";
 import {
   AVAILABLE_CONNECTION_STATE,
@@ -46,7 +50,7 @@ import {
   EMPTY_TERMINAL_BUFFER_STATE,
   type TerminalBufferState,
 } from "@t3tools/client-runtime/state/terminal";
-import type { TuiClient } from "../connection/clientRuntime.ts";
+import type { TuiClient, TuiProviderSetup } from "../connection/clientRuntime.ts";
 import { makeNewThreadActions, type CreateThreadCommand } from "../features/chat/newThread.ts";
 import { makeNewProjectActions } from "../features/projects/newProject.ts";
 import {
@@ -233,6 +237,102 @@ export function makeClientFixture(
     ...DEFAULT_SERVER_SETTINGS,
     defaultModelSelection: modelSelection,
   });
+  const settingsUpdates: Array<{
+    readonly patch: ServerSettingsPatch;
+    readonly mutation?: ProviderInstanceMutation;
+  }> = [];
+  const providerCalls: string[] = [];
+  const authStates = new Map<
+    string,
+    Atom.Writable<AsyncResult.Success<ProviderAuthState, never>>
+  >();
+  const authState = (instanceId: ProviderInstanceId) => {
+    const existing = authStates.get(instanceId);
+    if (existing) return existing;
+    const atom = Atom.make(
+      AsyncResult.success<ProviderAuthState>({
+        instanceId,
+        phase: "idle",
+        flowId: null,
+        authorizationUrl: null,
+        expiresAt: null,
+        message: null,
+      }),
+    );
+    authStates.set(instanceId, atom);
+    return atom;
+  };
+  const installState = Atom.make(
+    AsyncResult.success<ProviderInstallState>({
+      driver: ProviderDriverKind.make("codex"),
+      operationId: null,
+      phase: "idle",
+      downloadedBytes: 0,
+      totalBytes: null,
+      version: null,
+      installedVersion: null,
+      canRemove: false,
+      message: null,
+    }),
+  );
+  const providerSetup: TuiProviderSetup = {
+    updateSettings: async (registry, patch, mutation) => {
+      settingsUpdates.push({ patch, ...(mutation ? { mutation } : {}) });
+      registry.update(settings, (current) => {
+        if (!current) return current;
+        const instances = { ...current.providerInstances };
+        if (mutation?.operation === "remove") delete instances[mutation.instanceId];
+        else if (mutation) instances[mutation.instanceId] = mutation.instance;
+        return { ...current, ...(patch as Partial<ServerSettings>), providerInstances: instances };
+      });
+    },
+    refresh: async (_registry, instanceId) => {
+      providerCalls.push(`refresh:${instanceId}`);
+    },
+    authState,
+    startAuth: async (registry, input) => {
+      providerCalls.push(`auth:${input.instanceId}`);
+      registry.set(
+        authState(input.instanceId),
+        AsyncResult.success<ProviderAuthState>({
+          instanceId: input.instanceId,
+          phase: "waiting",
+          flowId: "flow-1",
+          authorizationUrl: null,
+          expiresAt: null,
+          message: null,
+          interaction: {
+            type: "deviceCode",
+            id: "device-1",
+            url: "https://example.com/device",
+            userCode: "ABCD-1234",
+          },
+        }),
+      );
+    },
+    respondAuth: async (_registry, input) => {
+      providerCalls.push(`respond:${input.instanceId}:${input.response.type}`);
+    },
+    completeAuth: async (_registry, input) => {
+      providerCalls.push(`complete:${input.instanceId}`);
+    },
+    cancelAuth: async (_registry, input) => {
+      providerCalls.push(`cancel:${input.instanceId}`);
+    },
+    logout: async (_registry, instanceId) => {
+      providerCalls.push(`logout:${instanceId}`);
+    },
+    installState: () => installState,
+    startInstall: async (_registry, instanceId) => {
+      providerCalls.push(`install:${instanceId}`);
+    },
+    cancelInstall: async (_registry, input) => {
+      providerCalls.push(`cancel-install:${input.instanceId}`);
+    },
+    update: async (_registry, input) => {
+      providerCalls.push(`update:${input.instanceId ?? input.provider}`);
+    },
+  };
   const creationCommands: CreateThreadCommand[] = [];
   const worktreeRequests: VcsCreateWorktreeInput[] = [];
   const terminalWrites: string[] = [];
@@ -769,6 +869,7 @@ export function makeClientFixture(
     },
     settings,
     providers,
+    providerSetup,
     terminals,
     refreshProvider: async () => true,
     retry: async () => {},
@@ -785,6 +886,8 @@ export function makeClientFixture(
     providers,
     provider,
     settings,
+    settingsUpdates,
+    providerCalls,
     creationCommands,
     worktreeRequests,
     terminalWrites,

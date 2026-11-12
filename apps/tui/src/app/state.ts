@@ -22,6 +22,7 @@ export type ShellOverlay =
   | { readonly type: "palette" }
   | { readonly type: "favorite-models" }
   | { readonly type: "theme" }
+  | { readonly type: "settings" }
   /** `turn` opens on that checkpoint's changes instead of everything saved. */
   | { readonly type: "diff"; readonly turn?: number }
   /** `messageId` opens straight to rewinding to before that prompt. */
