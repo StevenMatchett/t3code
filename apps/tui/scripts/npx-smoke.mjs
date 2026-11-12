@@ -1,9 +1,11 @@
-// Proves a clean `npx t3tui` from locally packed tarballs works end to end:
+// Proves a clean `npx t3tui` works end to end, from locally packed tarballs or,
+// with --registry, a registry the packages were published to:
 // npm installs the packages into an empty cache, the first launch installs and
 // starts the background server, pairs with it, and renders the TUI; a stopped
 // server is started again by the next launch; uninstall removes the service.
 //
-//   node scripts/npx-smoke.mjs [--tarballs <dir>] [--manager auto|systemd|launchd|process] [--keep]
+//   node scripts/npx-smoke.mjs [--tarballs <dir> | --registry <url>]
+//     [--manager auto|systemd|launchd|process] [--keep]
 //
 // HOME, the npm cache, the TUI state, and the server data are temporary. On
 // systemd and launchd the service is real but uses a disposable unit name, and
@@ -20,11 +22,10 @@ import * as NodePath from "node:path";
 import * as NodeProcess from "node:process";
 import * as NodeUtil from "node:util";
 
-import { buildTuiNpmPackages } from "./build-npm-packages.mjs";
-
 const { values: flags } = NodeUtil.parseArgs({
   options: {
     tarballs: { type: "string" },
+    registry: { type: "string" },
     manager: { type: "string", default: "auto" },
     keep: { type: "boolean", default: false },
   },
@@ -44,18 +45,31 @@ const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3tui-npx-smo
 const home = NodePath.join(root, "home");
 await NodeFSP.mkdir(home);
 
-let tarballs = flags.tarballs && NodePath.resolve(flags.tarballs);
-if (!tarballs) {
-  NodeProcess.stdout.write("Building npm packages…\n");
-  tarballs = (await buildTuiNpmPackages({ directory: NodePath.join(root, "packages") })).output;
-}
-const files = await NodeFSP.readdir(tarballs);
 const key = `${NodeProcess.platform}-${NodeProcess.arch}`;
-const platformTarball = files.find(
-  (name) => name.startsWith(`t3tui-${key}-`) && name.endsWith(".tgz"),
-);
-const launcherTarball = files.find((name) => /^t3tui-\d[^/]*\.tgz$/.test(name));
-NodeAssert.ok(platformTarball && launcherTarball, `Missing tarballs in ${tarballs}`);
+/** The `npx` arguments that install t3tui: tarballs by path, or just its name from a registry. */
+async function packageArgs() {
+  if (flags.registry) return ["t3tui"];
+  let tarballs = flags.tarballs && NodePath.resolve(flags.tarballs);
+  if (!tarballs) {
+    NodeProcess.stdout.write("Building npm packages…\n");
+    // Imported here so the registry mode runs without the monorepo, as in the Docker test.
+    const { buildTuiNpmPackages } = await import("./build-npm-packages.mjs");
+    tarballs = (await buildTuiNpmPackages({ directory: NodePath.join(root, "packages") })).output;
+  }
+  const files = await NodeFSP.readdir(tarballs);
+  const platformTarball = files.find(
+    (name) => name.startsWith(`t3tui-${key}-`) && name.endsWith(".tgz"),
+  );
+  const launcherTarball = files.find((name) => /^t3tui-\d[^/]*\.tgz$/.test(name));
+  NodeAssert.ok(platformTarball && launcherTarball, `Missing tarballs in ${tarballs}`);
+  return [
+    "--package",
+    NodePath.join(tarballs, platformTarball),
+    "--package",
+    NodePath.join(tarballs, launcherTarball),
+    "t3tui",
+  ];
+}
 
 const serviceName = `t3tui-smoke-${NodeCrypto.randomBytes(3).toString("hex")}`;
 const port = await freePort();
@@ -68,6 +82,7 @@ const env = {
   npm_config_update_notifier: "false",
   npm_config_fund: "false",
   npm_config_audit: "false",
+  ...(flags.registry ? { npm_config_registry: flags.registry } : {}),
   T3TUI_SERVICE_NAME: serviceName,
   T3TUI_DAEMON_PORT: String(port),
   ...(flags.manager === "auto" ? {} : { T3TUI_SERVICE_MANAGER: flags.manager }),
@@ -79,14 +94,7 @@ const env = {
     : {}),
 };
 const npx = NodeProcess.platform === "win32" ? "npx.cmd" : "npx";
-const npxArgs = [
-  "--yes",
-  "--package",
-  NodePath.join(tarballs, platformTarball),
-  "--package",
-  NodePath.join(tarballs, launcherTarball),
-  "t3tui",
-];
+const npxArgs = ["--yes", ...(await packageArgs())];
 
 function t3tui(...args) {
   const result = NodeChildProcess.spawnSync(npx, [...npxArgs, ...args], {

@@ -1,0 +1,24 @@
+# A throwaway npm registry for the Docker test. t3tui packages are published
+# here; everything else (for example `node` for the Node 26 fallback) is
+# proxied from the public registry.
+storage: /verdaccio/storage
+auth:
+  htpasswd:
+    file: /verdaccio/storage/htpasswd
+    max_users: 10
+uplinks:
+  npmjs:
+    url: https://registry.npmjs.org/
+packages:
+  "t3tui":
+    access: $all
+    publish: $authenticated
+  "t3tui-*":
+    access: $all
+    publish: $authenticated
+  "**":
+    access: $all
+    proxy: npmjs
+# The platform package is ~60 MB compressed.
+max_body_size: 200mb
+log: { type: stdout, format: pretty, level: warn }

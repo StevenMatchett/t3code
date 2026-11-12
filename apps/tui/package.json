@@ -12,6 +12,7 @@
     "build:artifact": "node ./scripts/build-artifact.mjs",
     "build:npm": "node ./scripts/build-npm-packages.mjs",
     "smoke:npx": "node ./scripts/npx-smoke.mjs",
+    "test:docker": "node ./scripts/docker-test.mjs",
     "dev": "tsc --noEmit false --outDir dist --noCheck && node ./scripts/run-with-node-ffi.mjs ./dist/cli/bin.js",
     "runtime:check": "node ./scripts/run-with-node-ffi.mjs ./scripts/runtime-compatibility.mjs",
     "runtime:smoke": "node ./scripts/run-with-node-ffi.mjs ./scripts/open-tui-smoke.mjs",
