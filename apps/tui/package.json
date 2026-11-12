@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/tui",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "bin": {
     "t3-tui": "./dist/cli/bin.js"

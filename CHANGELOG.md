@@ -2,17 +2,21 @@
 
 Releases of the `t3tui` npm package. The bundled T3 server version is shown by `t3tui --version`.
 
+## 0.1.2 - 2026-11-12
+
+- `t3tui --local` uses t3tui's own background server even when you have paired with another T3
+  Code. Its pairing now lives in `~/.t3-tui/local`, so pairing with another T3 Code no longer
+  replaces it, and you can switch either way.
+- When a saved pairing with another T3 Code cannot be reached, `t3tui` names it and suggests
+  starting it or running `t3tui --local`, instead of only reporting that it is unavailable.
+- Releases are published from CI.
+
 ## 0.1.1 - 2026-11-12
 
 - The first interactive `npx t3tui` offers once to install the `t3tui` command
   (`npm install -g t3tui` at the same version), so later launches are just `t3tui`. It never asks
   again after an answer, when a `t3tui` command is already on `PATH`, or for commands such as
   `t3tui daemon status`. If npm cannot install globally, it says how to do it yourself.
-- `t3tui --local` uses t3tui's own background server even when you have paired with another T3
-  Code. Its pairing now lives in `~/.t3-tui/local`, so pairing with another T3 Code no longer
-  replaces it, and you can switch either way.
-- When a saved pairing with another T3 Code cannot be reached, `t3tui` names it and suggests
-  starting it or running `t3tui --local`, instead of only reporting that it is unavailable.
 - The README leads with `npm install -g t3tui` and explains how the launcher, the bundled server,
   the service, and pairing fit together.
 
