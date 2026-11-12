@@ -1,21 +1,64 @@
 name: TUI npm packages
 
-# Builds the `npx t3tui` tarballs on each platform and uploads them as workflow
-# artifacts. It never publishes; see docs/operations/tui-npm-release.md.
+# Builds and smoke-tests the `npx t3tui` packages on each platform. A push to tui-main that changes
+# apps/tui/package.json publishes its version when npm does not have it yet, through npm trusted
+# publishing (no token), then tags and releases it. See docs/operations/tui-npm-release.md.
 on:
+  push:
+    branches: [tui-main]
+    paths: [apps/tui/package.json]
   workflow_dispatch:
     inputs:
       platforms:
         description: Platform packages the launcher depends on (comma-separated)
         default: linux-x64,linux-arm64,darwin-arm64,darwin-x64
         required: true
+      publish:
+        description: Publish this version to npm if it is not published yet
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: tui-npm-packages-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      platforms: ${{ steps.plan.outputs.platforms }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: apps/tui/package.json
+          sparse-checkout-cone-mode: false
+      - id: plan
+        env:
+          PLATFORMS: ${{ inputs.platforms || 'linux-x64,linux-arm64,darwin-arm64,darwin-x64' }}
+          WANT_PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          version=$(node -p 'require("./apps/tui/package.json").version')
+          published=$(npm view "t3tui@$version" version 2>/dev/null || true)
+          publish=false
+          if [ "$WANT_PUBLISH" = true ] && [ "$published" != "$version" ]; then publish=true; fi
+          # A push whose version is already on npm has nothing to build.
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$publish" = false ]; then PLATFORMS=; fi
+          {
+            echo "version=$version"
+            echo "platforms=$PLATFORMS"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+          echo "t3tui $version: npm has '${published:-nothing}', publish=$publish, platforms=${PLATFORMS:-none}"
+
   build:
     name: ${{ matrix.platform }}
+    needs: plan
+    if: needs.plan.outputs.platforms != ''
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -27,9 +70,12 @@ jobs:
           - { platform: darwin-arm64, runner: macos-15 }
           - { platform: darwin-x64, runner: macos-15-intel }
           - { platform: win32-x64, runner: windows-2025 }
+    env:
+      PLATFORMS: ${{ needs.plan.outputs.platforms }}
+      ENABLED: ${{ contains(needs.plan.outputs.platforms, matrix.platform) }}
     steps:
       - name: Checkout
-        if: contains(inputs.platforms, matrix.platform)
+        if: env.ENABLED == 'true'
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
@@ -38,36 +84,98 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Setup pnpm
-        if: contains(inputs.platforms, matrix.platform)
+        if: env.ENABLED == 'true'
         uses: pnpm/action-setup@v4
 
       # The TUI renderer needs Node 26.4+ with FFI; the repository root pins Node 24.
       - name: Setup Node 26
-        if: contains(inputs.platforms, matrix.platform)
+        if: env.ENABLED == 'true'
         uses: actions/setup-node@v5
         with:
           node-version: 26
           cache: pnpm
 
       - name: Install
-        if: contains(inputs.platforms, matrix.platform)
+        if: env.ENABLED == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build packages
-        if: contains(inputs.platforms, matrix.platform)
+        if: env.ENABLED == 'true'
         working-directory: apps/tui
-        run: node scripts/build-npm-packages.mjs ../../tui-npm --platforms "${{ inputs.platforms }}"
+        run: node scripts/build-npm-packages.mjs ../../tui-npm --platforms "$PLATFORMS"
 
       - name: Smoke test a clean npx install
-        if: contains(inputs.platforms, matrix.platform) && matrix.platform != 'win32-x64'
+        if: env.ENABLED == 'true' && matrix.platform != 'win32-x64'
         working-directory: apps/tui
         # Hosted runners have no user service manager, so this exercises the process fallback.
         run: node scripts/npx-smoke.mjs --tarballs ../../tui-npm --manager process
 
       - name: Upload tarballs
-        if: contains(inputs.platforms, matrix.platform)
+        if: env.ENABLED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: t3tui-${{ matrix.platform }}
           path: tui-npm/*.tgz
           if-no-files-found: error
+
+  publish:
+    needs: [plan, build]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # the tag and the GitHub release
+      id-token: write # npm trusted publishing and provenance
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      PLATFORMS: ${{ needs.plan.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: t3tui-*
+          path: artifacts
+
+      # Platform packages first, so no install resolves a launcher whose platform package is
+      # missing. Versions npm already has are skipped, so a rerun finishes a partial publish.
+      - name: Publish to npm
+        run: |
+          set -euo pipefail
+          publish() {
+            if [ "$(npm view "$1@$VERSION" version 2>/dev/null || true)" = "$VERSION" ]; then
+              echo "$1@$VERSION is already published"
+            else
+              npm publish --access public --provenance "$2"
+            fi
+          }
+          first=
+          for platform in ${PLATFORMS//,/ }; do
+            publish "@t3tui/$platform" "./artifacts/t3tui-$platform/t3tui-$platform-$VERSION.tgz"
+            first=${first:-$platform}
+          done
+          publish t3tui "./artifacts/t3tui-$first/t3tui-$VERSION.tgz"
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="t3tui-v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released"
+            exit 0
+          fi
+          awk -v version="$VERSION" '
+            /^## / { printing = index($0, "## " version " ") == 1 || $0 == "## " version; next }
+            printing
+          ' CHANGELOG.md > notes.md
+          gh release create "$tag" --target "$GITHUB_SHA" --title "t3tui $VERSION" --notes-file notes.md

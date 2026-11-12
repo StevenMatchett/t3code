@@ -2,7 +2,7 @@
 
 Releases of the `t3tui` npm package. The bundled T3 server version is shown by `t3tui --version`.
 
-## 0.1.1 - Unreleased
+## 0.1.1 - 2026-11-12
 
 - The first interactive `npx t3tui` offers once to install the `t3tui` command
   (`npm install -g t3tui` at the same version), so later launches are just `t3tui`. It never asks
