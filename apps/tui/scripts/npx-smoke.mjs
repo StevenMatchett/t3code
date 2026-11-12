@@ -100,8 +100,77 @@ function t3tui(...args) {
   return result;
 }
 
-// Colors and cursor moves split rendered text; matching runs on what is left between them.
-const visibleText = (output) => output.replace(/\x1b\[[0-9;?<>=]*[ -/]*[@-~]/g, "");
+const CSI = /^\x1b\[([0-9;?<>=]*)[ -/]*([@-~])/;
+const OSC = /^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/;
+const INCOMPLETE_ESCAPE = /^\x1b(?:\[[0-9;?<>=]*[ -/]*|\][^\x07\x1b]*\x1b?)?$/;
+
+/**
+ * The screen the TUI has drawn, rebuilt from its cursor moves and text. The renderer repaints only
+ * changed cells, so matching the raw stream misses words drawn over similar ones.
+ */
+function makeScreen(cols, rows) {
+  let grid = [];
+  let row = 0;
+  let col = 0;
+  let pending = "";
+  const clear = (fromRow = 0, fromCol = 0) => {
+    for (let r = fromRow; r < rows; r += 1) {
+      grid[r] ??= [];
+      for (let c = r === fromRow ? fromCol : 0; c < cols; c += 1) grid[r][c] = " ";
+    }
+  };
+  clear();
+  const apply = (params, final) => {
+    const n = params
+      .replace(/^[?<>=]/, "")
+      .split(";")
+      .map((value) => Number(value) || 0);
+    const count = Math.max(1, n[0]);
+    if (final === "H" || final === "f")
+      [row, col] = [Math.max(1, n[0]) - 1, Math.max(1, n[1] ?? 1) - 1];
+    else if (final === "A") row = Math.max(0, row - count);
+    else if (final === "B") row = Math.min(rows - 1, row + count);
+    else if (final === "C") col += count;
+    else if (final === "D") col = Math.max(0, col - count);
+    else if (final === "G") col = count - 1;
+    else if (final === "d") row = count - 1;
+    else if (final === "J") clear(n[0] === 0 ? row : 0, n[0] === 0 ? col : 0);
+    else if (final === "K") {
+      for (let c = n[0] === 0 ? col : 0; c < (n[0] === 1 ? col + 1 : cols); c += 1)
+        grid[row][c] = " ";
+    } else if ((final === "h" || final === "l") && params === "?1049") clear();
+  };
+  return {
+    write(data) {
+      const text = pending + data;
+      pending = "";
+      for (let index = 0; index < text.length;) {
+        const rest = text.slice(index);
+        if (rest[0] === "\x1b") {
+          const csi = CSI.exec(rest);
+          const osc = csi ? null : OSC.exec(rest);
+          if (csi) apply(csi[1], csi[2]);
+          else if (!osc && INCOMPLETE_ESCAPE.test(rest)) {
+            pending = rest;
+            break;
+          }
+          index += csi?.[0].length ?? osc?.[0].length ?? 2;
+          continue;
+        }
+        const char = String.fromCodePoint(rest.codePointAt(0));
+        index += char.length;
+        if (char === "\r") col = 0;
+        else if (char === "\n") row = Math.min(rows - 1, row + 1);
+        else if (char === "\b") col = Math.max(0, col - 1);
+        else if (char >= " ") {
+          if (row < rows && col < cols) grid[row][col] = char;
+          col += 1;
+        }
+      }
+    },
+    text: () => grid.map((cells) => cells.join("").trimEnd()).join("\n"),
+  };
+}
 
 /**
  * Opens the TUI in a pseudo-terminal, waits for its empty-environment screen, then sends each
@@ -115,30 +184,30 @@ async function openTui(pty, label, steps = []) {
     name: "xterm-256color",
     env,
   });
-  let output = "";
+  const screen = makeScreen(100, 30);
   let exited = false;
   let waiter = null;
   child.onData((data) => {
-    output += data;
+    screen.write(data);
     waiter?.check();
   });
   child.onExit(({ exitCode }) => {
     exited = true;
     waiter?.fail(new Error(`${label}: TUI exited ${exitCode}`));
   });
-  const waitFor = (text, from, timeoutMs) =>
+  const waitFor = (text, timeoutMs) =>
     new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         waiter = null;
         reject(
           new Error(
-            `${label}: timed out waiting for ${JSON.stringify(text)}: ${JSON.stringify(visibleText(output.slice(from)).slice(-2000))}`,
+            `${label}: timed out waiting for ${JSON.stringify(text)}. The screen:\n${screen.text()}`,
           ),
         );
       }, timeoutMs);
       waiter = {
         check: () => {
-          if (!visibleText(output.slice(from)).includes(text)) return;
+          if (!screen.text().includes(text)) return;
           clearTimeout(timer);
           waiter = null;
           resolve();
@@ -153,12 +222,11 @@ async function openTui(pty, label, steps = []) {
     });
   const started = Date.now();
   try {
-    await waitFor("Press P to add one.", 0, 180_000);
+    await waitFor("Press P to add one.", 180_000);
     NodeProcess.stdout.write(`${label}: TUI connected in ${Date.now() - started} ms\n`);
     for (const step of steps) {
-      const from = output.length;
       child.write(step.keys);
-      await waitFor(step.expect, from, 30_000);
+      await waitFor(step.expect, 30_000);
       NodeProcess.stdout.write(`${label}: ${step.name}\n`);
     }
     child.write("\x03");
@@ -177,14 +245,12 @@ async function openTui(pty, label, steps = []) {
 
 const DOWN = "\x1b[B";
 /**
- * Settings against the real server: the provider summary proves the server's provider status
- * loaded, and "Saved." proves a settings change went through the RPC. The terminal repaints only
- * changed cells, so expectations stick to text a step draws fresh.
+ * Settings against the real server. Each expectation is text the step newly puts on screen; the
+ * server's settings file is checked afterwards to prove the change went through the RPC.
  */
 const settingsSteps = [
   { name: "opened settings with live provider status", keys: ",", expect: "need setup" },
   { name: "opened general settings", keys: `${DOWN}\r`, expect: "Default permissions" },
-  // "Saving…" becomes "Saved." by redrawing only "ed.", so wait for the new value instead.
   { name: "saved a server setting", keys: "\r", expect: "Ask before changes" },
 ];
 
