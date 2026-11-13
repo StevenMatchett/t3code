@@ -1,12 +1,13 @@
 name: TUI npm packages
 
-# Builds and smoke-tests the `npx t3tui` packages on each platform. A push to tui-main that changes
-# apps/tui/package.json publishes its version when npm does not have it yet, through npm trusted
-# publishing (no token), then tags and releases it. See docs/operations/tui-npm-release.md.
+# Builds and smoke-tests the `npx t3tui` packages on each platform. Every push to tui-main publishes
+# the next patch version through npm trusted publishing (no token), then tags and releases it.
+# See docs/operations/tui-npm-release.md.
 on:
   push:
     branches: [tui-main]
-    paths: [apps/tui/package.json]
+    # Docs never reach the packages.
+    paths-ignore: ["docs/**", "**/*.md"]
   workflow_dispatch:
     inputs:
       platforms:
@@ -14,15 +15,16 @@ on:
         default: linux-x64,linux-arm64,darwin-arm64,darwin-x64
         required: true
       publish:
-        description: Publish this version to npm if it is not published yet
+        description: Publish the next version to npm
         type: boolean
         default: false
 
 permissions:
   contents: read
 
+# One release at a time, so each run numbers its version after the last one finished.
 concurrency:
-  group: tui-npm-packages-${{ github.ref }}
+  group: tui-npm-packages
   cancel-in-progress: false
 
 jobs:
@@ -37,23 +39,35 @@ jobs:
         with:
           sparse-checkout: apps/tui/package.json
           sparse-checkout-cone-mode: false
+      # The next version is one patch past the newest t3tui-v* tag or npm version, or
+      # apps/tui/package.json when that is newer (raise it there to start a new minor or major).
+      # Tags count because npm takes minutes to list a version it just accepted.
       - id: plan
         env:
           PLATFORMS: ${{ inputs.platforms || 'linux-x64,linux-arm64,darwin-arm64,darwin-x64' }}
-          WANT_PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
-          version=$(node -p 'require("./apps/tui/package.json").version')
-          published=$(npm view "t3tui@$version" version 2>/dev/null || true)
-          publish=false
-          if [ "$WANT_PUBLISH" = true ] && [ "$published" != "$version" ]; then publish=true; fi
-          # A push whose version is already on npm has nothing to build.
-          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$publish" = false ]; then PLATFORMS=; fi
+          set -euo pipefail
+          npm view t3tui versions --json > npm-versions.json 2>/dev/null || echo '[]' > npm-versions.json
+          git ls-remote --tags --refs origin 't3tui-v*' | sed 's#.*refs/tags/t3tui-v##' > tag-versions.txt
+          version=$(node -e '
+            const fs = require("node:fs");
+            const parse = (v) => /^\d+\.\d+\.\d+$/.test(v) ? v.split(".").map(Number) : null;
+            const compare = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+            const known = [].concat(JSON.parse(fs.readFileSync("npm-versions.json", "utf8")))
+              .concat(fs.readFileSync("tag-versions.txt", "utf8").split("\n"))
+              .map(parse).filter(Boolean).sort(compare);
+            let next = parse(require("./apps/tui/package.json").version);
+            const newest = known.at(-1);
+            if (newest && compare(newest, next) >= 0) next = [newest[0], newest[1], newest[2] + 1];
+            console.log(next.join("."));
+          ')
           {
             echo "version=$version"
             echo "platforms=$PLATFORMS"
-            echo "publish=$publish"
+            echo "publish=$PUBLISH"
           } >> "$GITHUB_OUTPUT"
-          echo "t3tui $version: npm has '${published:-nothing}', publish=$publish, platforms=${PLATFORMS:-none}"
+          echo "t3tui $version: publish=$PUBLISH, platforms=$PLATFORMS"
 
   build:
     name: ${{ matrix.platform }}
@@ -99,6 +113,12 @@ jobs:
         if: env.ENABLED == 'true'
         run: pnpm install --frozen-lockfile
 
+      # Not committed: the build reads the version from here, so --version and the packages agree.
+      - name: Set the release version
+        if: env.ENABLED == 'true'
+        working-directory: apps/tui
+        run: npm pkg set version=${{ needs.plan.outputs.version }}
+
       - name: Build packages
         if: env.ENABLED == 'true'
         working-directory: apps/tui
@@ -129,8 +149,11 @@ jobs:
       VERSION: ${{ needs.plan.outputs.version }}
       PLATFORMS: ${{ needs.plan.outputs.platforms }}
     steps:
+      # History and tags for the release notes; no file contents beyond CHANGELOG.md.
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
+          filter: blob:none
           sparse-checkout: CHANGELOG.md
           sparse-checkout-cone-mode: false
 
@@ -190,4 +213,14 @@ jobs:
             /^## / { printing = index($0, "## " version " ") == 1 || $0 == "## " version; next }
             printing
           ' CHANGELOG.md > notes.md
+          # Without a CHANGELOG entry, list the TUI's commits since the last release.
+          previous=$(git tag --list 't3tui-v*' --sort=-v:refname | head -1)
+          if ! grep -q '[^[:space:]]' notes.md; then
+            git log --no-merges --format='- %s (%h)' ${previous:+"$previous..HEAD"} -- apps/tui \
+              | head -50 > notes.md
+          fi
+          if [ -n "$previous" ]; then
+            printf '\nAll changes: %s/%s/compare/%s...%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" \
+              "$previous" "$tag" >> notes.md
+          fi
           gh release create "$tag" --target "$GITHUB_SHA" --title "t3tui $VERSION" --notes-file notes.md

@@ -14,14 +14,16 @@ set you will publish with `--platforms`. Publish the `.tgz` files, never the sta
 
 ## Release
 
-1. Bump `version` in `apps/tui/package.json` and give its `CHANGELOG.md` entry today's date.
-2. Push to `tui-main`.
+Every push to `tui-main` publishes a new version, except pushes that only change docs or Markdown.
+The **TUI npm packages** workflow's `plan` job picks the version: one patch past the newest
+`t3tui-v*` tag or npm version, or the version in `apps/tui/package.json` when that is newer. CI never
+commits it back; to start a new minor or major version, raise `apps/tui/package.json` yourself.
 
-The push runs the **TUI npm packages** workflow. Its `plan` job reads the version and stops if npm
-already has it. Otherwise each platform builds its package and smoke-tests a clean `npx` install,
-then the `publish` job publishes the four `@t3tui/*` platform packages, then `t3tui`, with
-provenance. It tags the commit `t3tui-v<version>` and creates a GitHub release from the version's
-`CHANGELOG.md` section. npm can take 10 to 15 minutes to make a new version installable.
+Each platform then builds its package at that version and smoke-tests a clean `npx` install. The
+`publish` job publishes the four `@t3tui/*` platform packages, then `t3tui`, with provenance, and
+creates the `t3tui-v<version>` tag and GitHub release. The release notes are that version's
+`CHANGELOG.md` section when there is one, or else the TUI's commits since the previous release.
+Releases run one at a time. npm can take 10 to 15 minutes to make a new version installable.
 
 A failed publish is safe to rerun: versions npm already has are skipped. Rerun the failed jobs, or
 run the workflow from Actions with **publish** checked. Without **publish**, a manual run only

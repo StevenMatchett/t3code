@@ -1,6 +1,8 @@
 # Changelog
 
-Releases of the `t3tui` npm package. The bundled T3 server version is shown by `t3tui --version`.
+Notable changes to the `t3tui` npm package. CI publishes a new patch version for every push to
+`tui-main`; a version listed here gets this section as its release notes. The bundled T3 server
+version is shown by `t3tui --version`.
 
 ## 0.1.2 - 2026-11-12
 
