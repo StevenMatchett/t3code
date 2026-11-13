@@ -161,11 +161,19 @@ jobs:
               npm publish --access public --provenance "$2"
             fi
           }
+          # Try every platform package so one failure does not hide the others' state.
           first=
+          failed=
           for platform in ${PLATFORMS//,/ }; do
-            publish "@t3tui/$platform" "./artifacts/t3tui-$platform/t3tui-$platform-$VERSION.tgz"
+            if ! publish "@t3tui/$platform" "./artifacts/t3tui-$platform/t3tui-$platform-$VERSION.tgz"; then
+              failed="$failed @t3tui/$platform"
+            fi
             first=${first:-$platform}
           done
+          if [ -n "$failed" ]; then
+            echo "::error::Not published:$failed. The launcher waits until every platform package is."
+            exit 1
+          fi
           publish t3tui "./artifacts/t3tui-$first/t3tui-$VERSION.tgz"
 
       - name: Tag and release
